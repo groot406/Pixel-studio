@@ -1,5 +1,5 @@
 import { createInPlaceEdit, setInPlaceScope, inPlaceRestriction, inPlaceDirty, inPlacePoint, beginInPlaceStroke, moveInPlaceStroke, finishInPlaceStroke, restoreInPlace, previewInPlaceEdit, prepareInPlaceEdit, PART_EDIT_TOOLS, inPlaceCanvasRect, inPlacePlacement, inPlaceMode, beginInPlaceSelection, moveInPlaceSelection, finishInPlaceSelection, selectAllInPlace, deselectInPlace, nudgeInPlaceSelection, clearInPlaceSelection, copyInPlaceSelection, pasteInPlace } from '../features/objects/in-place-edit.js';
-import { mapPaletteColors, copyObject, copyObjects, pasteObject, objectPixelBounds } from '../domain/object-clipboard.js';
+import { mapPaletteColors, copyObjects, pasteObject, objectPixelBounds } from '../domain/object-clipboard.js';
 import { commitRasterEdits, writeCelPixels, cloneArtwork } from '../domain/artwork.js';
 import { celObjects, isEmptyNode, reorderObject, reorderObjectContainer, updateObject, translateObject, forkObject, deleteObject, addObjectContainer, moveObjectToGroup, removeObjectContainer, objectBounds, hitTestObject, dropObject, resizeObject, frameObjects, orderObjects, translateObjects, deleteObjects, turnObjects, rotateObjects, tiltObjects } from '../domain/objects.js';
 import { transformedSize } from '../domain/geometry.js';
@@ -26,8 +26,11 @@ import { initToolExtras, renderToolExtras, gradientStatus, unclampedDrawing, lin
 import { curvePointerDown, curvePointerMove, curvePointerUp, curveKey } from './curve-tool.js';
 import { initObjectPose, renderObjectPose, renderPivotMarker } from './object-pose.js';
 import { initAnimatePanel, renderAnimatePanel } from './animate-panel.js';
+import { initMotionAsk, motionAskDialog } from './motion-ask.js';
 import { initMotionModes, syncMotionMode, drawMotionOverlay } from './motion-modes.js';
 import { initRigMode, syncRigMode, drawRigOverlay, toggleRigMode } from './rig-mode.js';
+import { initTimeline, renderFrameCards, frameAction, timelineKey, nextPreviewIndex, loopLabel } from './timeline.js';
+import { initOnion, drawOnion, onionSummary } from './onion.js';
 import { initEffectsPanel, renderEffectsPanel } from './effects-panel.js';
 import { initPaletteTools } from './palette-tools.js';
 import { initPaletteStudio } from './palette-studio.js';
@@ -417,12 +420,7 @@ function renderCanvas() {
     context.drawImage(layer, 0, 0, canvasWidth, canvasHeight);
   };
   const animation = currentAnimation();
-  if (!state.inPlaceEdit && state.onion && animation.frames.length > 1) {
-    const index = animation.frames.findIndex(f => f.id === state.frameId);
-    context.globalAlpha = 0.23;
-    drawPixels(compositeFrame(state.project,animation.frames[(index - 1 + animation.frames.length) % animation.frames.length]),stageLayers.onion);
-    context.globalAlpha = 1;
-  }
+  drawOnion(context, canvasWidth, canvasHeight);
   drawPixels(canvasPixels());
   if(state.inPlaceEdit) {
     const {session}=state.inPlaceEdit, outline=inPlaceCanvasRect(session);
@@ -683,6 +681,7 @@ function renderTools() {
     $(id).classList.toggle('active', active);
     $(id).setAttribute('aria-pressed', active);
   }
+  $('toggle-onion').title = onionSummary();
   $('undo').disabled = !(state.inPlaceEdit?state.inPlaceEdit.session.undo:state.undo).length;
   $('redo').disabled = !(state.inPlaceEdit?state.inPlaceEdit.session.redo:state.redo).length;
   $('pixel-canvas').style.cursor = state.tool === 'eyedropper' ? 'copy' : currentLayer().locked || !currentLayer().visible ? 'not-allowed' : state.tool==='select' && (state.inPlaceEdit?state.inPlaceEdit.session.selection:state.selection) ? 'grab' : state.tool==='wand' ? 'cell' : 'crosshair';
@@ -746,7 +745,7 @@ function selectFrameAt(index) {
 /** Compact thumbnails shown in the minimised Frames bar; reuses the full cards' painted canvases. */
 function renderMiniFrames(animation, selectedIndex) {
   const strip = $('frame-mini-strip'), cards = $('frame-list').querySelectorAll('canvas');
-  strip.innerHTML = animation.frames.map((frame, index) => `<button type="button" class="frame-mini${index === selectedIndex ? ' selected' : ''}" data-index="${index}" aria-label="Frame ${index + 1}" aria-pressed="${index === selectedIndex}" title="Frame ${index + 1} · ${frame.duration} ms"><canvas width="32" height="32"></canvas></button>`).join('');
+  strip.innerHTML = animation.frames.map((frame, index) => `<button type="button" class="frame-mini${index === selectedIndex ? ' selected' : ''}${frame.kind ? ` kind-${frame.kind}` : ''}" data-index="${index}" aria-label="Frame ${index + 1}" aria-pressed="${index === selectedIndex}" title="Frame ${index + 1} · ${frame.duration} ms"><canvas width="32" height="32"></canvas></button>`).join('');
   strip.querySelectorAll('.frame-mini').forEach((button, index) => {
     if (cards[index]) button.querySelector('canvas').getContext('2d').drawImage(cards[index], 0, 0);
     button.onclick = () => selectFrameAt(index);
@@ -762,18 +761,7 @@ function renderTimeline() {
   $('frame-count').textContent = animation.frames.length;
   $('animation-name-label').textContent = `${animation.name} animation`;
   $('frame-position').textContent = `Frame ${selectedIndex + 1} of ${animation.frames.length}`;
-  $('frame-list').innerHTML = animation.frames.map((frame, index) => `<button class="frame-card${frame.id === state.frameId ? ' selected' : ''}" data-frame="${escapeHTML(frame.id)}" aria-label="Select frame ${index + 1}" aria-pressed="${frame.id === state.frameId}"><canvas width="32" height="32"></canvas><span class="frame-number">${String(index + 1).padStart(2,'0')}</span><span class="frame-duration-label">${frame.duration} ms</span><span class="frame-marker"></span></button>`).join('');
-  $('frame-list').querySelectorAll('[data-frame]').forEach((button, index) => {
-    paintSprite(button.querySelector('canvas'), compositeFrame(state.project,animation.frames[index]), state.project.palette, true);
-    button.addEventListener('click', () => {
-      finishDrawing();
-      state.frameId = button.dataset.frame;
-      state.previewIndex = index;
-      state.previewTime = 0;
-      renderAll();
-      scheduleSave();
-    });
-  });
+  renderFrameCards();
   $('frame-list').scrollLeft = scroll;
   renderMiniFrames(animation, selectedIndex);
   $('delete-frame').disabled = animation.frames.length <= 1;
@@ -904,7 +892,7 @@ function beginCanvasPartEdit(item,partId) {
     for(const element of document.querySelectorAll('.app-header,#project-tabs,#new-project-tab,#open-saved-projects,#open-version-history,#details-panel,.timeline,.transform-section,.account-section,.left-bottom,.floating-panel[data-home="details-panel"],.panel-splitter')) {
       edit.inert.set(element,element.inert);element.inert=true;
     }
-    for(const element of document.querySelectorAll('[data-tool="object"],[data-tool="resize"],[data-tool="wand"],#make-object,#magic-outline,#resize-canvas,#toggle-onion,#color-picker,#hex-color,#add-color,#swap-colors')) {
+    for(const element of document.querySelectorAll('[data-tool="object"],[data-tool="resize"],[data-tool="wand"],#make-object,#magic-outline,#resize-canvas,#toggle-onion,#onion-settings,#color-picker,#hex-color,#add-color,#swap-colors')) {
       edit.disabled.set(element,element.disabled);element.disabled=true;
     }
     renderAll();renderSaveStatus();requestAnimationFrame(()=>{fitCanvas();$('pixel-canvas').focus({preventScroll:true});});
@@ -1086,7 +1074,7 @@ function duplicateObjectItem(item) {
 }
 function copyToAnimationDialog(item) {
   let clip;
-  try{clip=copyObject(state.project,objectTarget(item.layerId),item.key);}catch(error){toast(error.message);return;}
+  try{clip=copyObjects(state.project,objectTarget(item.layerId),itemsFor(item));}catch(error){toast(error.message);return;}
   const animations=state.project.animations;
   openDialog('Copy to animation',`<form id="copy-to-form"><p class="modal-body-text">Place a copy of “${escapeHTML(clip.name)}” in another animation. Shared parts stay linked, so editing one updates both.</p><label class="field"><span class="field-label">Animation</span><select id="copy-to-animation">${animations.map(a=>`<option value="${escapeHTML(a.id)}"${a.id===currentAnimation().id?' disabled':''}>${escapeHTML(a.name)} · ${a.frames.length} frame${a.frames.length===1?'':'s'}</option>`).join('')}</select></label><label class="field"><span class="field-label">Frames</span><select id="copy-to-scope"><option value="animation">Every frame</option><option value="frame">First frame only</option></select></label><label class="check-row"><input id="copy-to-independent" type="checkbox"> Make an independent copy of shared parts</label><p class="helper-text">To paste into another project, use Copy, switch tabs, then Paste.</p><div class="modal-actions"><button class="button primary" type="submit">Copy object</button></div></form>`,'OBJECTS');
   const select=$('copy-to-animation'), first=[...select.options].find(o=>!o.disabled);
@@ -1251,7 +1239,7 @@ function renderPreview() {
   const { project, animation, playing } = previewAnimation();
   const index = playing ? state.previewIndex % animation.frames.length : animation.frames.findIndex(f => f.id === state.frameId);
   paintSprite($('preview-canvas'), state.inPlaceEdit?previewInPlaceEdit(state.inPlaceEdit.session,true):compositeFrame(project,animation.frames[Math.max(0,index)]), project.palette);
-  $('preview-frame').textContent = `${Math.max(0,index) + 1} / ${animation.frames.length}`;
+  $('preview-frame').textContent = `${Math.max(0,index) + 1} / ${animation.frames.length}${playing ? loopLabel() : ''}`;
 }
 function renderPlaybackControls() {
   $('play-toggle').innerHTML = `${icon(state.playing ? 'pause' : 'play')}<span>${state.playing ? 'Pause' : 'Play'}</span>`;
@@ -1888,7 +1876,7 @@ function animationTick(time) {
     let steps = 0;
     while (time - state.previewTime >= duration && steps < 1024) {
       state.previewTime += duration;
-      state.previewIndex = (state.previewIndex + 1) % animation.frames.length;
+      state.previewIndex = nextPreviewIndex(state.previewIndex, animation);
       duration = animation.frames[state.previewIndex].duration || 1000 / animation.fps;
       changed = true;
       steps++;
@@ -1963,7 +1951,7 @@ function animationDialog(id = null) {
   $('new-animation-name').select();
 }
 function dimensionFields(prefix, width, height) {
-  const sizes = [16,24,32,48,64,96,128];
+  const sizes = [16,24,32,48,64,96,128,192,256];
   const preset = width === height && sizes.includes(width) ? String(width) : 'custom';
   return `<div class="canvas-size-fields"><label class="field"><span class="field-label">Canvas size</span><select id="${prefix}-preset">${sizes.map(size=>`<option value="${size}"${preset === String(size) ? ' selected' : ''}>${size} × ${size}</option>`).join('')}<option value="custom"${preset === 'custom' ? ' selected' : ''}>Custom dimensions</option></select></label><div class="form-grid"><label class="field"><span class="field-label">Width (pixels)</span><input id="${prefix}-width" type="number" min="1" max="${MAX_SIZE}" step="1" value="${width}" required></label><label class="field"><span class="field-label">Height (pixels)</span><input id="${prefix}-height" type="number" min="1" max="${MAX_SIZE}" step="1" value="${height}" required></label></div></div>`;
 }
@@ -2205,7 +2193,7 @@ async function importSpritesheet(file) {
     const image = await decodePng(file);
     const bestCell = (length, preferred) => {
       if (length % preferred === 0) return preferred;
-      return [32,16,64,24,48,96,128].find(size => length % size === 0) || Math.min(length,MAX_SIZE);
+      return [32,16,64,24,48,96,128,256].find(size => length % size === 0) || Math.min(length,MAX_SIZE);
     };
     let metadata = null, timingChanged = false, geometry = null, rowDrafts = [];
     openDialog('Every row has a story', `<p class="modal-body-text">${escapeHTML(file.name)} · ${image.width} × ${image.height} pixels. Each row becomes an animation; each column becomes a frame.</p><div class="sheet-preview-wrap"><canvas id="sheet-preview" aria-label="Spritesheet slicing preview"></canvas></div><div class="form-grid"><label class="field"><span class="field-label">Cell width (PNG pixels)</span><input id="sheet-cell-width" type="number" min="1" max="2048" value="${bestCell(image.width,state.project.width)}" step="1"></label><label class="field"><span class="field-label">Cell height (PNG pixels)</span><input id="sheet-cell-height" type="number" min="1" max="2048" value="${bestCell(image.height,state.project.height)}" step="1"></label><label class="field"><span class="field-label">PNG pixel scale</span><input id="sheet-scale" type="number" min="1" max="16" value="1" step="1"></label><label class="field"><span class="field-label">Default playback (FPS)</span><input id="sheet-fps" type="number" min="1" max="60" value="8" step="1"></label></div><div id="sheet-summary" class="sheet-summary"></div><p id="sheet-error" class="sheet-error" role="alert" hidden></p><div class="sheet-metadata-row"><button id="load-sheet-metadata" class="button small">${icon('file')} Load metadata</button><span id="sheet-metadata-name" class="helper-text">Optional .sheet.json file restores names and timing.</span><input id="sheet-metadata-input" type="file" accept=".json,application/json" hidden></div><div class="sheet-row-heading"><span>Row</span><span>Animation name</span><span>Frames</span></div><div id="sheet-rows" class="sheet-row-list"></div>${skipEmptyControl('sheet-skip-empty')}<p class="helper-text">Frames start in column 1. Empty cells anywhere in the selected range and empty rows are skipped by default. Uncheck to keep intentional blank frames.</p><div class="modal-actions"><button id="cancel-sheet" class="button">Cancel</button><button id="confirm-sheet" class="button primary">Import spritesheet</button></div>`, 'SPRITESHEET IMPORT');
@@ -2386,7 +2374,7 @@ function bindEvents() {
   bindFileDrop();
   const mathsDeps={state,$,icon,escapeHTML,mutate,snapshot,remember,versionBefore,renderAll,renderCanvas,renderPreview,renderTools,toast,openDialog,paintSprite,finishDrawing,drawPoints,
     currentAnimation,currentFrame,currentLayer,selectedObject,selectedItems,transformItems,resizableObject,objectTarget,canEditPixels,canvasPixels,canvasPosition,normalizeSelection,selectObject,selectFrameAt,addFrame,undo:()=>restore(state.undo,state.redo)};
-  initToolExtras(mathsDeps);initObjectPose(mathsDeps);initMotionModes(mathsDeps);initRigMode(mathsDeps);initAnimatePanel(mathsDeps);initEffectsPanel(mathsDeps);initPaletteTools(mathsDeps);initPaletteStudio(mathsDeps);
+  initToolExtras(mathsDeps);initObjectPose(mathsDeps);initMotionModes(mathsDeps);initRigMode(mathsDeps);initAnimatePanel(mathsDeps);initMotionAsk(mathsDeps);initTimeline(mathsDeps);initOnion(mathsDeps);initEffectsPanel(mathsDeps);initPaletteTools(mathsDeps);initPaletteStudio(mathsDeps);
   // Holding Shift previews the straight line a pencil or eraser click will draw.
   const trackShift=event=>{if(state.shiftHeld!==event.shiftKey){state.shiftHeld=event.shiftKey;if(state.cursor)renderCanvas();}};
   window.addEventListener('keydown',trackShift);window.addEventListener('keyup',trackShift);
@@ -2492,8 +2480,8 @@ function bindEvents() {
   });
   $('pixel-canvas').addEventListener('contextmenu',event => event.preventDefault());
   $('add-frame').onclick = () => addFrame(false);
-  $('duplicate-frame').onclick = () => addFrame(true);
-  $('delete-frame').onclick = deleteFrame;
+  $('duplicate-frame').onclick = () => frameAction('duplicate');
+  $('delete-frame').onclick = () => frameAction('delete');
   $('move-frame-left').onclick = () => moveFrame(-1);
   $('move-frame-right').onclick = () => moveFrame(1);
   $('add-animation').onclick = () => animationDialog();
@@ -2503,7 +2491,7 @@ function bindEvents() {
   $('frame-duration').onchange=event=>{
     const duration=Number(event.target.value);
     if(!Number.isInteger(duration) || duration<1 || duration>60000){toast('Frame duration must be 1–60,000 milliseconds.');event.target.value=currentFrame().duration;return;}
-    mutate(()=>{currentFrame().duration=duration;state.previewTime=0;});
+    frameAction('duration',duration);
   };
   $('manage-parts').onclick=()=>partLibrary();
   $('open-part-library').onclick=()=>partLibrary();
@@ -2584,6 +2572,7 @@ function bindEvents() {
     if ((event.ctrlKey || event.metaKey) && key === 'v' && state.objectClipboard && (state.lastClipboard==='object' || !state.clipboard)) {event.preventDefault();pasteObjectItem({independent:event.shiftKey});return;}
     if ((event.ctrlKey || event.metaKey) && key === 'v' && state.clipboard) {event.preventDefault();pasteClipboardPixels();return;}
     if (event.ctrlKey || event.metaKey) return;
+    if (timelineKey(event, key)) return;
     if (event.target.closest('button,a') && (key==='enter' || key===' ')) return;
     if(state.tool==='object' || state.tool==='resize') {
       const item=selectedObject(), node=celObjects(currentFrame().cels.find(c=>c.layerId===item.layerId)).find(n=>n.key===item.key);
@@ -2606,10 +2595,11 @@ function bindEvents() {
     const tool = TOOL_KEYS[key];
     if (tool) { state.tool = tool; if(!SELECT_TOOLS.includes(tool) && !['gradient','curve'].includes(tool))state.selection=null; renderTools(); renderSelection(); renderCanvas(); return; }
     if (key === 'j') { event.preventDefault(); toggleRigMode(); return; }
+    if (key === 'q') { event.preventDefault(); motionAskDialog(); return; }
     if (key === 'g') $('toggle-grid').click();
     else if((key==='[' || key===']') && BRUSH_TOOLS.includes(state.tool)){event.preventDefault();state.brushSize=Math.max(1,Math.min(8,state.brushSize+(key===']'?1:-1)));renderTools();renderCanvas();}
     else if (key === 'o') $('toggle-onion').click();
-    else if (key === 'd') addFrame(true);
+    else if (key === 'd') frameAction('duplicate');
     else if (key === ' ' && !event.repeat) { event.preventDefault(); togglePlay(); }
     else if (key === '+' || key === '=') setZoom(state.scale+2);
     else if (key === '-') setZoom(state.scale-2);

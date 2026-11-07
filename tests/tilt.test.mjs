@@ -45,13 +45,22 @@ test('a half turn about y or x is an exact mirror, with or without perspective',
   }
 });
 
-test('edge-on at 90° shows nothing, and the box narrows with cos', () => {
-  for (const tilt of [{ x: 0, y: 90 }, { x: 0, y: -90 }, { x: 90, y: 0 }]) {
-    const { p } = scene({ tilt });
-    assert.equal(opaque(canvas(p)).length, 0, JSON.stringify(tilt));
-    const box = instanceBox(op(p), image(p));
-    assert.ok(tilt.x ? box.height <= 1 : box.width <= 1, JSON.stringify(box));
+test('edge-on at 90° shows a 1px sliver of the near edge, and the box narrows with cos', () => {
+  for (const tilt of [{ x: 0, y: 90 }, { x: 0, y: -90 }, { x: 90, y: 0 }, { x: 0, y: 90, perspective: 0 }, { x: 0, y: 88 }, { x: 0, y: -91 }]) {
+    const { p } = scene({ tilt }), points = opaque(canvas(p)), box = instanceBox(op(p), image(p));
+    assert.ok(points.length, JSON.stringify(tilt));
+    assert.equal(tilt.x ? span(points, 'y') : span(points, 'x'), 1, JSON.stringify(tilt));
+    assert.ok(tilt.x ? box.height <= 2 : box.width <= 2, JSON.stringify(box));
+    // Without perspective the sliver is exactly as tall (or wide) as the part; perspective makes the near edge longer.
+    const length = tilt.x ? span(points, 'x') : span(points, 'y');
+    if (tilt.perspective === 0) assert.equal(length, 6); else assert.ok(length >= (tilt.x ? 8 : 6), `${length}`);
   }
+  // Each row shows the edge nearest the viewer: the left column turning +90°, the right one at −90°, rows unchanged.
+  const colours = p => opaque(canvas(p)).map(({ x, y }) => canvas(p)[y * 48 + x]);
+  assert.deepEqual(colours(scene({ tilt: { x: 0, y: 90, perspective: 0 } }).p), [0, 1, 2, 3, 4, 5].map(y => colour(0, y, 8)));
+  assert.deepEqual(colours(scene({ tilt: { x: 0, y: -90, perspective: 0 } }).p), [0, 1, 2, 3, 4, 5].map(y => colour(7, y, 8)));
+  const rot = scene({ tilt: { x: 0, y: 90, perspective: 0 }, angle: 90 }).p;
+  assert.equal(span(opaque(canvas(rot)), 'y'), 1);
   const flat = { perspective: 0 };
   const sixty = opaque(canvas(scene({ tilt: { x: 0, y: 60, ...flat } }, 16, 12).p));
   assert.deepEqual([span(sixty, 'x'), span(sixty, 'y')], [8, 12]);
@@ -141,4 +150,9 @@ test('spin3d inserts a seamless loop turning the object about one axis', () => {
   assert.deepEqual(tip.project.animations[0].frames[2].cels[0].source.ops[0].tilt, { x: 180, y: 10 });
   assert.throws(() => spin3d(p, { animationId: 'A', layerId: 'L', instanceId: 'o', fromFrameId: 'f0', frames: 1 }));
   assert.throws(() => spin3d(p, { animationId: 'A', layerId: 'L', instanceId: 'o', fromFrameId: 'f0', axis: 'z' }));
+  // A frame time retimes the whole loop; without one the copies keep the from-frame's duration.
+  const timed = spin3d(p, { animationId: 'A', layerId: 'L', instanceId: 'o', fromFrameId: 'f0', frames: 4, duration: 80 }).project.animations[0].frames;
+  assert.deepEqual(timed.map(f => f.duration), [80, 80, 80, 80, 125, 125]);
+  assert.deepEqual(frames.map(f => f.duration), Array(6).fill(125));
+  assert.throws(() => spin3d(p, { animationId: 'A', layerId: 'L', instanceId: 'o', fromFrameId: 'f0', duration: 0 }), /duration/);
 });

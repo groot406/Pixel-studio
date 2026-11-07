@@ -52,7 +52,7 @@ test('frame-only ordering, instance movement and deletion preserve every other a
   const deleted=deleteObject(moved,target,'square','frame');
   assert.ok(!deleted.animations[0].frames[0].cels[1].source.ops.some(o=>o.id==='square'));
   assert.ok(deleted.animations[0].frames[1].cels[1].source.ops.some(o=>o.id==='square'));
-  assert.throws(()=>translateObject(p,target,'square',128,0),/integer/);
+  assert.throws(()=>translateObject(p,target,'square',256,0),/integer/);
 });
 
 test('hit testing respects topmost overlap, hidden objects, erasures, transforms and locked selection',()=>{

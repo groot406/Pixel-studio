@@ -83,7 +83,7 @@ The launcher rebuilds from source and binds to loopback. Development mode rebuil
 
 ## Compatibility limit
 
-The supplied standalone patch's 256-pixel ceiling is not enabled. The editor retains 128 × 128 and its existing PXS encoding, which uses one-byte dimensions. The integrated patch retains the editor's 64 colors and fractional FPS instead of imposing the standalone patch's narrower assumptions.
+The canvas ceiling is now 256 × 256 (4,194,304 stored pixels); PXS keeps one-byte dimensions and stores 256 as 0 (`tests/formats.test.mjs`). The integrated patch retains the editor's 64 colors and fractional FPS instead of imposing the standalone patch's narrower assumptions.
 
 ## Model catalog update
 

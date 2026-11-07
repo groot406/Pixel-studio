@@ -1,5 +1,6 @@
 /** Part editing use cases shared by the editor's part controls. */
 import { validateProject, MAX_SIZE } from './project.js';
+import { PIVOT_MIN, PIVOT_MAX } from './limits.js';
 import { grownInstanceShift, transformedSize } from './geometry.js';
 import { sourceForCel, pixelSpans, cloneArtwork, artworkId, renderOperations, hasLockedInstances } from './artwork.js';
 
@@ -99,7 +100,7 @@ export function flattenCel(project,target) {
  * moving the origin by shift − (I − L)·d, with L = rotation·3D turn·skew, keeps the old pixels in place (rounded to the pixel).
  */
 function keepTurnedPivot(op,shift,before,after) {
-  if(op.pivot) { op.pivot={x:Math.max(-128,Math.min(256,op.pivot.x-shift.x)),y:Math.max(-128,Math.min(256,op.pivot.y-shift.y))}; return; }
+  if(op.pivot) { op.pivot={x:Math.max(PIVOT_MIN,Math.min(PIVOT_MAX,op.pivot.x-shift.x)),y:Math.max(PIVOT_MIN,Math.min(PIVOT_MAX,op.pivot.y-shift.y))}; return; }
   if(!op.angle && !op.skew && !op.tilt)return;
   const r=(op.angle || 0)*Math.PI/180, cos=Math.cos(r), sin=Math.sin(r), tan=deg=>Math.tan((deg || 0)*Math.PI/180), rad=deg=>(deg || 0)*Math.PI/180;
   const dx=shift.x+(after.width-before.width)/2, dy=shift.y+(after.height-before.height)/2;

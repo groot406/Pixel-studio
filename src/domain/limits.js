@@ -1,6 +1,10 @@
 export const SIZE = 32;
-export const MAX_SIZE = 128;
-export const MAX_TOTAL_PIXELS = 1048576;
+/** Largest canvas (and part) edge. */
+export const MAX_SIZE = 256;
+/** Stored canvas pixels across all cels: 64 cels of 256×256 (or 256 of 128×128). */
+export const MAX_TOTAL_PIXELS = 4194304;
+/** Pivot pixel range (it may lie outside the box). */
+export const PIVOT_MIN = -MAX_SIZE, PIVOT_MAX = 2 * MAX_SIZE;
 export const MAX_COLORS = 64;
 export const MAX_LAYERS = 32;
 

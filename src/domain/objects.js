@@ -1,5 +1,6 @@
 /** Object editing over the established cel format. Groups retain isolated erase/override semantics. */
 import { validateProject, getAnimationLayers, insertProjectLayer, removeProjectLayer, uid, MAX_LAYERS, MAX_TOTAL_PIXELS } from './project.js';
+import { PIVOT_MIN, PIVOT_MAX } from './limits.js';
 import { cloneArtwork, sourceForCel, renderParts, hasLockedInstances } from './artwork.js';
 import { linePoints, ellipsePoints, instancePixel, instanceSize, instanceBox, transformedSize, swapsAxes, composeTransform, transformPoint } from './geometry.js';
 import { nextPartId } from './parts.js';
@@ -245,7 +246,7 @@ export function turnObjects(project,target,items,turn,scope='animation') {
     if(swapsAxes(transform)!==swapsAxes(op.transform)){op.x+=Math.trunc((before.width-before.height)/2);op.y+=Math.trunc((before.height-before.width)/2);}
     // The pivot follows its artwork pixel; flips mirror skew and twist, and quarter turns swap the skew axes.
     // A flip negates the 3D turn about the mirrored axis' partner (FX: y, FY: x); quarter turns swap the axes.
-    if(op.pivot){const p=transformPoint(turn,before.width,before.height,op.pivot.x,op.pivot.y);op.pivot={x:Math.max(-128,Math.min(256,p.x)),y:Math.max(-128,Math.min(256,p.y))};}
+    if(op.pivot){const p=transformPoint(turn,before.width,before.height,op.pivot.x,op.pivot.y);op.pivot={x:Math.max(PIVOT_MIN,Math.min(PIVOT_MAX,p.x)),y:Math.max(PIVOT_MIN,Math.min(PIVOT_MAX,p.y))};}
     op.transform=transform;
     if(turn==='FX' || turn==='FY') {
       if(op.angle)op.angle=-op.angle;

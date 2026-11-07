@@ -8,7 +8,7 @@
  */
 import { validateProject, makeLayeredFrame } from './project.js';
 import { renderParts } from './artwork.js';
-import { instancePivot, instanceSize, transformedSize, instanceBox, instancePixel, pivotUnder, withPivot, poseVector, TRANSFORM_MATRICES } from './geometry.js';
+import { instancePivot, instanceSize, transformedSize, instanceBox, instancePixel, pivotUnder, withPivot, poseVector, deformPoint, TRANSFORM_MATRICES } from './geometry.js';
 import { normalizeAngle, angleDelta, roundInt, solveChain, ease } from './motion.js';
 
 const cels = frame => frame.cels;
@@ -52,15 +52,20 @@ export function boxToPart(op, part, pt) {
   return { x: (a*X + c*Y) * part.width / size.width, y: (b*X + d*Y) * part.height / size.height };
 }
 const pivotOffset = (op, part) => { const c = instancePivot(op, part); return { x: c.x - op.x, y: c.y - op.y }; };
-/** Box point → canvas point as rendered: skewed, 3D-turned and rotated about the pivot (deform is ignored). */
+/** Box point → canvas point as rendered: deformed (wave, bulge, twist), skewed, 3D-turned and rotated about the pivot. */
 export function boxToWorld(op, part, pt) {
-  const off = pivotOffset(op, part), v = poseVector(op, part, { x: pt.x - off.x, y: pt.y - off.y });
+  const off = pivotOffset(op, part), d = deformPoint(op, part, pt), v = poseVector(op, part, { x: d.x - off.x, y: d.y - off.y });
   return { x: op.x + off.x + v.x, y: op.y + off.y + v.y };
 }
 /** Canvas point → box point (inverse of boxToWorld). */
 export function worldToBox(op, part, pt) {
   const off = pivotOffset(op, part), v = poseVector(op, part, { x: pt.x - op.x - off.x, y: pt.y - op.y - off.y }, true);
-  return { x: off.x + v.x, y: off.y + v.y };
+  return deformPoint(op, part, { x: off.x + v.x, y: off.y + v.y }, true);
+}
+/** Canvas joint of a placed bone: where its pivot pixel is drawn, so a deform that moves that pixel moves the joint. */
+export function jointWorld(op, part) {
+  const off = pivotOffset(op, part);
+  return op.deform ? boxToWorld(op, part, off) : { x: op.x + off.x, y: op.y + off.y };
 }
 /** Canvas point of a parent-part anchor as the parent is posed. */
 export const anchorWorld = (op, part, anchor) => boxToWorld(op, part, partToBox(op, part, anchor));
@@ -134,7 +139,8 @@ export function layoutFrame(p, frame, rels = new Map(), roots = {}) {
     const before = { x: s.op.x, y: s.op.y, angle: absOf(s.op) }, rel = rels.has(id) ? rels.get(id) : current.get(id);
     setAngle(s.op, s.parent ? absOf(s.parent.op) + rel : rel);
     const goal = s.parent ? anchorWorld(s.parent.op, s.parent.part, s.bone.anchor) : roots[id];
-    if (goal) { const off = pivotOffset(s.op, s.part); s.op.x = roundInt(goal.x - off.x); s.op.y = roundInt(goal.y - off.y); }
+    // A child's drawn joint (deform included) sits on the anchor; roots place their pivot.
+    if (goal) { const j = s.parent ? jointWorld(s.op, s.part) : instancePivot(s.op, s.part), off = { x: j.x - s.op.x, y: j.y - s.op.y }; s.op.x = roundInt(goal.x - off.x); s.op.y = roundInt(goal.y - off.y); }
     if ((s.op.locked || locked.has(s.bone.layerId)) && (before.x !== s.op.x || before.y !== s.op.y || before.angle !== absOf(s.op))) throw new Error('Unlock the rigged objects first.');
   }
 }
@@ -151,7 +157,7 @@ export function rigView(project, animationId, frameId) {
   const map = placed(project, frame), parents = new Set(project.bones.map(b => b.parent).filter(Boolean));
   return [...map.values()].map(({ bone, op, part, parent }) => ({
     bone, layerId: bone.layerId, instanceId: bone.instanceId, root: !parent, leaf: !parents.has(bone.id), angle: absOf(op),
-    joint: instancePivot(op, part), parentJoint: parent ? instancePivot(parent.op, parent.part) : null,
+    joint: jointWorld(op, part), parentJoint: parent ? jointWorld(parent.op, parent.part) : null,
     anchor: parent ? anchorWorld(parent.op, parent.part, bone.anchor) : null, tip: boxToWorld(op, part, tipBox(op, part)),
   }));
 }
@@ -203,7 +209,7 @@ export function attachBone(project, { animationId, frameId, child, parent, point
   if (childBone && parentBone && subtree(p, childBone.id).has(parentBone.id)) throw new Error('That would make a loop: the parent hangs below this part.');
   if (!parentBone) { parentBone = newBone(p, parent.layerId, parent.instanceId, parentOp); if (absOf(parentOp)) parentBone.rest = absOf(parentOp); p.bones.push(parentBone); }
   if (!childBone) { childBone = newBone(p, child.layerId, child.instanceId, childOp); p.bones.push(childBone); }
-  const joint = instancePivot(childOp, childPart), parentPart = partOf(p, parentOp), anchor = boxToPart(parentOp, parentPart, worldToBox(parentOp, parentPart, joint));
+  const joint = jointWorld(childOp, childPart), parentPart = partOf(p, parentOp), anchor = boxToPart(parentOp, parentPart, worldToBox(parentOp, parentPart, joint));
   const rest = normalizeAngle(absOf(childOp) - absOf(parentOp));
   Object.assign(childBone, { parent: parentBone.id, anchor: { x: Math.round(anchor.x * 1000) / 1000, y: Math.round(anchor.y * 1000) / 1000 } });
   if (rest) childBone.rest = rest; else delete childBone.rest;

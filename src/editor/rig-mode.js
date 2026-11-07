@@ -14,6 +14,7 @@ import { frameObjects } from '../domain/objects.js';
 import { renderParts } from '../domain/artwork.js';
 import { closeMotionMode } from './motion-modes.js';
 import { characters } from '../domain/poses.js';
+import { markKinds } from '../domain/timing.js';
 import { initRigLibrary, libraryHTML, paintThumbs, libraryAction, libraryChange } from './rig-library.js';
 
 const PINK = '#ff2d87';
@@ -253,7 +254,7 @@ function computeTween() {
   if (!r.tween.to) { st().previewOverride = null; return; }
   try {
     const result = tweenPoses(st().project, { animationId: animation().id, fromFrameId: st().frameId, toFrameId: r.tween.to, insert: r.tween.count, easing: r.tween.easing });
-    r.tween.candidate = result.project; r.info = `${result.frameIds.length} in-between${result.frameIds.length === 1 ? '' : 's'} (${result.inserted.length} new frames) · Live Preview shows the result`;
+    r.tween.candidate = markKinds(result.project, animation().id, { key: [st().frameId, r.tween.to], inbetween: result.frameIds }); r.info = `${result.frameIds.length} in-between${result.frameIds.length === 1 ? '' : 's'} (${result.inserted.length} new frames) · Live Preview shows the result`;
   } catch (error) { r.error = error.message; }
   st().previewOverride = r.tween.candidate;
 }

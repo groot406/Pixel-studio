@@ -57,7 +57,7 @@ test('build serves every browser module and asset with the original layout', asy
 
 test('all supported AI formats reach the local bridge and preserve the chosen model', async t => {
   const { url, headers, requests } = await start(t);
-  for (const format of ['PXA 1', 'PXA 2', 'PXAPATCH 2', 'PXAINPAINT 1', 'PXAPALETTE 1']) {
+  for (const format of ['PXA 1', 'PXA 2', 'PXAPATCH 2', 'PXAINPAINT 1', 'PXAPALETTE 1', 'PXAMOTION 1']) {
     const response = await fetch(`${url}api/local-ai/edit`, { method: 'POST', headers, body: JSON.stringify({ prompt: `Return ${format}`, model: 'test-model' }) });
     const events = [];
     assert.equal(await readLocalEditResponse(response, event => events.push(event)), 'Test response');

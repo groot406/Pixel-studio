@@ -9,6 +9,7 @@ import { ease, solveTwoBone } from '../domain/motion.js';
 import { instanceBox, instancePivot, instancePixel } from '../domain/geometry.js';
 import { frameObjects } from '../domain/objects.js';
 import { renderParts } from '../domain/artwork.js';
+import { markKinds } from '../domain/timing.js';
 
 const PINK = '#ff2d87';
 const EASES = [['easeInOut', 'Smooth'], ['easeIn', 'Speed up'], ['easeOut', 'Slow down'], ['backOut', 'Overshoot'], ['bounceOut', 'Bounce'], ['elasticOut', 'Elastic'], ['linear', 'Linear']];
@@ -177,11 +178,13 @@ const MODES = {
       const common = { ...target(m.item), fromFrameId: from, easing: m.easing, path: g.path, orient: m.orient && Boolean(g.path), autoSquash: m.squash ? { strength: .5 } : undefined };
       if (m.to) {
         const gap = gapTo(m.to), r = tweenObject(st().project, { ...common, toFrameId: m.to, insert: Math.max(0, m.frames - gap) });
+        markKinds(r.project, st().animationId, { key: [from, m.to], inbetween: r.frameIds });
         m.ghosts = r.frameIds; m.info = `${plural(r.frameIds.length, 'in-between')}${r.inserted.length ? ` (${r.inserted.length} new)` : ''} up to the pose in frame ${frameNo(m.to)}`;
         return r.project;
       }
       if (!m.dx && !m.dy) throw new Error('Drag the ghost to where the move should end.');
       const r = tweenToPose(st().project, { ...common, endPose: { x: g.end.x, y: g.end.y }, frames: m.frames });
+      markKinds(r.project, st().animationId, { key: [from, r.endFrameId], inbetween: r.frameIds });
       m.ghosts = r.frameIds;
       const at = frameNo(from);
       m.info = `Adds frames ${at + 1}–${at + m.frames} after frame ${at}; the ghost is the last one`;

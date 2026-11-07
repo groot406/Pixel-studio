@@ -47,7 +47,7 @@ test('paint commits local overrides and shared part edits survive reload', () =>
 test('v2 rejects incomplete, ambiguous and excessive input before use', () => {
   for (const [from,to] of [
     ['END\n',''], ['USE glint star','USE glint missing'], ['AT glint 7 4','AT missing 7 4'],
-    ['SPAN 2 2 2','SPAN 4 2 2{200}'], ['PART star 5 5','PART star 129 5'],
+    ['SPAN 2 2 2','SPAN 4 2 2{200}'], ['PART star 5 5','PART star 257 5'],
     ['FRAME f1 125 FROM f0','FRAME f1 125 FROM f1'], ['LAYER back','LAYER effects'],
     ['SPAN 2 2 2','USE recursive star 0 0'], ['FRAME f1','FRAME f0'],
     ['RECT 0 2 5 1 1','RECT 0 2 6 1 1'], ['PAL #111111','PAL nope'],
@@ -77,11 +77,23 @@ test('bounded frame inheritance round trips at the operation budget and rejects 
   p.animations=Array.from({length:4},(_,a)=>({id:`a${a}`,name:`A${a}`,fps:8,frames:Array.from({length:256},(_,f)=>({id:`f${a}_${f}`,duration:125,cels:[{layerId:'art',source:structuredClone(source)}]}))}));
   const clean=validateProject(p);
   assert.deepEqual(decodeAIProject(encodeAIProject(clean)),clean);
-  const excessive='PXA 2\nSIZE 1 1\nNAME "Work"\nPAL #123456\nLAYER art "Art" 1 0\nPART huge 128 128\nRECT 0 0 128 128 0\nENDPART\nANIM a "A" 8\nFRAME f 125 CLEAR\nCEL art\n'+Array.from({length:513},(_,i)=>`USE p${i} huge 0 0`).join('\n')+'\nEND';
+  const excessive='PXA 2\nSIZE 1 1\nNAME "Work"\nPAL #123456\nLAYER art "Art" 1 0\nPART huge 256 256\nRECT 0 0 256 256 0\nENDPART\nANIM a "A" 8\nFRAME f 125 CLEAR\nCEL art\n'+Array.from({length:513},(_,i)=>`USE p${i} huge 0 0`).join('\n')+'\nEND';
   assert.throws(()=>decodeAIProject(excessive),/budget/);
 });
 
 test('raster decoding bounds repeated full-canvas shifts', () => {
-  const text = 'PXA 2\nSIZE 128 128\nNAME "Shift budget"\nPAL #123456\nLAYER art "Art" 1 0\nANIM a "A" 8\nFRAME f 125 CLEAR\nCEL art RASTER\n';
+  const text = 'PXA 2\nSIZE 256 256\nNAME "Shift budget"\nPAL #123456\nLAYER art "Art" 1 0\nANIM a "A" 8\nFRAME f 125 CLEAR\nCEL art RASTER\n';
   assert.throws(() => decodeAIProject(text + 'SHIFT 1 0\n'.repeat(513) + 'END'), /Raster decoding work budget/);
+});
+test('frame kinds (key, breakdown, in-between) survive PXA 1 and PXA 2', async () => {
+  const { project } = await keyPrototype();
+  const at = project.animations.findIndex(a => a.frames.length > 2), frames = project.animations[at].frames;
+  frames[0].kind = 'key'; frames[1].kind = 'inbetween'; frames[2].kind = 'breakdown';
+  const kinds = p => p.animations[at].frames.map(f => f.kind);
+  const text = encodeAIProject(project);
+  assert.match(text, / KEY$/m);
+  assert.deepEqual(kinds(decodeAIProject(text)), kinds(project));
+  assert.deepEqual(kinds(decodeAIProject(encodeAIProject(project, { version: 1 }))), kinds(project));
+  assert.deepEqual(kinds(validateProject(project)), kinds(project));
+  assert.throws(() => decodeAIProject(text.replace(/ KEY$/m, ' KEY KEY')), /expects/);
 });

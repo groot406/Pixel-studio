@@ -11,6 +11,8 @@ import {
   resetPose, mirrorPose, tweenPoses, rigView, anchorWorld, boneDescendants,
 } from '../src/domain/skeleton.js';
 import { encodePXA2, decodePXA2 } from '../src/formats/pxa-v2.js';
+import { copyObject, copyObjects, pasteObject } from '../src/domain/object-clipboard.js';
+import { savePose, applyPose } from '../src/domain/poses.js';
 
 /** 64×64, layer L, frames f0..; body 4×8 at (20,10), upper arm 2×6 at (24,10), lower arm 2×6 at (24,16). */
 function scene(n = 1, extra = []) {
@@ -203,4 +205,63 @@ test('joints follow a part’s skew and 3D turn', () => {
   assert.ok(Math.abs(bent.x - plain.x) > 1 && plain.y - bent.y > .5, `the elbow moves with the shear and the turn: ${JSON.stringify([plain, bent])}`);
   for (const delta of [35, -50]) assert.ok(jointGaps(rotateBone(posed, { ...at, boneId: 'up', delta }).project).every(g => g <= .75));
   assert.ok(jointGaps(moveSkeleton(posed, { ...at, boneId: 'body', dx: 3, dy: 2 }).project).every(g => g <= .75));
+});
+
+test('joints follow a part’s wave, bulge and twist deform', () => {
+  const base = rigged(), anchor = q => rigView(q, 'A', 'f0').find(v => v.bone.id === 'low').anchor;
+  const deformed = deform => { const p = structuredClone(base); op(p, 'up').deform = deform; return validateProject(p); };
+  // A wave shifting the upper arm's last row 2px left carries the elbow with it.
+  const waved = deformed({ kind: 'wave', axis: 'x', amplitude: 2, wavelength: 12, phase: 90 });
+  assert.ok(Math.abs(anchor(waved).x - anchor(base).x + 2) < 1e-9 && anchor(waved).y === anchor(base).y, JSON.stringify([anchor(base), anchor(waved)]));
+  for (const deform of [{ kind: 'wave', axis: 'x', amplitude: 2, wavelength: 12, phase: 90 }, { kind: 'twist', angle: 90 }, { kind: 'bulge', strength: 80 }]) {
+    const p = deformed(deform);
+    for (const delta of [0, 35, -50]) assert.ok(jointGaps(rotateBone(p, { ...at, boneId: 'up', delta }).project).every(g => g <= .75), JSON.stringify(deform));
+  }
+  // A child's own deform moves its drawn pivot pixel; layout puts that pixel (the joint) on the anchor.
+  const own = structuredClone(base);
+  op(own, 'low').deform = { kind: 'wave', axis: 'x', amplitude: 2, wavelength: 12, phase: 90 };
+  const laid = rotateBone(validateProject(own), { ...at, boneId: 'up', delta: 0 }).project, view = rigView(laid, 'A', 'f0').find(v => v.bone.id === 'low');
+  assert.equal(op(laid, 'low').x, 22);
+  assert.ok(Math.hypot(view.joint.x - view.anchor.x, view.joint.y - view.anchor.y) <= .75);
+});
+
+test('copying rigged parts copies their bones: duplicate, partial copies, groups, other animations and projects', () => {
+  const p = setBoneLimit(renameBone(rigged(), 'up', 'arm L'), 'low', { min: -90, max: 10 }), all = ['body', 'up', 'low'].map(id => ({ layerId: 'L', key: id }));
+  const clip = copyObjects(p, { ...at, layerId: 'L' }, all);
+  assert.equal(clip.bones.length, 3);
+  // Duplicate (Ctrl+D): the copies, 2px down-right, get their own skeleton with the same joints and limits.
+  const dup = pasteObject(p, { ...at, layerId: 'L' }, clip, { offset: 2, fill: false }).project, copies = dup.bones.slice(3);
+  assert.deepEqual(copies.map(b => [b.id, b.name, b.instanceId, b.parent]), [['body-2', 'body 2', 'body', null], ['up-2', 'arm L 2', 'up', 'body-2'], ['low-2', 'limb 2', 'low', 'up-2']]);
+  assert.ok(copies.every(b => b.layerId !== 'L'), 'each copy is a new object');
+  const placedOp = (q, bone) => q.animations[0].frames[0].cels.find(c => c.layerId === bone.layerId).source.ops.find(o => o.id === bone.instanceId);
+  assert.deepEqual([copies[1].anchor, copies[2].anchor, copies[2].limit], [p.bones[1].anchor, p.bones[2].anchor, { min: -90, max: 10 }]);
+  assert.ok(jointGaps(dup).every(g => g <= .75));
+  const turned = rotateBone(dup, { ...at, boneId: 'up-2', delta: 40 }).project;
+  for (const id of ['body', 'up', 'low']) assert.deepEqual(op(turned, id), op(dup, id), 'posing the copy leaves the original alone');
+  assert.equal(placedOp(turned, copies[1]).angle, 40);
+  assert.equal(placedOp(dup, copies[0]).x, op(p, 'body').x + 2);
+  assert.ok(jointGaps(turned).every(g => g <= .75));
+  // A library pose saved on the original applies to the chosen copy by bone name (the copy number is ignored).
+  const saved = savePose(rotateBone(dup, { ...at, boneId: 'up', delta: 30 }).project, { ...at, rootBoneId: 'body', name: 'wave' });
+  const posedCopy = applyPose(dup, { ...at, pose: saved.project.poses[0], rootBoneId: 'body-2' }).project;
+  assert.equal(placedOp(posedCopy, copies[1]).angle, 30);
+  assert.equal(op(posedCopy, 'up').angle, undefined);
+  // Inside a group the copies join it under fresh instance ids.
+  const grouped = structuredClone(p); grouped.layers[0].group = true;
+  const inGroup = pasteObject(validateProject(grouped), { ...at, layerId: 'L' }, clip, { offset: 2, fill: false }).project;
+  assert.deepEqual(inGroup.bones.slice(3).map(b => [b.layerId, b.instanceId, b.parent]), [['L', 'body_2', null], ['L', 'up_2', 'body-2'], ['L', 'low_2', 'up-2']]);
+  // A copied subtree whose parent stays behind gets its own root; a lone part brings no bones.
+  const arm = pasteObject(p, { ...at, layerId: 'L' }, copyObjects(p, { ...at, layerId: 'L' }, all.slice(1)), { offset: 2, fill: false }).project;
+  assert.deepEqual(arm.bones.slice(3).map(b => [b.id, b.parent, b.anchor]), [['up-2', null, undefined], ['low-2', 'up-2', p.bones[2].anchor]]);
+  assert.equal(pasteObject(p, { ...at, layerId: 'L' }, copyObject(p, { ...at, layerId: 'L' }, 'low'), { offset: 2, fill: false }).project.bones.length, 3);
+  // The whole group in another animation (Copy to animation): a new object with the same instance ids, bones mapped onto it.
+  const two = structuredClone(p);
+  two.animations.push({ id: 'B', name: 'Walk', fps: 8, frames: [{ id: 'g0', duration: 100, cels: [{ layerId: 'L', pixels: Array(64 * 64).fill(-1) }] }] });
+  const group = copyObject(validateProject(two), { ...at, layerId: 'L' }, '@group');
+  const moved = pasteObject(validateProject(two), { animationId: 'B', frameId: 'g0', layerId: 'L' }, group).project, layer = moved.layers.at(-1).id;
+  assert.deepEqual(moved.bones.slice(3).map(b => [b.layerId, b.instanceId, b.parent]), [[layer, 'body', null], [layer, 'up', 'body-2'], [layer, 'low', 'up-2']]);
+  assert.equal(rigView(moved, 'B', 'g0').length, 3);
+  // Another project tab: the clipboard is plain JSON carrying the bones.
+  const other = blankProject('other', 64, 64), pasted = pasteObject(other, { animationId: other.animations[0].id, frameId: other.animations[0].frames[0].id, layerId: other.layers[0].id }, JSON.parse(JSON.stringify(clip))).project;
+  assert.deepEqual(pasted.bones.map(b => [b.id, b.name, b.parent]), [['body', 'body', null], ['up', 'arm L', 'body'], ['low', 'limb', 'up']]);
 });

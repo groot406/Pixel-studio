@@ -87,15 +87,36 @@ export function mirroredPose(project, pose) {
   const moves = pose.moves && Object.fromEntries(Object.entries(pose.moves).map(([id, m]) => [id, { x: -m.x || 0, y: m.y }]));
   return { ...pose, bones, ...(moves ? { moves } : {}) };
 }
+const baseName = bone => String(bone.name ?? bone.id).toLowerCase().replace(/ \d+$/, '');
+/**
+ * A pose's angles moved onto the character with root `rootBoneId`: bones of that character keep theirs; a bone of
+ * another character (e.g. the original of a pasted copy, whose bones are named "arm L 2") goes to the character's bone
+ * with the same name, ignoring a trailing copy number, under a matching parent.
+ */
+export function poseForCharacter(project, pose, rootBoneId) {
+  const keep = subtree(project, rootBoneId), byId = new Map((project.bones || []).map(b => [b.id, b])), mine = [...keep].map(id => byId.get(id)).filter(Boolean);
+  const to = new Map(), used = new Set(), target = id => keep.has(id) ? id : to.get(id);
+  const ids = [...Object.keys(pose.bones), ...Object.keys(pose.moves || {})].filter(id => byId.has(id)).sort((x, y) => depthOf(byId, x) - depthOf(byId, y));
+  for (const id of ids) {
+    if (keep.has(id) || to.has(id)) continue;
+    const src = byId.get(id), match = mine.find(b => !used.has(b.id) && !Object.hasOwn(pose.bones, b.id) && baseName(b) === baseName(src) && (b.parent ? target(src.parent) === b.parent : !src.parent));
+    if (match) { to.set(id, match.id); used.add(match.id); }
+  }
+  const pick = obj => Object.fromEntries(Object.entries(obj).flatMap(([id, v]) => target(id) ? [[target(id), v]] : []));
+  return { ...pose, bones: pick(pose.bones), ...(pose.moves ? { moves: pick(pose.moves) } : {}) };
+}
+const depthOf = (byId, id) => { let n = 0; for (let b = byId.get(id); b?.parent; b = byId.get(b.parent)) n++; return n; };
 /**
  * Apply a library pose (`poseId`) or a pose object to `frameIds` (or `frameId`): each bone turns `amount` (0..1) of the
- * short way toward the pose, `mirror` flips it first, `move` also carries roots to their saved offset. Returns { project }.
+ * short way toward the pose, `mirror` flips it first, `move` also carries roots to their saved offset. With `rootBoneId`
+ * only that character is posed, by name where the pose was saved on another one (poseForCharacter). Returns { project }.
  */
-export function applyPose(project, { poseId, pose, mirror = false, amount = 1, move = true, animationId, frameId, frameIds }) {
+export function applyPose(project, { poseId, pose, mirror = false, amount = 1, move = true, animationId, frameId, frameIds, rootBoneId }) {
   const p = validateProject(project), animation = animationOf(p, animationId);
   if (!p.bones?.length) throw new Error('Rig the parts first.');
   let goal = pose || poseById(p, poseId);
   if (mirror) goal = mirroredPose(p, goal);
+  if (rootBoneId && p.bones.some(b => b.id === rootBoneId)) goal = poseForCharacter(p, goal, rootBoneId);
   const t = Math.max(0, Math.min(1, Number(amount))), wanted = new Set(frameIds || [frameId]), frames = animation.frames.filter(f => wanted.has(f.id));
   if (!frames.length) throw new Error('Choose a frame to pose.');
   for (const frame of frames) {

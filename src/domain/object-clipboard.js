@@ -33,10 +33,27 @@ function locate(project, target) {
   return { animation, frame, layer, cel };
 }
 
-/** Capture what the object looks like in one frame. Instances keep their shared definition; groups keep their retained source. */
+/** Instances a clipboard item carries, as {layerId, instanceId} of the copied project. */
+function clipInstances(clip) {
+  if (clip.kind === 'instance') return [{ layerId: clip.layerId, instanceId: clip.instance.id }];
+  const ids = new Set();
+  for (const data of [clip, ...Object.values(clip.frames || {})]) for (const op of data.source?.ops || []) if (op.type === 'use') ids.add(op.id);
+  return [...ids].map(instanceId => ({ layerId: clip.layerId, instanceId }));
+}
+/** The clipboard with the skeleton bones of the instances it carries (parents outside the copy are dropped later). */
+function withBones(project, clip) {
+  const items = clip.kind === 'multi' ? clip.items : [clip], keys = new Set(items.flatMap(clipInstances).map(i => `${i.layerId}/${i.instanceId}`));
+  const bones = (project.bones || []).filter(b => keys.has(`${b.layerId}/${b.instanceId}`));
+  return bones.length ? { ...clip, bones: cloneArtwork(bones) } : clip;
+}
+
+/** Capture what the object looks like in one frame. Instances keep their shared definition; groups keep their retained source; rigged instances bring their bones. */
 export function copyObject(project, target, key) {
+  return withBones(project, copyOne(project, target, key));
+}
+function copyOne(project, target, key) {
   const { animation, layer, cel } = locate(project, target);
-  const nodes = celObjects(cel), base = { format: OBJECT_CLIPBOARD_FORMAT, version: 1, palette: [...project.palette], width: project.width, height: project.height, animationId: animation.id };
+  const nodes = celObjects(cel), base = { format: OBJECT_CLIPBOARD_FORMAT, version: 1, palette: [...project.palette], width: project.width, height: project.height, animationId: animation.id, layerId: layer.id };
   const celIn = frame => frame.cels.find(c => c.layerId === layer.id);
   const usedParts = ops => {
     const ids = new Set(ops.filter(op => op.type === 'use').map(op => op.partId));
@@ -69,8 +86,8 @@ export function copyObjects(project, target, items) {
   const frame = locate(project, target).frame, ordered = orderObjects(project, frame, items);
   if (!ordered.length) throw new Error('Select an object to copy.');
   if (ordered.length === 1) return copyObject(project, { ...target, layerId: ordered[0].layerId }, ordered[0].key);
-  return { format: OBJECT_CLIPBOARD_FORMAT, version: 1, kind: 'multi', name: `${ordered.length} objects`,
-    items: ordered.map(item => copyObject(project, { ...target, layerId: item.layerId }, item.key)) };
+  return withBones(project, { format: OBJECT_CLIPBOARD_FORMAT, version: 1, kind: 'multi', name: `${ordered.length} objects`,
+    items: ordered.map(item => copyOne(project, { ...target, layerId: item.layerId }, item.key)) });
 }
 
 /** Paste a `multi` clipboard bottom to top, each item above the previous one, so the copied stacking order is kept. */
@@ -78,14 +95,14 @@ function pasteObjects(project, target, clip, options) {
   if (!Array.isArray(clip.items) || !clip.items.length || clip.items.length > MAX_LAYERS) throw new Error('The copied objects are incomplete.');
   const host = project.layers.find(l => l.id === target.layerId), group = host && host.group !== false && !host.locked ? host.id : null;
   let p = project, layerId = target.layerId;
-  const items = [];
+  const items = [], placed = [];
   for (const item of clip.items) {
     if (item?.kind === 'multi') throw new Error('The copied objects are incomplete.');
-    const result = pasteObject(p, { ...target, layerId }, item, { ...options, intoGroup: layerId === group });
+    const result = pasteOne(p, { ...target, layerId }, item, { ...options, intoGroup: layerId === group });
     p = result.project; layerId = result.layerId;
-    items.push({ layerId: result.layerId, key: result.key });
+    items.push({ layerId: result.layerId, key: result.key }); placed.push(...result.placed);
   }
-  return { project: p, layerId, key: items.at(-1).key, items };
+  return { project: p, layerId, key: items.at(-1).key, items, placed };
 }
 
 function readClipboard(clip) {
@@ -124,8 +141,39 @@ function addContainer(p, afterId, name, group) {
  * With `fill`, frames where the object was absent or empty get the copied frame's version, so it appears in every frame;
  * without it (Duplicate), only frames that had the object get a copy.
  */
-export function pasteObject(project, target, clipboard, { scope = 'animation', independent = false, offset = 0, fill = true, intoGroup = true } = {}) {
-  if (clipboard?.kind === 'multi' && clipboard.format === OBJECT_CLIPBOARD_FORMAT) return pasteObjects(project, target, clipboard, { scope, independent, offset, fill });
+export function pasteObject(project, target, clipboard, options = {}) {
+  const multi = clipboard?.kind === 'multi' && clipboard.format === OBJECT_CLIPBOARD_FORMAT;
+  const { placed, ...result } = multi ? pasteObjects(project, target, clipboard, options) : pasteOne(project, target, clipboard, options);
+  return Array.isArray(clipboard.bones) && clipboard.bones.length ? { ...result, project: pasteBones(result.project, clipboard.bones, placed) } : result;
+}
+/**
+ * Bones for pasted instances: each copied bone whose instance was pasted gets a new bone (unique id and name, the same
+ * anchor, limit and rest angle) on the copy. Parents are mapped within the copy; a bone whose parent was not copied
+ * becomes a root (validation then drops roots left without children, e.g. a lone copied part).
+ */
+export function pasteBones(project, bones, placed) {
+  const p = validateProject(project), to = new Map(placed.map(m => [`${m.from.layerId}/${m.from.instanceId}`, m.to])), ids = new Map();
+  const taken = new Set((p.bones || []).map(b => b.id)), names = new Set((p.bones || []).map(b => (b.name ?? b.id).toLowerCase()));
+  const copied = bones.filter(b => to.has(`${b.layerId}/${b.instanceId}`) && !(p.bones || []).some(x => x.layerId === to.get(`${b.layerId}/${b.instanceId}`).layerId && x.instanceId === to.get(`${b.layerId}/${b.instanceId}`).instanceId));
+  for (const bone of copied) {
+    let id = String(bone.id).slice(0, 90);
+    for (let n = 2; taken.has(id); n++) id = `${String(bone.id).slice(0, 90)}-${n}`;
+    taken.add(id); ids.set(bone.id, id);
+  }
+  const added = copied.map(bone => {
+    const base = String(bone.name ?? bone.id).slice(0, 56);
+    let name = base;
+    for (let n = 2; names.has(name.toLowerCase()); n++) name = `${base} ${n}`;
+    names.add(name.toLowerCase());
+    const where = to.get(`${bone.layerId}/${bone.instanceId}`), parent = ids.get(bone.parent) || null;
+    return { id: ids.get(bone.id), name, layerId: where.layerId, instanceId: where.instanceId, parent,
+      ...(parent && bone.anchor ? { anchor: { ...bone.anchor } } : {}), ...(bone.limit ? { limit: { ...bone.limit } } : {}), ...(bone.rest ? { rest: bone.rest } : {}) };
+  });
+  if (!added.length) return p;
+  p.bones = [...(p.bones || []), ...added];
+  return validateProject(p);
+}
+function pasteOne(project, target, clipboard, { scope = 'animation', independent = false, offset = 0, fill = true, intoGroup = true } = {}) {
   const clip = readClipboard(clipboard);
   if (!['frame', 'animation'].includes(scope)) throw new Error('Choose current frame or current animation.');
   const p = validateProject(project), { animation, frame } = locate(p, target);
@@ -172,7 +220,7 @@ export function pasteObject(project, target, clipboard, { scope = 'animation', i
       cel.source = sourceForCel(cel, p.width);
       cel.source.ops.push({ type: 'use', id, partId: part.id, ...pose, name: clip.name.slice(0, 80) });
     }
-    return { project: validateProject(p), layerId: layer.id, key: id, items: [{ layerId: layer.id, key: id }] };
+    return { project: validateProject(p), layerId: layer.id, key: id, items: [{ layerId: layer.id, key: id }], placed: poses.size ? [{ from: { layerId: clip.layerId, instanceId: clip.instance.id }, to: { layerId: layer.id, instanceId: id } }] : [] };
   }
   const layer = addContainer(p, host ? host.id : p.layers.at(-1).id, clip.name, Boolean(clip.group));
   for (const f of frames) {
@@ -192,8 +240,9 @@ export function pasteObject(project, target, clipboard, { scope = 'animation', i
     }
   }
   const clean = validateProject(p), cel = clean.animations.find(a => a.id === animation.id).frames.find(f => f.id === frame.id).cels.find(c => c.layerId === layer.id);
-  const key = layer.group ? '@group' : celObjects(cel).at(-1).key;
-  return { project: clean, layerId: layer.id, key, items: [{ layerId: layer.id, key }] };
+  const key = layer.group ? '@group' : celObjects(cel).at(-1).key, kept = new Set(clean.animations.flatMap(a => a.frames).flatMap(f => f.cels.find(c => c.layerId === layer.id).source?.ops || []).filter(op => op.type === 'use').map(op => op.id));
+  const placed = keepsSource ? clipInstances(clip).filter(i => kept.has(i.instanceId)).map(from => ({ from, to: { layerId: layer.id, instanceId: from.instanceId } })) : [];
+  return { project: clean, layerId: layer.id, key, items: [{ layerId: layer.id, key }], placed };
 }
 
 /** Bounding box of a node's visible pixels in one frame, for canvas highlighting. */

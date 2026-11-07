@@ -127,7 +127,7 @@ test('PXA 2 round trips every effect, including FRAME FROM deltas that animate t
 });
 
 test('invalid effect values are rejected', () => {
-  for (const pose of [{ pivot: { x: 257, y: 0 } }, { pivot: { x: 0 } }, { skew: { x: 61, y: 0 } }, { skew: { x: 0, y: -61 } }, { skew: { x: 1.5, y: 0 } },
+  for (const pose of [{ pivot: { x: 513, y: 0 } }, { pivot: { x: 0 } }, { skew: { x: 61, y: 0 } }, { skew: { x: 0, y: -61 } }, { skew: { x: 1.5, y: 0 } },
     { deform: { kind: 'wave', axis: 'x', amplitude: 0, wavelength: 4, phase: 0 } }, { deform: { kind: 'wave', axis: 'x', amplitude: 33, wavelength: 4, phase: 0 } },
     { deform: { kind: 'wave', axis: 'z', amplitude: 1, wavelength: 4, phase: 0 } }, { deform: { kind: 'wave', axis: 'x', amplitude: 1, wavelength: 1, phase: 0 } },
     { deform: { kind: 'bulge', strength: 101 } }, { deform: { kind: 'twist', angle: 361 } }, { deform: { kind: 'swirl' } }, { sampling: 'bilinear' }])

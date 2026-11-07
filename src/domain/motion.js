@@ -4,6 +4,7 @@
  */
 
 import { instancePivot, instanceSize } from './geometry.js';
+import { MAX_SIZE } from './limits.js';
 
 const DEG = 180 / Math.PI, RAD = Math.PI / 180, EPS = 1e-9;
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -137,7 +138,7 @@ export function applyPose(instance, pose, part) {
   const op = { ...instance }, int = (v, lo, hi) => clamp(roundInt(v), lo, hi);
   if (Number.isFinite(pose.x)) op.x = roundInt(pose.x);
   if (Number.isFinite(pose.y)) op.y = roundInt(pose.y);
-  const size = instanceSize(instance, part), w = Number.isFinite(pose.width) ? int(pose.width, 1, 128) : size.width, h = Number.isFinite(pose.height) ? int(pose.height, 1, 128) : size.height;
+  const size = instanceSize(instance, part), w = Number.isFinite(pose.width) ? int(pose.width, 1, MAX_SIZE) : size.width, h = Number.isFinite(pose.height) ? int(pose.height, 1, MAX_SIZE) : size.height;
   if (w === part.width && h === part.height) { delete op.width; delete op.height; } else Object.assign(op, { width: w, height: h });
   if (Number.isFinite(pose.angle)) { const a = roundInt(normalizeAngle(pose.angle)); if (a) op.angle = a === -180 ? 180 : a; else delete op.angle; }
   if (Number.isFinite(pose.skewX) || Number.isFinite(pose.skewY)) {

@@ -1,5 +1,5 @@
 /** Retained pixel artwork. Source is authoritative; pixels are derived editing buffers. */
-import { MAX_SIZE, MAX_TOTAL_PIXELS } from './limits.js';
+import { MAX_SIZE, MAX_TOTAL_PIXELS, PIVOT_MIN, PIVOT_MAX } from './limits.js';
 import { linePoints, rectanglePoints, ellipsePoints, instancePixel, instanceBox, instanceImage, resamples, smoothSampling, TRANSFORM_NAMES, SAMPLING_MODES, DEFAULT_PERSPECTIVE } from './geometry.js';
 import { paletteBlend } from './antialias.js';
 import { ROTSPRITE_SCALE } from './rotsprite.js';
@@ -33,7 +33,7 @@ export function instanceEffects(op) {
   const out = {};
   if (!absent(op.pivot)) {
     if (!object(op.pivot)) throw new Error('Instance pivot needs x and y.');
-    out.pivot = { x: integer(op.pivot.x, -128, 256, 'Pivot x'), y: integer(op.pivot.y, -128, 256, 'Pivot y') };
+    out.pivot = { x: integer(op.pivot.x, PIVOT_MIN, PIVOT_MAX, 'Pivot x'), y: integer(op.pivot.y, PIVOT_MIN, PIVOT_MAX, 'Pivot y') };
   }
   if (!absent(op.skew)) {
     if (!object(op.skew)) throw new Error('Instance skew needs x and y.');

@@ -6,6 +6,7 @@ import { attachBone } from '../src/domain/skeleton.js';
 export const STRESS_PRESETS = {
   'big-canvas': { width: 128, height: 128, layers: 8, frames: 8 },
   'many-frames': { width: 40, height: 40, layers: 8, frames: 60 },
+  'huge-canvas': { width: 256, height: 256, layers: 8, frames: 8 },
 };
 
 /** A seeded project: each layer holds painted spans, 30 instances in total (rotated, tilted, skewed, RotSprite and Smooth AA), and a 3-bone rig. */

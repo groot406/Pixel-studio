@@ -11,7 +11,7 @@
  *   16..19 CRC32 of the uncompressed payload
  *
  * Payload: six u8 fields (payload schema=2, 3 or 4, width, height, palette count,
- * layer count, animation count), then the project name and RGB palette bytes.
+ * layer count, animation count; a width/height byte of 0 means 256), then the project name and RGB palette bytes.
  * Strings use a u16 UTF-8 byte length followed by those bytes. Each layer is
  * id/name/u8 flags (bit 0 visible, bit 1 locked). Each animation is id/name/
  * float64 FPS/u16 frame count. Each frame is id/u16 duration followed by one
@@ -29,9 +29,9 @@ import {
 } from '../domain/project.js';
 
 export const PIXEL_FILE_HEADER_BYTES = 20;
-// One million pixel bytes plus bounded frame IDs, names, and other metadata
-// fit comfortably in 2 MiB under the same limits as core validation.
-export const MAX_PIXEL_PAYLOAD_BYTES = 2 * 1024 * 1024;
+// 4,194,304 pixel bytes plus bounded frame IDs, names, and other metadata
+// fit comfortably in 8 MiB under the same limits as core validation.
+export const MAX_PIXEL_PAYLOAD_BYTES = 8 * 1024 * 1024;
 export const MAX_PIXEL_FILE_BYTES = PIXEL_FILE_HEADER_BYTES + MAX_PIXEL_PAYLOAD_BYTES + 65536;
 const MAX_ANIMATIONS = 100;
 const MAX_FRAMES_PER_ANIMATION = 256;
@@ -158,8 +158,8 @@ function encodePayload(project) {
   const writer = new Writer();
   const schema = project.animations.some(a=>a.frames.some(f=>f.layerOrder)) ? 4 : project.animations.some(animation => animation.layerOrder) ? 3 : 2;
   writer.u8(schema);
-  writer.u8(project.width);
-  writer.u8(project.height);
+  writer.u8(project.width & 255);
+  writer.u8(project.height & 255);
   writer.u8(project.palette.length);
   writer.u8(project.layers.length);
   writer.u8(project.animations.length);
@@ -197,8 +197,8 @@ function decodePayload(bytes) {
   const reader = new Reader(bytes);
   const schema = reader.u8();
   if (![2, 3, 4].includes(schema)) invalid('This pixel file uses an unsupported payload schema. Expected version 2, 3 or 4.');
-  const width = reader.u8();
-  const height = reader.u8();
+  const width = reader.u8() || 256;
+  const height = reader.u8() || 256;
   if (width < 1 || height < 1 || width > MAX_SIZE || height > MAX_SIZE) {
     invalid(`Pixel file dimensions must be from 1 to ${MAX_SIZE} pixels.`);
   }

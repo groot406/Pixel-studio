@@ -1,5 +1,5 @@
 /** Deterministic integer-grid geometry shared by tools and retained artwork. */
-import { SIZE, MAX_TOTAL_PIXELS, pixelCount } from './limits.js';
+import { SIZE, MAX_TOTAL_PIXELS, PIVOT_MIN, PIVOT_MAX, pixelCount } from './limits.js';
 import { rotspriteImage, ROTSPRITE_SCALE } from './rotsprite.js';
 import { paletteBlend } from './antialias.js';
 
@@ -193,6 +193,12 @@ function redeform(d, box, x, y) {
   const a = d.angle * (1 - r) * Math.PI / 180, cos = Math.cos(a), sin = Math.sin(a);
   return [hw + (nx * cos - ny * sin) * hw, hh + (nx * sin + ny * cos) * hh];
 }
+/** Box point `pt` moved by the instance's deform as rendered (`inverse` undoes it); unchanged without a deform. */
+export function deformPoint(instance, part, pt, inverse = false) {
+  if (!instance.deform) return { x: pt.x, y: pt.y };
+  const [x, y] = (inverse ? undeform : redeform)(instance.deform, transformedSize(instance, part), pt.x, pt.y);
+  return { x, y };
+}
 /** Pivot-relative corners of the box (widened by a wave) after skew: what the 3D turn and rotation act on. */
 function skewedCorners(instance, box, c) {
   const d = instance.deform, skew = instance.skew, tx = slope(skew?.x), ty = slope(skew?.y);
@@ -267,7 +273,8 @@ export function instanceBox(instance, part) {
     xs.push(ox + dx*cos - dy*sin); ys.push(oy + dx*sin + dy*cos);
   }
   const left = Math.floor(Math.min(...xs) + EPSILON), top = Math.floor(Math.min(...ys) + EPSILON);
-  return { x: left, y: top, width: Math.ceil(Math.max(...xs) - EPSILON) - left, height: Math.ceil(Math.max(...ys) - EPSILON) - top };
+  // An edge-on 3D turn flattens the box to a line; it keeps one pixel of width (or height) for its sliver.
+  return { x: left, y: top, width: Math.max(1, Math.ceil(Math.max(...xs) - EPSILON) - left), height: Math.max(1, Math.ceil(Math.max(...ys) - EPSILON) - top) };
 }
 
 /**
@@ -304,12 +311,16 @@ function partPoint(instance, part, size, box, px, py) {
   const lx = a*u + c*v + (a < 0 ? size.width : 0) + (c < 0 ? size.width : 0), ly = b*u + d*v + (b < 0 ? size.height : 0) + (d < 0 ? size.height : 0);
   return [lx * part.width / size.width, ly * part.height / size.height];
 }
+/** Box point of the continuous part point (sx,sy): resize → transform → deform. */
+function partToBoxPoint(instance, part, size, box, sx, sy) {
+  const [a, b, c, d] = matrix(instance.transform), lx = sx * size.width / part.width, ly = sy * size.height / part.height;
+  const x = a*lx + b*ly + (a < 0 ? size.width : 0) + (b < 0 ? size.height : 0), y = c*lx + d*ly + (c < 0 ? size.width : 0) + (d < 0 ? size.height : 0);
+  return instance.deform ? redeform(instance.deform, box, x, y) : [x, y];
+}
 /** Instance-relative canvas point of the continuous part point (sx,sy): the forward map resize → transform → deform → skew → 3D turn → rotate. */
 export function partToInstancePoint(instance, part, sx, sy) {
-  const size = instanceSize(instance, part), box = transformedSize(instance, part), [a, b, c, d] = matrix(instance.transform);
-  const lx = sx * size.width / part.width, ly = sy * size.height / part.height;
-  let x = a*lx + b*ly + (a < 0 ? size.width : 0) + (b < 0 ? size.height : 0), y = c*lx + d*ly + (c < 0 ? size.width : 0) + (d < 0 ? size.height : 0);
-  if (instance.deform) [x, y] = redeform(instance.deform, box, x, y);
+  const box = transformedSize(instance, part);
+  let [x, y] = partToBoxPoint(instance, part, instanceSize(instance, part), box, sx, sy);
   if (instance.angle || instance.skew || instanceTilt(instance)) {
     const p = pivotPoint(instance, box), v = poseVector(instance, part, { x: x - p.x, y: y - p.y });
     x = v.x + p.x; y = v.y + p.y;
@@ -347,6 +358,40 @@ function aaPixel(instance, part, size, box, x, y) {
   return { color: coverage >= .5 ? color : -1, raw: d, edge: coverage >= .25 && coverage < .75 ? coverage : 0 };
 }
 
+/** Whether a 3D turn shows the plane exactly edge-on (cos of either turn is 0, e.g. 90° or 270°). */
+export function edgeOn(instance) {
+  const t = instanceTilt(instance);
+  return Boolean(t) && Math.abs(turned(t.y)[0] * turned(t.x)[0]) < 1e-6;
+}
+const SLIVER_SAMPLES = 4;
+/**
+ * Edge-on, the turned plane would show nothing; it is drawn as a 1px sliver instead (its
+ * thickness, as a real card or coin shows). Each part pixel is forward-mapped at 4×4 sample points and every canvas
+ * pixel on the line keeps the sample nearest the viewer (smallest depth Z of the 3D turn); on a tie (no depth
+ * difference) the first in part order wins. So a Y turn shows, per row, the part pixel on the edge that was nearest
+ * (the left edge turning +90°, the right edge at −90°): usually the outline colour. A turn so nearly edge-on that no
+ * pixel centre is covered shows the sliver of the nearest exact edge-on turn.
+ */
+function sliverPixels(instance, part, rect) {
+  const size = instanceSize(instance, part), box = transformedSize(instance, part), c = pivotPoint(instance, box), t = instanceTilt(instance);
+  const [, sy] = turned(t.y), [cx, sx] = turned(t.x), tx = slope(instance.skew?.x), ty = slope(instance.skew?.y), pw = part.width;
+  const pixels = new Array(rect.width * rect.height).fill(-1), depth = new Float64Array(pixels.length).fill(Infinity);
+  part.pixels.forEach((value, s) => {
+    if (value < 0) return;
+    for (let j = 0; j < SLIVER_SAMPLES; j++) for (let i = 0; i < SLIVER_SAMPLES; i++) {
+      const px = s % pw + (i + .5) / SLIVER_SAMPLES, py = Math.floor(s / pw) + (j + .5) / SLIVER_SAMPLES, [fx, fy] = partToInstancePoint(instance, part, px, py);
+      const x = Math.floor(fx + EPSILON) - rect.x, y = Math.floor(fy + EPSILON) - rect.y;
+      if (x < 0 || y < 0 || x >= rect.width || y >= rect.height) continue;
+      const [bx, by] = partToBoxPoint(instance, part, size, box, px, py);
+      let u = bx - c.x, v = by - c.y;
+      if (instance.skew) { u += tx * v; v += ty * u; }
+      const z = u * sy * cx - v * sx, k = y * rect.width + x;
+      if (z < depth[k] - EPSILON) { depth[k] = z; pixels[k] = value; }
+    }
+  });
+  return pixels;
+}
+
 const imageCache = new WeakMap(), IMAGE_CACHE_AREA = 1 << 19;
 /**
  * The instance drawn into its own box (relative to the instance origin), for instances that resample their part:
@@ -365,6 +410,7 @@ export function instanceImage(instance, part) {
   const cached = byPose.get(key);
   if (cached) { byPose.delete(key); byPose.set(key, cached); return cached; }
   const rect = instanceBox({ ...instance, x: 0, y: 0 }, part), size = instanceSize(instance, part), box = transformedSize(instance, part);
+  if (edgeOn(instance)) return remember(byPose, key, { ...rect, pixels: sliverPixels(instance, part, rect), edge: null });
   const { width, height } = rect, n = width * height, pixels = new Array(n).fill(-1), owner = new Int32Array(n).fill(-1);
   const pw = part.width, ph = part.height, P = part.pixels, count = new Int32Array(pw * ph), best = new Int32Array(pw * ph).fill(-1), bestD = new Float64Array(pw * ph).fill(Infinity);
   const sampling = instance.sampling === 'rotsprite' && smoothSampling(instance) ? 'rotsprite' : instance.sampling === 'aa' ? 'aa' : 'nearest';
@@ -397,6 +443,11 @@ export function instanceImage(instance, part) {
     owner[t] = o; count[o]++;
     const dist = Math.hypot(lx - o % pw - .5, ly - Math.floor(o / pw) - .5);
     if (dist < bestD[o]) { bestD[o] = dist; best[o] = t; }
+  }
+  // Turned (nearly) edge-on so that no pixel centre is covered: draw the sliver rather than nothing.
+  if (instanceTilt(instance) && !owner.some(o => o !== -1)) {
+    const t = instance.tilt, near = a => Math.sign(turned(a || 0)[1]) * 90 || 90;
+    return instanceImage({ ...instance, tilt: Math.abs(turned(t.y || 0)[0]) <= Math.abs(turned(t.x || 0)[0]) ? { ...t, y: near(t.y) } : { ...t, x: near(t.x) } }, part);
   }
   const shown = Array.from({ length: P.length }, () => []);
   owner.forEach((o, t) => { if (o >= 0) shown[o].push(t); });
@@ -454,8 +505,11 @@ export function instanceImage(instance, part) {
       }
     }
   }
-  const image = { ...rect, pixels, edge: edge?.size ? edge : null };
-  // Least recently used poses go first once this part's cached images exceed the pixel budget.
+  return remember(byPose, key, { ...rect, pixels, edge: edge?.size ? edge : null });
+}
+/** Cache an instance image; least recently used poses go first once the part's cached images exceed the pixel budget. */
+function remember(byPose, key, image) {
+  const n = image.pixels.length;
   for (const [old, value] of byPose) { if (byPose.area + n <= IMAGE_CACHE_AREA) break; byPose.delete(old); byPose.area -= value.pixels.length; }
   byPose.set(key, image); byPose.area += n;
   return image;
@@ -499,11 +553,12 @@ export function poseVector(instance, part, v, inverse = false) {
   if (map) [x, y] = tiltForward(map, x, y);
   return { x: x * cos - y * sin, y: x * sin + y * cos };
 }
-/** Box-relative pivot pixel under canvas point `at`, for the instance as it is shown (rotation, 3D turn and skew undone). */
+/** Box-relative pivot pixel under canvas point `at`, for the instance as it is shown (rotation, 3D turn, skew and deform undone). */
 export function pivotUnder(instance, part, at) {
   const c = instancePivot(instance, part), local = poseVector(instance, part, { x: at.x - c.x, y: at.y - c.y }, true);
-  const clamp = v => Math.max(-128, Math.min(256, Math.floor(v)));
-  return { x: clamp(c.x - instance.x + local.x), y: clamp(c.y - instance.y + local.y) };
+  const box = deformPoint(instance, part, { x: c.x - instance.x + local.x, y: c.y - instance.y + local.y }, true);
+  const clamp = v => Math.max(PIVOT_MIN, Math.min(PIVOT_MAX, Math.floor(v)));
+  return { x: clamp(box.x), y: clamp(box.y) };
 }
 /**
  * Copy of `instance` with `pivot` set (null: the centre), moved so its artwork stays put: changing the point a

@@ -29,11 +29,11 @@ Indices are consecutive from 0. Visibility and lock flags are 0 or 1. Layer orde
 Then use:
 ANIM "animation name" fps
 ORDER layer-index layer-index ...
-FRAME duration-ms CLEAR|PREV
+FRAME duration-ms CLEAR|PREV [KEY|BREAKDOWN|INBETWEEN]
 CEL layer-index
 SPAN y x pixel-string
 
-Every animation needs a frame. CLEAR starts every layer transparent. PREV copies all layers of the immediately preceding frame in this animation; its first frame must therefore use CLEAR. Select CEL again after each FRAME before writing SPAN. SPAN overwrites a contiguous row segment; coordinates are zero-based, y first. It must stay within that row. Repeated or overlapping spans are applied in order.
+Every animation needs a frame. CLEAR starts every layer transparent. PREV copies all layers of the immediately preceding frame in this animation; its first frame must therefore use CLEAR. The optional KEY, BREAKDOWN or INBETWEEN marks the frame's role (key pose, breakdown, in-between) without changing pixels. Select CEL again after each FRAME before writing SPAN. SPAN overwrites a contiguous row segment; coordinates are zero-based, y first. It must stay within that row. Repeated or overlapping spans are applied in order.
 
 ORDER is optional, once immediately after ANIM and before its first FRAME. List every declared layer index exactly once, bottom to top. Omit it to use declaration order. The order applies only to that animation. Older readers without ORDER support cannot read files containing it.
 FRAMEORDER is optional, once after FRAME and before SHIFT or CEL. It lists every layer index exactly once and overrides only that frame's order; omission uses animation order. PREV copies pixels, not frame order.
@@ -46,7 +46,7 @@ A period (.) is transparent and erases an old pixel. Optionally repeat one symbo
 
 Preserve hidden layers, deliberate blank frames, names, palette order, visibility, locks, FPS, and durations unless asked to change them. Internal IDs are regenerated.
 
-Limits: dimensions 1–128; 1–64 colors; 1–32 layers; 1–100 animations; 1–256 frames per animation, 1,024 total; 1,048,576 stored pixels across all layers and frames. FPS is 1–60, including decimals. Durations are whole milliseconds from 1–60,000. Use decimal numbers without leading zeros. Project names allow 120 characters; layer and animation names allow 80. Text is limited to 4 MiB of UTF-8.`;
+Limits: dimensions 1–256; 1–64 colors; 1–32 layers; 1–100 animations; 1–256 frames per animation, 1,024 total; 4,194,304 stored pixels across all layers and frames. FPS is 1–60, including decimals. Durations are whole milliseconds from 1–60,000. Use decimal numbers without leading zeros. Project names allow 120 characters; layer and animation names allow 80. Text is limited to 4 MiB of UTF-8.`;
 
 function problem(message, lineNumber) {
   throw new Error(lineNumber === undefined ? message : `Line ${lineNumber}: ${message}`);
@@ -129,7 +129,7 @@ export function encodeAIProjectV1(project) {
     if (animation.layerOrder) append(`ORDER ${animation.layerOrder.map(id => clean.layers.findIndex(layer => layer.id === id)).join(' ')}`);
     let previous;
     for (const frame of animation.frames) {
-      append(`FRAME ${frame.duration} ${previous ? 'PREV' : 'CLEAR'}`);
+      append(`FRAME ${frame.duration} ${previous ? 'PREV' : 'CLEAR'}${frame.kind ? ` ${frame.kind.toUpperCase()}` : ''}`);
       if(frame.layerOrder)append(`FRAMEORDER ${frame.layerOrder.map(id=>clean.layers.findIndex(layer=>layer.id===id)).join(' ')}`);
       let body = frameBody(clean, frame, previous);
       let shortest = bodyLength(body);
@@ -358,7 +358,9 @@ export function decodeAIProjectV1(text) {
       }
       case 'FRAME': {
         if (!animation) problem('Declare an ANIM before FRAME.', lineNumber);
-        const [durationText, mode] = fields(rest, 2, 'FRAME', lineNumber);
+        const kindToken = rest.split(/\s+/).length === 3 ? rest.split(/\s+/)[2] : '';
+        const kind = { KEY: 'key', BREAKDOWN: 'breakdown', INBETWEEN: 'inbetween' }[kindToken];
+        const [durationText, mode] = fields(kind ? rest.slice(0, rest.lastIndexOf(kindToken)).trim() : rest, 2, 'FRAME', lineNumber);
         const duration = whole(durationText, 'Frame duration', lineNumber);
         if (duration < 1 || duration > 60000) problem('Frame durations must be from 1 to 60,000 milliseconds.', lineNumber);
         if (mode !== 'CLEAR' && mode !== 'PREV') problem('FRAME mode must be CLEAR or PREV.', lineNumber);
@@ -377,6 +379,7 @@ export function decodeAIProjectV1(text) {
             layerId: layer.id,
             pixels: mode === 'PREV' ? [...getLayerPixels(previous, layer.id)] : Array(count).fill(-1),
           })),
+          ...(kind ? { kind } : {}),
         };
         animation.frames.push(frame);
         totalFrames += 1;

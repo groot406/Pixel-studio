@@ -8,6 +8,7 @@ import { compositeFrame } from '../domain/project.js';
 import { celObjects } from '../domain/objects.js';
 import { openMode, closeMotionMode, activeMotionMode } from './motion-modes.js';
 import { toggleRigMode, closeRigMode, rigModeOpen } from './rig-mode.js';
+import { motionAskDialog } from './motion-ask.js';
 
 let d;
 const MODES = { tween: 'move', squash: 'bounce', follow: 'follow', ik: 'ik', smear: 'smear' };
@@ -19,6 +20,7 @@ export function initAnimatePanel(deps) {
   d.$('animate-wave').onclick = () => { closeRigMode({ render: false }); closeMotionMode(); waveDialog(); };
   d.$('animate-spin3d').onclick = () => { closeRigMode({ render: false }); closeMotionMode(); spinDialog(); };
   d.$('animate-skeleton').onclick = () => toggleRigMode();
+  d.$('animate-describe').onclick = () => { closeRigMode({ render: false }); closeMotionMode(); motionAskDialog(); };
 }
 
 /** The selected placed object in the current frame, and whether the frame has any. */
@@ -39,6 +41,7 @@ export function renderAnimatePanel() {
     : !objects.length ? 'Place a part on the canvas (drag one from Parts) to animate it.'
     : rigModeOpen() ? 'Skeleton mode: work on the canvas; Done or Enter returns here.'
     : primary ? `Animate “${primary.name}”: pick a motion, then work on the canvas.` : 'Pick a motion, then click the object on the canvas.';
+  $('animate-describe').disabled = Boolean(state.inPlaceEdit) || !objects.length;
   for (const row of ['skeleton', ...Object.keys(MODES), 'wave', 'spin3d']) {
     const button = $(`animate-${row}`), on = row === 'skeleton' ? rigModeOpen() : MODES[row] && active === MODES[row];
     const needsPrimary = row === 'wave' || row === 'spin3d';
@@ -122,7 +125,7 @@ function spinDialog() {
   if (!primary) return;
   const options = () => {
     const { $ } = d;
-    return { animationId: animation.id, layerId: primary.layerId, instanceId: primary.key, fromFrameId: frame.id, frames: Number($('spin-frames').value), axis: $('spin-axis').value, turns: Number($('spin-direction').value) };
+    return { animationId: animation.id, layerId: primary.layerId, instanceId: primary.key, fromFrameId: frame.id, frames: Number($('spin-frames').value), axis: $('spin-axis').value, turns: Number($('spin-direction').value), duration: $('spin-keep').checked ? undefined : Number($('spin-duration').value) };
   };
   mathsDialog({
     title: '3D spin', icon: 'spin3d', submit: 'Add frames',
@@ -131,12 +134,15 @@ function spinDialog() {
       <div class="form-grid"><label class="field"><span class="field-label">Axis</span><select id="spin-axis"><option value="y">Turn ↔ (Y axis)</option><option value="x">Tip ↕ (X axis)</option></select></label>
       <label class="field"><span class="field-label">Direction</span><select id="spin-direction"><option value="1">Forward</option><option value="-1">Backward</option></select></label></div>
       ${slider('spin-frames', 'Frames per turn', 4, 32, 1, 8, v => `${v}`)}
+      ${slider('spin-duration', 'Frame time', 20, 500, 10, 80, v => `${v} ms`)}
+      ${check('spin-keep', `Keep this frame’s time (${frame.duration} ms)`, false)}
       <p id="spin-info" class="maths-info" aria-live="polite"></p>`,
     update() {
       const { state } = d, o = options();
       try { state.previewOverride = spin3d(state.project, o).project; }
       catch { state.previewOverride = null; }
-      d.$('spin-info').textContent = `Adds ${plural(o.frames - 1, 'frame')} after this one, ${Math.round(360 / o.frames)}° apart. Change the depth effect with Transform → Object pose → Perspective.`;
+      d.$('spin-duration').disabled = d.$('spin-keep').checked;
+      d.$('spin-info').textContent = `Adds ${plural(o.frames - 1, 'frame')} after this one, ${Math.round(360 / o.frames)}° apart; one turn takes ${((o.duration ?? frame.duration) * o.frames / 1000).toFixed(2)} s. Change the depth effect with Transform → Object pose → Perspective.`;
     },
     run() {
       const { state } = d, result = spin3d(state.project, options());

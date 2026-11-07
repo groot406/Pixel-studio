@@ -355,7 +355,7 @@ export function waveAnimate(project, { animationId, layerId, instanceId, speed =
   const base = list[0].op.deform?.kind === 'wave' ? list[0].op.deform : { kind: 'wave', axis: 'x', amplitude: 2, wavelength: 8, phase: 0, ...wave };
   list.forEach(({ frame, op }, k) => {
     const d = op.deform?.kind === 'wave' ? op.deform : base;
-    writeOp(frame, layerId, { ...unlockedOp(op), deform: { ...d, phase: (((base.phase + k * speed) % 360) + 360) % 360 } });
+    writeCarried(p, frame, layerId, { ...unlockedOp(op), deform: { ...d, phase: (((base.phase + k * speed) % 360) + 360) % 360 } });
   });
   const gcd = (a, b) => (b ? gcd(b, a % b) : a), loopFrames = speed % 360 ? 360 / gcd(360, Math.abs(speed) % 360) : 1;
   return { project: validateProject(p), frameIds: list.map(a => a.frame.id), seamless: (list.length * speed) % 360 === 0, loopFrames };
@@ -365,10 +365,13 @@ export function waveAnimate(project, { animationId, layerId, instanceId, speed =
  * A looping 3D spin from a single frame: the from-frame is the first of `frames` (2..64) and `frames − 1` copies follow
  * it. Frame k turns the object by turns·360·k/frames about `axis` ('y': turn like a coin or door, 'x': tip head over
  * heels), added to its 3D turn in the from-frame, so the frame after the last would be the first again: a seamless loop.
- * `turns` is a whole number of spins (negative spins the other way). Returns { project, frameIds (the loop), inserted }.
+ * `turns` is a whole number of spins (negative spins the other way). `duration` (ms) times every frame of the loop,
+ * the from-frame included, so it turns evenly; omitted, the copies keep the from-frame's duration.
+ * Returns { project, frameIds (the loop), inserted }.
  */
-export function spin3d(project, { animationId, layerId, instanceId, fromFrameId, frames = 8, axis = 'y', turns = 1 }) {
+export function spin3d(project, { animationId, layerId, instanceId, fromFrameId, frames = 8, axis = 'y', turns = 1, duration }) {
   if (!Number.isInteger(frames) || frames < 2 || frames > 64) throw new Error('A 3D spin takes 2 to 64 frames.');
+  if (duration !== undefined && (!Number.isInteger(duration) || duration < 1 || duration > 60000)) throw new Error('A frame needs a duration from 1 to 60,000 milliseconds.');
   if (!['x', 'y'].includes(axis)) throw new Error('Spin about the x or y axis.');
   if (!Number.isInteger(turns) || !turns || Math.abs(turns) > 8) throw new Error('Spin 1 to 8 whole turns.');
   const p = validateProject(project), animation = animationOf(p, animationId);
@@ -378,6 +381,7 @@ export function spin3d(project, { animationId, layerId, instanceId, fromFrameId,
   unlockedOp(base);
   const part = partOf(p, base), start = poseOf(base, part), field = axis === 'x' ? 'tiltX' : 'tiltY';
   const list = [animation.frames[i], ...insertCopies(p, animation, i, animation.frames[i], frames - 1)];
+  if (duration) for (const frame of list) frame.duration = duration;
   list.forEach((frame, k) => { if (k) writeCarried(p, frame, layerId, applyPose(opIn(frame, layerId, instanceId), { [field]: start[field] + turns * 360 * k / frames }, part)); });
   return { project: validateProject(p), frameIds: list.map(f => f.id), inserted: list.slice(1).map(f => f.id) };
 }

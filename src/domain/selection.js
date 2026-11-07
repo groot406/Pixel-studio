@@ -1,7 +1,9 @@
 /** Pure, indexed-pixel selection and outline operations. Transparency is -1. */
+import { MAX_SIZE } from './limits.js';
+
 function dimensions(width, height) {
-  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width > 128 || height > 128) {
-    throw new Error('Canvas width and height must be whole numbers from 1 to 128.');
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width > MAX_SIZE || height > MAX_SIZE) {
+    throw new Error(`Canvas width and height must be whole numbers from 1 to ${MAX_SIZE}.`);
   }
   return width * height;
 }

@@ -66,7 +66,7 @@ export function paintThumbs(bar) {
     let image = thumbs.get(key);
     if (!image) {
       try {
-        const base = animation.frames[0], out = applyPose(p, { pose, animationId: animation.id, frameId: base.id });
+        const base = animation.frames[0], out = applyPose(p, { pose, animationId: animation.id, frameId: base.id, rootBoneId: who });
         image = characterImage(out.project, out.project.animations.find(x => x.id === animation.id).frames[0], who);
       } catch { image = { pixels: [], width: 1, height: 1 }; }
       if (thumbs.size > 200) thumbs.clear();
@@ -82,7 +82,7 @@ export function libraryAction(name, el) {
     let id;
     a.commit(p => { const out = savePose(p, { ...opts, rootBoneId: a.character(), name: '' }); id = out.poseId; return out.project; }, 'Pose saved to the library: rename it on its card.');
     if (id) document.querySelector(`#rig-bar input[data-pose="${id}"]`)?.select();
-  } else if (name === 'pose-apply' || name === 'pose-mirror') a.commit(p => applyPose(p, { ...opts, poseId: pose, mirror: name === 'pose-mirror', amount: a.r().blend / 100, move: a.r().poseMove }).project);
+  } else if (name === 'pose-apply' || name === 'pose-mirror') a.commit(p => applyPose(p, { ...opts, poseId: pose, mirror: name === 'pose-mirror', amount: a.r().blend / 100, move: a.r().poseMove, rootBoneId: a.character() }).project);
   else if (name === 'pose-delete') a.commit(p => deletePose(p, pose), 'Pose deleted.');
   else if (name === 'templates') templatesDialog();
   else if (name === 'retarget') retargetDialog();

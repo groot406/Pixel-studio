@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { validateProject } from '../src/domain/project.js';
+import { validateProject, blankProject } from '../src/domain/project.js';
 import { decodeAIProject, encodeAIProject } from '../src/formats/pxa.js';
 import { decodePixelProject, encodePixelProject } from '../src/formats/pxs.js';
 import { createSheetMetadata, validateSheetMetadata } from '../src/formats/spritesheet.js';
@@ -33,6 +33,19 @@ test('format round trips retain hidden layers, transparent frames, duplicate col
   const bytes = await encodePixelProject(source);
   bytes[16] ^= 1;
   await assert.rejects(decodePixelProject(bytes), /checksum|trailer/);
+});
+
+test('256×256 canvases round trip through PXS and PXA 2; 257 is rejected', async () => {
+  const source = blankProject('Big', 256, 256);
+  const cel = source.animations[0].frames[0].cels[0].pixels;
+  for (let i = 0; i < cel.length; i += 7) cel[i] = i % 3 === 0 ? 0 : -1;
+  cel[cel.length - 1] = 0;
+  const pxs = await decodePixelProject(await encodePixelProject(source));
+  assert.equal(pxs.width, 256); assert.equal(pxs.height, 256);
+  assert.deepEqual(artwork(pxs), artwork(source));
+  assert.deepEqual(artwork(decodeAIProject(encodeAIProject(source, { version: 2 }))), artwork(source));
+  assert.throws(() => validateProject({ ...source, width: 257, animations: [] }), /size|width|dimension/i);
+  assert.throws(() => blankProject('Too big', 257, 1));
 });
 
 test('existing scoped AI edits preserve locks, timing, other frames, and IDs', () => {

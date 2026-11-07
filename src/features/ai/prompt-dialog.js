@@ -51,8 +51,8 @@ export function openPromptBuilder({ project, documentId, openDialog, openImport,
           <label class="field prompt-description-field"><span class="field-label">What would you like to create?</span><textarea id="prompt-description" rows="3" maxlength="6000" required placeholder="A tiny pirate with a red coat and a curved sword, viewed from above…"></textarea></label>
         </div>
         <div class="prompt-spec-grid">
-          <label class="field"><span class="field-label">Width · pixels</span><input id="prompt-width" type="number" min="1" max="128" step="1" required inputmode="numeric"></label>
-          <label class="field"><span class="field-label">Height · pixels</span><input id="prompt-height" type="number" min="1" max="128" step="1" required inputmode="numeric"></label>
+          <label class="field"><span class="field-label">Width · pixels</span><input id="prompt-width" type="number" min="1" max="256" step="1" required inputmode="numeric"></label>
+          <label class="field"><span class="field-label">Height · pixels</span><input id="prompt-height" type="number" min="1" max="256" step="1" required inputmode="numeric"></label>
           <label class="field prompt-palette-field"><span class="field-label">Palette</span><select id="prompt-palette-mode"><option value="auto">AI chooses colors</option><option value="current">Use current palette</option></select></label>
           <label class="field prompt-color-limit" id="prompt-color-limit-field"><span class="field-label">Max. colors</span><input id="prompt-max-colors" type="number" min="1" max="64" step="1" required inputmode="numeric"></label>
         </div>

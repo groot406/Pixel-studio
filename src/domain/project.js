@@ -3,6 +3,8 @@ import { artworkId, artworkBudget, validateParts, validateSource, renderParts, r
 import { SIZE, MAX_SIZE, MAX_TOTAL_PIXELS, MAX_COLORS, MAX_LAYERS, pixelCount } from './limits.js';
 export { SIZE, MAX_SIZE, MAX_TOTAL_PIXELS, MAX_COLORS, MAX_LAYERS } from './limits.js';
 export { linePoints, rectanglePoints, ellipsePoints } from './geometry.js';
+/** Optional frame markers for key poses, breakdowns and in-betweens (frame.kind). */
+export const FRAME_KINDS = Object.freeze(['key', 'breakdown', 'inbetween']);
 export const DEFAULT_PALETTE = Object.freeze([
   '#232a36', '#465060', '#87929f', '#d4dae0',
   '#fff7e8', '#e8c99c', '#ce956b', '#875546',
@@ -190,7 +192,7 @@ export function validateProject(input) {
           });
         }
         const frameOrder=readLayerOrder(frame.layerOrder,label);
-        return { id: readId(frame.id), duration, cels, ...(frameOrder?{layerOrder:frameOrder}:{}) };
+        return { id: readId(frame.id), duration, cels, ...(frameOrder?{layerOrder:frameOrder}:{}), ...(FRAME_KINDS.includes(frame.kind)?{kind:frame.kind}:{}) };
       }),
     };
   });
@@ -279,7 +281,7 @@ function readPoses(value, bones) {
     for (const [id, angle] of Object.entries(pose.bones)) if (known.has(id)) out.bones[id] = int(angle, 360, `${label} angle`);
     if (pose.moves !== undefined) {
       if (!object(pose.moves)) throw new Error(`${label} moves need x and y.`);
-      for (const [id, m] of Object.entries(pose.moves)) if (roots.has(id) && object(m)) (out.moves ||= {})[id] = { x: int(m.x, 256, `${label} move`), y: int(m.y, 256, `${label} move`) };
+      for (const [id, m] of Object.entries(pose.moves)) if (roots.has(id) && object(m)) (out.moves ||= {})[id] = { x: int(m.x, 2 * MAX_SIZE, `${label} move`), y: int(m.y, 2 * MAX_SIZE, `${label} move`) };
     }
     return out;
   }).filter(pose => Object.keys(pose.bones).length);

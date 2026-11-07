@@ -2,7 +2,7 @@
  * Device-local project storage. Closing a tab never deletes its saved document. Each save also keeps the previous
  * record as a last good copy, project versions are stored as packed text (domain/versions.js), and journals hold crash-recovery copies.
  */
-import { getAnimationLayers, validateProject } from '../domain/project.js';
+import { getAnimationLayers, validateProject, MAX_SIZE } from '../domain/project.js';
 import { celObjects } from '../domain/objects.js';
 
 const DATABASE_NAME = 'pixel-studio-workspace';
@@ -45,8 +45,8 @@ function documentMetadata(document) {
 function metadataList(records) {
   return records.filter(record => object(record) && identifier(record.id)
     && typeof record.name === 'string' && record.name.trim() && record.name.length <= 120
-    && Number.isInteger(record.width) && record.width >= 1 && record.width <= 128
-    && Number.isInteger(record.height) && record.height >= 1 && record.height <= 128
+    && Number.isInteger(record.width) && record.width >= 1 && record.width <= MAX_SIZE
+    && Number.isInteger(record.height) && record.height >= 1 && record.height <= MAX_SIZE
     && Number.isInteger(record.frameCount) && record.frameCount >= 1 && record.frameCount <= 1024
     && Number.isInteger(record.animationCount) && record.animationCount >= 1 && record.animationCount <= 100
     && Number.isFinite(record.updatedAt) && record.updatedAt >= 0)

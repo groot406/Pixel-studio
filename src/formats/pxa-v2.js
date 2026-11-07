@@ -1,8 +1,10 @@
 /** PXA 2 codec. Domain operations are independent of this text grammar. */
-import { validateProject, MAX_TOTAL_PIXELS } from '../domain/project.js';
+import { validateProject, MAX_TOTAL_PIXELS, MAX_SIZE } from '../domain/project.js';
 import { artworkId, cloneArtwork, pixelSpans, translatePixels, MAX_OPERATIONS, MAX_PARTS, MAX_RENDER_WORK } from '../domain/artwork.js';
 import { instancePivot } from '../domain/geometry.js';
 import { boxToPart, worldToBox } from '../domain/skeleton.js';
+
+const FRAME_KIND_TOKENS = { KEY: 'key', BREAKDOWN: 'breakdown', INBETWEEN: 'inbetween' };
 
 export const PXA2_ALPHABET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz@$';
 export const PXA2_MAX_BYTES = 4 * 1024 * 1024;
@@ -16,9 +18,9 @@ SPAN symbols: ${PXA2_ALPHABET}; dot erases. A{6} repeats six times. No spaces; p
 Within a cel use drawing commands or USE instance-id part-id x y [transform] to place a part (an object).
 Object transforms (combine freely; they never change the part itself, so edits to the part still reach every copy):
 - Flip/quarter turn: transform N (default) FX FY R90 R180 R270 R90FX R270FX. FX mirrors left-right, FY top-bottom, R90/R180/R270 turn clockwise, R90FX = turn 90° clockwise then mirror. Lossless; applied inside the part bounds, then the transformed top-left sits at x y.
-- Resize, squash and stretch: RESIZE instance-id width height (1–128 each) draws the part at that size by nearest-neighbour sampling, measured before the flip/turn. Unequal scaling squashes or stretches (a 16×16 part at RESIZE id 20 12 is squashed). RESIZE to the part's own size resets it.
+- Resize, squash and stretch: RESIZE instance-id width height (1–256 each) draws the part at that size by nearest-neighbour sampling, measured before the flip/turn. Unequal scaling squashes or stretches (a 16×16 part at RESIZE id 20 12 is squashed). RESIZE to the part's own size resets it.
 - Free rotation: ROTATE instance-id degrees (whole degrees, -360..360, stored as -179..180; positive = clockwise; 0 resets) turns the resized, flipped result about its pivot (default: the box centre) by nearest-neighbour sampling. Use TURN for exact 90°/180°/270° turns.
-- Pivot: PIVOT instance-id x y (integers -128..256) sets the point that ROTATE, SKEW and TILT turn about: the centre of pixel x y of the flipped/turned, unrotated box, measured from its top-left (the USE x y). PIVOT instance-id CENTER resets to the exact box centre. Example: PIVOT arm 0 3 swings an 8×6 arm about its left edge.
+- Pivot: PIVOT instance-id x y (integers -256..512) sets the point that ROTATE, SKEW and TILT turn about: the centre of pixel x y of the flipped/turned, unrotated box, measured from its top-left (the USE x y). PIVOT instance-id CENTER resets to the exact box centre. Example: PIVOT arm 0 3 swings an 8×6 arm about its left edge.
 - Skew (shear): SKEW instance-id sx sy (whole degrees, -60..60 each; SKEW id 0 0 resets) slants about the pivot: first x moves by tan(sx)·(y − pivot y), then y moves by tan(sy)·(x − pivot x). SKEW id -15 0 leans the top to the right (positive leans it left); good for running lean, wind and fake perspective.
 - 3D turn (pseudo-3D rotation about the other axes): TILT instance-id x y [PERSPECTIVE p] (whole degrees, -180..180 each; TILT id 0 0 resets). y turns the object about a vertical axis through the pivot like a door, coin or a character turning round: its width shrinks by cos(y), at 90 it is edge-on (invisible) and past 90 the back shows (the artwork mirrored); positive y moves the right side away. x tips it about a horizontal axis (head over heels, a card flipping vertically): height shrinks by cos(x), positive x moves the top away. PERSPECTIVE p (0..100, default 30) makes the far edge shorter and the near edge taller; 0 is flat. TILT id 0 180 is a horizontal mirror and TILT id 180 0 a vertical one. A coin spin: TILT coin 0 45, then 0 90, 0 135, ... in successive frames.
 - Deform: DEFORM instance-id NONE | WAVE X|Y amplitude wavelength phase | BULGE strength | TWIST degrees, in box space about the box centre. WAVE X shifts each row y sideways by round(amplitude·sin(360°·y/wavelength + phase)); WAVE Y shifts each column vertically the same way (amplitude 1..32, wavelength 2..256, phase 0..359 degrees; the box grows by the amplitude). BULGE strength (-100..100; positive bulges/magnifies the centre, negative pinches) and TWIST degrees (-360..360; full turn at the centre fading to none at the edge) act inside the ellipse that fits the box. NONE, BULGE 0 and TWIST 0 reset. Animate a flag or water by stepping the WAVE phase each frame: FRAME wave_1 100 FROM wave_0, CEL fx, DEFORM flag WAVE X 2 8 45, then phase 90, 135, ...
@@ -26,7 +28,7 @@ Object transforms (combine freely; they never change the part itself, so edits t
 - Order: resize, then flip/quarter turn, then deform, then skew, then 3D turn (TILT), then free rotation about the pivot. x y is the top-left of the unrotated box; with no PIVOT, rotation keeps that box's centre.
 To place a transformed object, write its USE line, then RESIZE/ROTATE/PIVOT/SKEW/TILT/DEFORM/SAMPLE lines for the same instance-id in that cel.
 Changing an existing object in a later cel (for example after FRAME FROM): AT instance-id x y sets its absolute position. TURN instance-id transform changes its flip/quarter turn. RESIZE, ROTATE, PIVOT, SKEW, TILT, DEFORM and SAMPLE as above. SWAP instance-id part-id changes its part (keeping position and transforms). DROP instance-id removes it. These keep draw order and do not paint trails.
-Placement may be off canvas within -128..128 and is clipped; transparent part pixels leave underlying artwork visible. Animate objects by changing AT, TURN, RESIZE (squash and stretch: keep width×height roughly constant), ROTATE about a PIVOT (joints such as shoulders and hips), SKEW, TILT (spins and turns) and DEFORM (for example the WAVE phase) across frames, keeping the same instance-id.
+Placement may be off canvas within -256..256 and is clipped; transparent part pixels leave underlying artwork visible. Animate objects by changing AT, TURN, RESIZE (squash and stretch: keep width×height roughly constant), ROTATE about a PIVOT (joints such as shoulders and hips), SKEW, TILT (spins and turns) and DEFORM (for example the WAVE phase) across frames, keeping the same instance-id.
 OVERRIDE x y pixels writes final local pixels after all cel operations. Dot explicitly erases the cel pixel; omitted coordinates remain unchanged. Overrides stay in canvas coordinates when instances move.`;
 
 export const PXA2_GUIDE = `PXA 2: uppercase commands, one per line; blank lines and full-line # comments allowed. No Markdown. Finish with END.
@@ -37,13 +39,13 @@ INSTANCE instance-id "name" visible locked optionally sets an existing USE objec
 IDs: 1–100 letters/digits/_/-. Layer, animation and frame IDs must be globally unique. Part IDs are unique in the part library; instance IDs are unique within each cel. Names use JSON quoted strings.
 PART id width height starts a reusable part. End it with ENDPART. PART new-id FROM existing-part copies a definition for a local variant; it is not a live link. Parts contain drawing commands only.
 ${PXA2_COMMAND_GUIDE}
-ANIM id "name" fps starts an animation. FRAME id duration-ms CLEAR starts blank; FRAME id duration-ms FROM earlier-frame-id copies that frame across all layers (even across animations). Copies are independent snapshots, but keep shared part references.
+ANIM id "name" fps starts an animation. FRAME id duration-ms CLEAR starts blank; FRAME id duration-ms FROM earlier-frame-id copies that frame across all layers (even across animations). Copies are independent snapshots, but keep shared part references. An optional last token KEY, BREAKDOWN or INBETWEEN marks the frame's role in the animation (key pose, breakdown, in-between); it does not change the artwork, e.g. FRAME f3 250 FROM f2 KEY.
 ORDER layer-id layer-id ... optionally appears once immediately after ANIM, before its first FRAME. Include every declared layer ID exactly once, bottom to top. This overrides declaration order only for that animation; omitted ORDER uses declaration order. FRAME FROM copies cels, not the source animation's order. Older readers without ORDER support cannot read files containing it.
 FRAMEORDER layer-id layer-id ... optionally appears once after FRAME, before CEL. It overrides that frame's bottom-to-top stack with every layer exactly once. Omission uses animation order. FRAME FROM does not inherit frame order.
 BONE id layer-id instance-id PARENT parent-bone-id|- [JOINT x y] [LIMIT min max] [REST degrees] [NAME "name"] rigs a skeleton (after the animations, before END). A bone is one object (instance-id in layer-id, the same object in every frame); its joint is that object's PIVOT, pinned to point JOINT x y of the parent's part (part pixels, decimals allowed, 0.5 = a pixel centre). Omit JOINT to use where the child's pivot sits on the parent in the first frame showing both. A root bone uses PARENT - and no JOINT. LIMIT bounds the angle relative to the parent (a root: its own ROTATE), REST is the relative angle of the rest pose. Posing a rig = ROTATE each part per frame (children keep their joints on the parent); place each child so its PIVOT lies on the parent's joint. Example: BONE torso fig body PARENT -, BONE arm fig arm PARENT torso JOINT 2.5 1.5 LIMIT -120 120.
 POSE id "name" bone-id=degrees ... [MOVE root-bone-id dx dy] saves a named pose in the pose library (after the BONE lines): each bone's angle relative to its parent (a root: its own ROTATE), whole degrees; MOVE offsets a root's pivot from where it stands in its animation's first frame. Poses are not frames: the editor applies them to frames (Skeleton mode → Poses). Example: POSE crouch "Crouch" body=0 leg-l=40 shin-l=-80 leg-r=-40 shin-r=80 MOVE body 0 3.
 CEL layer-id selects a frame's layer. CEL layer-id CLEAR resets that cel. CEL layer-id RASTER selects raw pixels (an empty or already raster cel); SPAN and SHIFT dx dy are allowed until another CEL. SHIFT translates only the selected raster cel, clips edges and clears exposed pixels. RASTER retains compact pixel deltas without creating shared parts.
-Limits: canvas/parts 1–128 per dimension; 1–64 colors; 1–32 layers; at most 256 parts; 1–100 animations, 1–256 frames each, 1024 total; 1,048,576 canvas pixel slots across all cels; same budget for part pixels; 32,768 expanded operations and 8,388,608 rendering work units. FPS 1–60; duration 1–60000 ms. Names: project 120, layer/animation 80 characters. Text 4 MiB; line 4096 characters. END is required. Preserve hidden artwork and deliberate blank frames.`;
+Limits: canvas/parts 1–256 per dimension; 1–64 colors; 1–32 layers; at most 256 parts; 1–100 animations, 1–256 frames each, 1024 total; 4,194,304 canvas pixel slots across all cels (64 cels of 256×256); same budget for part pixels; 32,768 expanded operations and 33,554,432 rendering work units. FPS 1–60; duration 1–60000 ms. Names: project 120, layer/animation 80 characters. Text 4 MiB; line 4096 characters. END is required. Preserve hidden artwork and deliberate blank frames.`;
 
 export function pxa2Lines(text, header = 'PXA 2') {
   if (typeof text !== 'string' || text.length > PXA2_MAX_BYTES || new TextEncoder().encode(text).length > PXA2_MAX_BYTES) throw new Error('PXA text exceeds 4 MiB.');
@@ -73,7 +75,7 @@ function quoted(value) {
   if (typeof name !== 'string') throw new Error('Invalid name.');
   return name;
 }
-export function decodeRun(value, max = 128) {
+export function decodeRun(value, max = MAX_SIZE) {
   const out = [];
   if (typeof value !== 'string' || !value) throw new Error('SPAN needs pixels.');
   const regex = /([0-9A-Za-z@$.])(?:\{([1-9][0-9]*)\})?/gy;
@@ -206,7 +208,7 @@ export function decodePXA2(text) {
       const cmd = t[0];
       if (stage < 3) {
         if (cmd !== ['SIZE', 'NAME', 'PAL'][stage]) throw new Error('Expected SIZE, NAME, PAL in order.');
-        if (cmd === 'SIZE') { argumentsCount(t, 2); project.width = numberToken(t[1]); project.height = numberToken(t[2]); if (![project.width, project.height].every(n => n >= 1 && n <= 128)) throw new Error('Invalid canvas size.'); }
+        if (cmd === 'SIZE') { argumentsCount(t, 2); project.width = numberToken(t[1]); project.height = numberToken(t[2]); if (![project.width, project.height].every(n => n >= 1 && n <= MAX_SIZE)) throw new Error('Invalid canvas size.'); }
         if (cmd === 'NAME') { argumentsCount(t, 1); project.name = quoted(t[1]); }
         if (cmd === 'PAL') { project.palette = t.slice(1); if (!project.palette.length || project.palette.length > 64) throw new Error('Invalid palette length.'); }
         stage++; continue;
@@ -253,6 +255,8 @@ export function decodePXA2(text) {
         animation.layerOrder = order;
       } else if (cmd === 'FRAME') {
         if (!animation) throw new Error('FRAME requires ANIM.');
+        const kind = t.length === (t[3] === 'FROM' ? 6 : 5) ? FRAME_KIND_TOKENS[t[t.length - 1]] : undefined;
+        if (kind) t.pop();
         if (t[3] === 'CLEAR') argumentsCount(t, 3);
         else if (t[3] === 'FROM') argumentsCount(t, 4);
         else throw new Error('FRAME needs CLEAR or FROM frame-id.');
@@ -262,7 +266,7 @@ export function decodePXA2(text) {
         if (frames.has(t[1])) throw new Error(`Duplicate frame ${t[1]}.`);
         if (previous) expandedOps += previous.cels.reduce((n, c) => n + (c.source ? c.source.ops.length + c.source.overrides.length : 0), 0);
         if (expandedOps > MAX_OPERATIONS) throw new Error('Expanded operation budget exceeded.');
-        frame = { id: artworkId(t[1]), duration: numberToken(t[2]), cels: previous ? cloneArtwork(previous.cels) : project.layers.map(l => ({ layerId: l.id, source: { ops: [], overrides: [] } })) };
+        frame = { id: artworkId(t[1]), duration: numberToken(t[2]), cels: previous ? cloneArtwork(previous.cels) : project.layers.map(l => ({ layerId: l.id, source: { ops: [], overrides: [] } })), ...(kind ? { kind } : {}) };
         animation.frames.push(frame); frames.set(frame.id, frame); source = raster = null;
       } else if (cmd === 'FRAMEORDER') {
         if(!frame || frame.layerOrder || source || raster)throw new Error('FRAMEORDER is allowed once after FRAME, before CEL.');
@@ -432,10 +436,11 @@ export function encodePXA2(input) {
         const partial = changes ? [`CEL ${id}`, ...changes] : null;
         return partial && partial.join('\n').length < full.join('\n').length ? partial : full;
       });
-      const clear = [`FRAME ${f.id} ${f.duration} CLEAR`, ...bodyFor(null)];
+      const mark = f.kind ? ` ${f.kind.toUpperCase()}` : '';
+      const clear = [`FRAME ${f.id} ${f.duration} CLEAR${mark}`, ...bodyFor(null)];
       let selected = clear;
       if (previous) {
-        const delta = [`FRAME ${f.id} ${f.duration} FROM ${previous.id}`, ...bodyFor(previous.cels)];
+        const delta = [`FRAME ${f.id} ${f.duration} FROM ${previous.id}${mark}`, ...bodyFor(previous.cels)];
         if (delta.join('\n').length < clear.join('\n').length) selected = delta;
       }
       if(f.layerOrder)selected.splice(1,0,`FRAMEORDER ${f.layerOrder.join(' ')}`);

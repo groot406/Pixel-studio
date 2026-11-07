@@ -1,11 +1,12 @@
 /**
- * Animate panel: launchers for the canvas motion modes (motion-modes.js: move, bounce, follow-through, IK limb, smear)
- * and the Wave motion dialog, which previews its result live and applies as one undo step.
+ * Animate panel: launchers for Skeleton mode (rig-mode.js), the canvas motion modes (motion-modes.js: move, bounce,
+ * follow-through, IK limb, smear) and the Wave motion dialog, which previews its result live and applies as one undo step.
  */
 import { waveAnimate } from '../domain/animate.js';
 import { compositeFrame } from '../domain/project.js';
 import { celObjects } from '../domain/objects.js';
 import { openMode, closeMotionMode, activeMotionMode } from './motion-modes.js';
+import { toggleRigMode, closeRigMode, rigModeOpen } from './rig-mode.js';
 
 let d;
 const MODES = { tween: 'move', squash: 'bounce', follow: 'follow', ik: 'ik', smear: 'smear' };
@@ -13,8 +14,9 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 export function initAnimatePanel(deps) {
   d = deps;
-  for (const [row, mode] of Object.entries(MODES)) d.$(`animate-${row}`).onclick = () => (activeMotionMode() === mode ? closeMotionMode() : openMode(mode));
-  d.$('animate-wave').onclick = () => { closeMotionMode(); waveDialog(); };
+  for (const [row, mode] of Object.entries(MODES)) d.$(`animate-${row}`).onclick = () => { closeRigMode({ render: false }); if (activeMotionMode() === mode) closeMotionMode(); else openMode(mode); };
+  d.$('animate-wave').onclick = () => { closeRigMode({ render: false }); closeMotionMode(); waveDialog(); };
+  d.$('animate-skeleton').onclick = () => toggleRigMode();
 }
 
 /** The selected placed object in the current frame, and whether the frame has any. */
@@ -33,10 +35,11 @@ export function renderAnimatePanel() {
   const { $, state } = d, { objects, primary } = context(), active = activeMotionMode();
   $('animate-hint').textContent = state.inPlaceEdit ? 'Finish editing the object on the canvas to animate it.'
     : !objects.length ? 'Place a part on the canvas (drag one from Parts) to animate it.'
+    : rigModeOpen() ? 'Skeleton mode: work on the canvas; Done or Enter returns here.'
     : primary ? `Animate “${primary.name}”: pick a motion, then work on the canvas.` : 'Pick a motion, then click the object on the canvas.';
-  for (const row of [...Object.keys(MODES), 'wave']) {
-    const button = $(`animate-${row}`), on = MODES[row] && active === MODES[row];
-    button.disabled = Boolean(state.inPlaceEdit) || !objects.length || (row === 'wave' && !primary);
+  for (const row of ['skeleton', ...Object.keys(MODES), 'wave']) {
+    const button = $(`animate-${row}`), on = row === 'skeleton' ? rigModeOpen() : MODES[row] && active === MODES[row];
+    button.disabled = Boolean(state.inPlaceEdit) || (!objects.length && !(row === 'skeleton' && state.project.bones?.length)) || (row === 'wave' && !primary);
     button.classList.toggle('active', Boolean(on));
     button.setAttribute('aria-pressed', String(Boolean(on)));
     button.title = row === 'wave' && !primary && objects.length ? 'Select an object first' : '';

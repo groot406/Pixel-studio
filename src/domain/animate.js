@@ -11,6 +11,7 @@ import {
   springFollow as springSeries, loopSpring, overlapDelay, solveTwoBone, normalizeAngle, roundInt, rotatePoint,
 } from './motion.js';
 import { smear } from './pixel-fx.js';
+import { boneOf, relPose, layoutFrame } from './skeleton.js';
 
 const MAX_FRAMES_PER_ANIMATION = 256, MAX_TOTAL_FRAMES = 1024, DEG = 180 / Math.PI;
 
@@ -43,6 +44,12 @@ function appearances(p, animation, layerId, instanceId, frameIds) {
 function writeOp(frame, layerId, next) {
   const ops = celOf(frame, layerId).source.ops, i = ops.findIndex(op => op.type === 'use' && op.id === next.id);
   ops[i] = next;
+}
+/** writeOp for a possibly rigged object of project `p`: the parts rigged below it keep their angles and follow it. */
+function writeCarried(p, frame, layerId, next) {
+  const bone = boneOf(p, layerId, next.id), rels = bone && relPose(p, frame);
+  writeOp(frame, layerId, next);
+  if (rels) { rels.delete(bone.id); layoutFrame(p, frame, rels); }
 }
 const offsetOf = (op, part) => { const c = instancePivot(op, part); return { x: c.x - op.x, y: c.y - op.y }; };
 
@@ -118,7 +125,7 @@ export function tweenObject(project, { animationId, layerId, instanceId, fromFra
       const goal = along(e), off = offsetOf(next, opPart);
       next = { ...next, x: roundInt(goal.x - off.x), y: roundInt(goal.y - off.y) };
     }
-    writeOp(frame, layerId, next);
+    writeCarried(p, frame, layerId, next);
     frameIds.push(frame.id);
   }
   let out = validateProject(p);
@@ -140,7 +147,7 @@ export function tweenToPose(project, { animationId, layerId, instanceId, fromFra
   if (!from) throw new Error('The object must appear in the first frame of the move.');
   unlockedOp(from);
   const inserted = insertCopies(p, animation, i, animation.frames[i], frames), end = inserted.at(-1);
-  writeOp(end, layerId, applyPose(from, endPose, partOf(p, from)));
+  writeCarried(p, end, layerId, applyPose(from, endPose, partOf(p, from)));
   const ids = inserted.map(f => f.id);
   if (frames === 1) return { project: validateProject(p), frameIds: [], inserted: ids, endFrameId: end.id };
   const result = tweenObject(p, { ...tween, animationId, layerId, instanceId, fromFrameId, toFrameId: end.id });
@@ -168,7 +175,7 @@ export function bounceInPlace(project, { animationId, layerId, instanceId, fromF
   const report = list.map((frame, k) => {
     const size = k ? squashStretch({ x: 0, y: (lift(k + 1) - lift(k - 1)) / 2 }, box, { strength: amount, max: amount * .8 }) : impactSquash(box, amount * .8);
     const rise = roundInt(lift(k)), x = roundInt(centre - size.width / 2), y = ground - rise - size.height;
-    writeOp(frame, layerId, applyPose(opIn(frame, layerId, instanceId), { x, y, width: swap ? size.height : size.width, height: swap ? size.width : size.height }, part));
+    writeCarried(p, frame, layerId, applyPose(opIn(frame, layerId, instanceId), { x, y, width: swap ? size.height : size.width, height: swap ? size.width : size.height }, part));
     return { width: size.width, height: size.height, lift: rise };
   });
   return { project: validateProject(p), frameIds: list.map(f => f.id), inserted: list.slice(1).map(f => f.id), frames: report };

@@ -1,0 +1,33 @@
+/* Skeleton mode (rig-mode.js): reuses the motion bar; adds the bone tree, step tabs and in-between row. */
+.rig-steps li { padding: 0; }
+.rig-steps li::before { margin-left: 3px; }
+.rig-steps button { padding: 2px 8px 2px 4px; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+.rig-steps li:not(.now):hover { background: #e8efe2; }
+.rig-row { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.rig-list { width: 100%; }
+.rig-empty { margin: 0; color: #8a9680; }
+.rig-bones { display: grid; gap: 2px; max-height: 180px; margin: 0; padding: 0; overflow: auto; list-style: none; }
+.motion-bar:not(.docked) .rig-bones { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); max-height: 92px; }
+.rig-bone { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 2px 4px 2px calc(4px + var(--depth, 0) * 10px); border-radius: 7px; }
+.rig-bone.active { background: #e3efe0; }
+.rig-dot { flex: none; width: 8px; height: 8px; border: 2px solid #ff2d87; border-radius: 50%; background: #fff; }
+.rig-dot.root { background: #ff2d87; box-shadow: 0 0 0 2px #fff, 0 0 0 3px #ff2d87; }
+.rig-name { flex: 1 1 60px; min-width: 0; height: 22px; padding: 0 5px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--ink); font: inherit; font-size: 11px; }
+.rig-name:hover { border-color: #dce4d5; }
+.rig-name:focus { border-color: var(--green); outline: none; background: #fff; }
+.rig-root { color: #a0aa96; font-size: 10px; }
+.rig-mini { display: inline-grid; place-items: center; min-width: 22px; height: 20px; padding: 0 4px; border: 1px solid #dce4d5; border-radius: 5px; background: #fff; color: #65735e; font: inherit; font-size: 10px; cursor: pointer; }
+.rig-mini:hover { background: #f3f6ee; }
+.rig-mini.on { border-color: var(--green); color: var(--green); font-weight: 600; }
+.rig-mini svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; }
+.rig-limit { display: flex; flex: 1 0 100%; align-items: center; gap: 6px; padding: 4px 0 2px 12px; }
+.rig-limit input { width: 52px; height: 22px; padding: 0 4px; border: 1px solid #dce4d5; border-radius: 5px; font: inherit; font-size: 11px; }
+.rig-tween { display: flex; flex: 1 0 100%; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 8px; border-radius: 9px; background: #f4f8f0; }
+.rig-tween select { height: 24px; border: 1px solid #dce4d5; border-radius: 6px; background: #fff; font: inherit; font-size: 11px; }
+.motion-bar.docked .rig-row .button.small { flex: 1 1 auto; justify-content: center; }
+.motion-bar.docked .rig-steps { flex-direction: row; }
+.motion-bar.docked .motion-controls > .rig-row { width: 100%; align-items: center; }
+.motion-bar.docked .rig-pose .button.small { flex: 1 1 calc(33% - 6px); padding-inline: 6px; }
+.rig-tween .motion-chips { flex-wrap: wrap; }
+.motion-bar.docked .rig-tween { flex-direction: column; align-items: stretch; }
+.motion-bar .button.small.active { border-color: var(--green); background: #e3efe0; }

@@ -1,6 +1,8 @@
 /** PXA 2 codec. Domain operations are independent of this text grammar. */
 import { validateProject, MAX_TOTAL_PIXELS } from '../domain/project.js';
 import { artworkId, cloneArtwork, pixelSpans, translatePixels, MAX_OPERATIONS, MAX_PARTS, MAX_RENDER_WORK } from '../domain/artwork.js';
+import { instancePivot } from '../domain/geometry.js';
+import { boxToPart, worldToBox } from '../domain/skeleton.js';
 
 export const PXA2_ALPHABET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz@$';
 export const PXA2_MAX_BYTES = 4 * 1024 * 1024;
@@ -37,6 +39,7 @@ ${PXA2_COMMAND_GUIDE}
 ANIM id "name" fps starts an animation. FRAME id duration-ms CLEAR starts blank; FRAME id duration-ms FROM earlier-frame-id copies that frame across all layers (even across animations). Copies are independent snapshots, but keep shared part references.
 ORDER layer-id layer-id ... optionally appears once immediately after ANIM, before its first FRAME. Include every declared layer ID exactly once, bottom to top. This overrides declaration order only for that animation; omitted ORDER uses declaration order. FRAME FROM copies cels, not the source animation's order. Older readers without ORDER support cannot read files containing it.
 FRAMEORDER layer-id layer-id ... optionally appears once after FRAME, before CEL. It overrides that frame's bottom-to-top stack with every layer exactly once. Omission uses animation order. FRAME FROM does not inherit frame order.
+BONE id layer-id instance-id PARENT parent-bone-id|- [JOINT x y] [LIMIT min max] [REST degrees] [NAME "name"] rigs a skeleton (after the animations, before END). A bone is one object (instance-id in layer-id, the same object in every frame); its joint is that object's PIVOT, pinned to point JOINT x y of the parent's part (part pixels, decimals allowed, 0.5 = a pixel centre). Omit JOINT to use where the child's pivot sits on the parent in the first frame showing both. A root bone uses PARENT - and no JOINT. LIMIT bounds the angle relative to the parent (a root: its own ROTATE), REST is the relative angle of the rest pose. Posing a rig = ROTATE each part per frame (children keep their joints on the parent); place each child so its PIVOT lies on the parent's joint. Example: BONE torso fig body PARENT -, BONE arm fig arm PARENT torso JOINT 2.5 1.5 LIMIT -120 120.
 CEL layer-id selects a frame's layer. CEL layer-id CLEAR resets that cel. CEL layer-id RASTER selects raw pixels (an empty or already raster cel); SPAN and SHIFT dx dy are allowed until another CEL. SHIFT translates only the selected raster cel, clips edges and clears exposed pixels. RASTER retains compact pixel deltas without creating shared parts.
 Limits: canvas/parts 1–128 per dimension; 1–64 colors; 1–32 layers; at most 256 parts; 1–100 animations, 1–256 frames each, 1024 total; 1,048,576 canvas pixel slots across all cels; same budget for part pixels; 32,768 expanded operations and 8,388,608 rendering work units. FPS 1–60; duration 1–60000 ms. Names: project 120, layer/animation 80 characters. Text 4 MiB; line 4096 characters. END is required. Preserve hidden artwork and deliberate blank frames.`;
 
@@ -182,7 +185,7 @@ export function applyCelCommand(source, tokens) {
 
 export function decodePXA2(text) {
   const project = { format: 'pixel-studio', version: 3, layers: [], parts: [], animations: [] };
-  const frames = new Map();
+  const frames = new Map(), bones = [];
   let animation, frame, source, raster, part, stage = 0, totalFrames = 0, expandedOps = 0, rasterWork = 0;
   const spendRasterWork = count => {
     rasterWork += count;
@@ -224,6 +227,10 @@ export function decodePXA2(text) {
         if (!/^(?:[1-9][0-9]*)(?:\.[0-9]+)?$/.test(t[3])) throw new Error('Invalid FPS.');
         animation = { id: artworkId(t[1]), name: quoted(t[2]), fps: Number(t[3]), frames: [] };
         project.animations.push(animation); frame = source = raster = null;
+      } else if (cmd === 'BONE') {
+        if (!animation) throw new Error('Declare BONE after the animations.');
+        if (bones.length >= 256) throw new Error('At most 256 bones.');
+        bones.push(boneDeclaration(t)); frame = source = raster = null;
       } else if (cmd === 'ORDER') {
         if (!animation || animation.frames.length || animation.layerOrder) throw new Error('ORDER is allowed once after ANIM, before its first FRAME.');
         argumentsCount(t, project.layers.length);
@@ -287,7 +294,38 @@ export function decodePXA2(text) {
     } catch (error) { throw new Error(`Line ${number}: ${error.message}`); }
   }
   if (part) throw new Error('Missing ENDPART.');
-  return validateProject(project);
+  return bones.length ? rigBones(validateProject(project), bones) : validateProject(project);
+}
+const decimal = value => { if (!/^-?\d+(?:\.\d+)?$/.test(value ?? '')) throw new Error(`Invalid number ${value}.`); return Number(value); };
+function boneDeclaration(t) {
+  if (t.length < 6 || t[4] !== 'PARENT') throw new Error('BONE needs id layer-id instance-id PARENT parent-id|-.');
+  const bone = { id: artworkId(t[1]), layerId: artworkId(t[2]), instanceId: artworkId(t[3]), parent: t[5] === '-' ? null : artworkId(t[5]) };
+  for (let i = 6; i < t.length;) {
+    const key = t[i];
+    if (key === 'JOINT') { bone.anchor = { x: decimal(t[i + 1]), y: decimal(t[i + 2]) }; i += 3; }
+    else if (key === 'LIMIT') { bone.limit = { min: numberToken(t[i + 1]), max: numberToken(t[i + 2]) }; i += 3; }
+    else if (key === 'REST') { bone.rest = numberToken(t[i + 1]); i += 2; }
+    else if (key === 'NAME') { bone.name = quoted(t[i + 1]); i += 2; }
+    else throw new Error(`Unknown BONE option ${key}.`);
+  }
+  return bone;
+}
+/** Attach decoded bones; a missing JOINT comes from the child's pivot on the parent in the first frame showing both. */
+function rigBones(project, bones) {
+  const opIn = (frame, layerId, id) => frame.cels.find(c => c.layerId === layerId)?.source?.ops.find(op => op.type === 'use' && op.id === id);
+  const byId = new Map(bones.map(b => [b.id, b])), partOf = op => project.parts.find(part => part.id === op.partId);
+  for (const bone of bones) {
+    const parent = byId.get(bone.parent);
+    if (bone.anchor || !parent) continue;
+    for (const frame of project.animations.flatMap(a => a.frames)) {
+      const child = opIn(frame, bone.layerId, bone.instanceId), host = opIn(frame, parent.layerId, parent.instanceId);
+      if (!child || !host) continue;
+      const a = boxToPart(host, partOf(host), worldToBox(host, partOf(host), instancePivot(child, partOf(child))));
+      bone.anchor = { x: Math.round(a.x * 1000) / 1000, y: Math.round(a.y * 1000) / 1000 };
+      break;
+    }
+  }
+  return validateProject({ ...project, bones });
 }
 
 export function encodeOperation(op) {
@@ -380,6 +418,8 @@ export function encodePXA2(input) {
 
     }
   }
+  const num = v => String(Math.round(v * 1000) / 1000);
+  for (const b of p.bones || []) lines.push(`BONE ${b.id} ${b.layerId} ${b.instanceId} PARENT ${b.parent || '-'}${b.anchor ? ` JOINT ${num(b.anchor.x)} ${num(b.anchor.y)}` : ''}${b.limit ? ` LIMIT ${b.limit.min} ${b.limit.max}` : ''}${b.rest ? ` REST ${b.rest}` : ''}${b.name !== undefined ? ` NAME ${q(b.name)}` : ''}`);
   const text = [...lines, 'END', ''].join('\n');
   if (new TextEncoder().encode(text).length > PXA2_MAX_BYTES) throw new Error('PXA export exceeds 4 MiB.');
   return text;

@@ -1,0 +1,170 @@
+PXA 2
+SIZE 48 48
+NAME "Stick puppet"
+PAL #2a2433 #f1c27d #e2583e #b53d2c #3a4e7a #2b3a5c #5a3825 #3b2a1e
+LAYER fig "Puppet" 1 0
+PART torso 8 12
+RECT 0 0 8 12 0
+RECT 1 1 6 8 2
+RECT 1 1 1 8 3
+RECT 1 9 6 2 4
+ENDPART
+PART head 8 8
+RECT 0 0 8 8 0
+RECT 1 1 6 6 1
+RECT 1 1 6 2 6
+SPAN 1 3 6
+SPAN 6 3 6
+SPAN 2 4 0
+SPAN 5 4 0
+ENDPART
+PART upperarm 4 7
+RECT 0 0 4 7 0
+RECT 1 1 2 5 2
+RECT 1 1 1 5 3
+ENDPART
+PART lowerarm 4 7
+RECT 0 0 4 7 0
+RECT 1 1 2 5 1
+ENDPART
+PART upperleg 4 7
+RECT 0 0 4 7 0
+RECT 1 1 2 5 4
+RECT 1 1 1 5 5
+ENDPART
+PART lowerleg 4 8
+RECT 0 0 4 8 0
+RECT 1 1 2 4 4
+RECT 1 1 1 4 5
+RECT 1 5 2 2 7
+ENDPART
+ANIM jack "Jumping jack" 8
+FRAME jack_a 120 CLEAR
+CEL fig
+USE leg-l upperleg 20 28
+PIVOT leg-l 1 0
+USE leg-r upperleg 24 28
+PIVOT leg-r 2 0
+USE shin-l lowerleg 20 34
+PIVOT shin-l 1 0
+USE shin-r lowerleg 24 34
+PIVOT shin-r 2 0
+USE arm-l upperarm 16 17
+ROTATE arm-l 10
+PIVOT arm-l 2 1
+USE arm-r upperarm 28 17
+ROTATE arm-r -10
+PIVOT arm-r 1 1
+USE body torso 20 17
+USE head head 20 9
+PIVOT head 3 7
+USE hand-l lowerarm 15 23
+ROTATE hand-l 10
+PIVOT hand-l 2 0
+USE hand-r lowerarm 29 23
+ROTATE hand-r -10
+PIVOT hand-r 1 0
+FRAME 9d87f2f6-30c1-45c3-bb28-74563dc9defa 120 FROM jack_a
+CEL fig
+ROTATE leg-l 4
+ROTATE leg-r -4
+ROTATE shin-l 2
+ROTATE shin-r -2
+ROTATE arm-l 38
+ROTATE arm-r -38
+ROTATE hand-l 44
+AT hand-l 13 22
+ROTATE hand-r -44
+AT hand-r 31 22
+FRAME 26ade7af-c306-46ed-bcf9-20d917e69870 120 FROM 9d87f2f6-30c1-45c3-bb28-74563dc9defa
+CEL fig
+ROTATE leg-l 16
+ROTATE leg-r -16
+ROTATE shin-l 10
+AT shin-l 18 34
+ROTATE shin-r -10
+AT shin-r 26 34
+ROTATE arm-l 107
+ROTATE arm-r -107
+ROTATE hand-l 126
+AT hand-l 11 17
+ROTATE hand-r -126
+AT hand-r 33 17
+FRAME jack_b 120 FROM 26ade7af-c306-46ed-bcf9-20d917e69870
+CEL fig
+ROTATE leg-l 20
+ROTATE leg-r -20
+ROTATE shin-l 12
+ROTATE shin-r -12
+ROTATE arm-l 135
+ROTATE arm-r -135
+ROTATE hand-l 160
+AT hand-l 12 14
+ROTATE hand-r -160
+AT hand-r 32 14
+FRAME 48b64535-4dfe-4311-8b34-f710411f2f8e 120 FROM jack_b
+CEL fig
+ROTATE leg-l 16
+ROTATE leg-r -16
+ROTATE shin-l 10
+ROTATE shin-r -10
+ROTATE arm-l 107
+ROTATE arm-r -107
+ROTATE hand-l 126
+AT hand-l 11 17
+ROTATE hand-r -126
+AT hand-r 33 17
+FRAME 28b57662-f5f6-4f8d-b03b-c50d188f0594 120 FROM 48b64535-4dfe-4311-8b34-f710411f2f8e
+CEL fig
+ROTATE leg-l 4
+ROTATE leg-r -4
+ROTATE shin-l 2
+AT shin-l 20 34
+ROTATE shin-r -2
+AT shin-r 24 34
+ROTATE arm-l 38
+ROTATE arm-r -38
+ROTATE hand-l 44
+AT hand-l 13 22
+ROTATE hand-r -44
+AT hand-r 31 22
+ANIM wave "Wave" 6
+FRAME wave_a 160 FROM 28b57662-f5f6-4f8d-b03b-c50d188f0594
+CEL fig
+ROTATE leg-l 0
+ROTATE leg-r 0
+ROTATE shin-l 0
+ROTATE shin-r 0
+ROTATE arm-l 8
+ROTATE arm-r -150
+ROTATE head -6
+ROTATE hand-l 8
+AT hand-l 15 23
+ROTATE hand-r -170
+AT hand-r 31 14
+FRAME 52fc116f-d2e4-42d7-b330-89a757f02f81 160 FROM wave_a
+CEL fig
+ROTATE arm-r -145
+ROTATE head -1
+ROTATE hand-r -138
+FRAME wave_b 160 FROM 52fc116f-d2e4-42d7-b330-89a757f02f81
+CEL fig
+ROTATE arm-r -140
+ROTATE head 4
+ROTATE hand-r -105
+FRAME b3754b9f-97ca-4c69-8fca-55d7be2c57d8 160 FROM wave_b
+CEL fig
+ROTATE arm-r -145
+ROTATE head -1
+ROTATE hand-r -138
+BONE body fig body PARENT - NAME "torso"
+BONE head fig head PARENT body JOINT 3.5 -0.5 NAME "head"
+BONE arm-l fig arm-l PARENT body JOINT -1.5 1.5 NAME "upper arm L"
+BONE hand-l fig hand-l PARENT arm-l JOINT 2.5 6.5 NAME "lower arm L"
+BONE arm-r fig arm-r PARENT body JOINT 9.5 1.5 NAME "upper arm R"
+BONE hand-r fig hand-r PARENT arm-r JOINT 1.5 6.5 NAME "lower arm R"
+BONE leg-l fig leg-l PARENT body JOINT 1.5 11.5 NAME "upper leg L"
+BONE shin-l fig shin-l PARENT leg-l JOINT 1.5 6.5 NAME "lower leg L"
+BONE leg-r fig leg-r PARENT body JOINT 6.5 11.5 NAME "upper leg R"
+BONE shin-r fig shin-r PARENT leg-r JOINT 2.5 6.5 NAME "lower leg R"
+END

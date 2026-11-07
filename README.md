@@ -84,7 +84,7 @@ Use **Copy prompt** and **Paste AI result** for a manual workflow. Include the f
 
 The **Parts** section in the side panel shows every reusable part as a thumbnail: **drag one onto the canvas** to place it there, or click it to open the **Part library**. The library is a visual browser (search, sort by name, use or size) showing each part's size, colours, number of copies and the animations and frames that use it. From there you can place it (in every frame or only this frame, following the Edit switch), edit its shared artwork, rename it (all copies follow) or delete it once unused. New parts come from a selection (Ctrl/⌘ G). Regular drawing tools write local overrides. Moving an instance rebuilds the cel without leaving trails. Shared edits update its instances; local overrides remain at their canvas coordinates.
 
-The samples include **Golden Key · reusable parts**. The prompt builder defaults to PXA 2 and also offers PXA 1. Export PXA 2 to retain editable parts; PXA 1 and PXS bake the same layer/frame pixels. Resizing also bakes retained cels. Browser saves preserve the reusable structure.
+The samples include **Golden Key · reusable parts** and **Stick puppet · skeleton** (a rigged PXA 2 figure with key poses). The prompt builder defaults to PXA 2 and also offers PXA 1. Export PXA 2 to retain editable parts; PXA 1 and PXS bake the same layer/frame pixels. Resizing also bakes retained cels. Browser saves preserve the reusable structure.
 
 See the [PXA 2 format, editor workflow, and benchmarks](docs/pxa-v2.md). The benchmarks verify pixel equivalence and report both improvements and regressions; file size alone is not a token count or an art-quality measurement.
 
@@ -96,6 +96,7 @@ The **Animate** panel rows open *motion modes*: you work directly on the canvas 
 
 | # | Tool | Where in the UI |
 |---|------|-----------------|
+| 0 | **Skeleton rigging** – join placed parts into a bone tree (saved with the project and in PXA 2 as `BONE` lines), then pose it: drag a part to bend it at its joint (children follow), drag a hand or foot to reach with n-bone IK, drag the root to move the whole figure. Angle snap (Free/5°/15°), RotSprite, optional bend limits, *New key frame*, *Copy/Paste*, *Mirror*, *Swap L/R*, *Reset* to the rest pose, and *In-between…* to fill frames between two key poses. The Object tool's drag, arrow nudges, rotation and *Animate a move* carry a rigged part's children too. | **Animate** → *Skeleton rig* (or **J**); try the *Stick puppet · skeleton* example |
 | 1 | **Tweening with easing** – drag the end ghost (or use arrow keys) to where the object ends, drag the round mid handle to bend the path into an arc; numbered in-between ghosts show the eased positions. Choose frames, easing (Smooth, Speed up, Slow down, Overshoot, Bounce, Elastic, Linear), *Squash & stretch* and *Turn along path*; *To frame N* tweens to a pose the object already has in a later frame. | **Animate** panel → *Animate a move* |
 | 2 | **Bounce · squash & stretch** – *Bounce in place* builds a looping bounce from a single frame (drag the height handle; frames and squash amount in the bar); *Add to existing motion* stretches along motion and squashes on impact, keeping the area. | **Animate** → *Bounce · squash & stretch* (also a toggle in *Animate a move*) |
 | 3 | **Pivots and motion arcs** – rotation and skew turn about a pivot (joint); tweens follow a line, an arc or a bézier, optionally turning with the path. | **Transform** panel → *Object pose* → Pivot (drag the pink crosshair on the canvas with the Object/Transform tool; *Centre* resets); path options in the tween dialog |
@@ -111,6 +112,14 @@ The **Animate** panel rows open *motion modes*: you work directly on the canvas 
 | 13 | **Colour cycling** – rotate a ramp of palette colours across frames. | **Color palette** → *Colour cycle* |
 | 14 | **Ordered dithering** – Bayer dither between two colours. | **Effects** → *Dither* (and the Gradient tool's *Dither* style) |
 | 15 | **Pixel-perfect lines** – no L-shaped doubles, clean line slopes, clean up existing lines. | Pencil options → *Pixel-perfect strokes*; Line options → *Clean slopes*; **Effects** → *Clean up lines* |
+
+### Skeleton rigging
+
+1. Draw each body part as its own part (select pixels, **⌘/Ctrl G**) and place them on the canvas in a rest pose, or open the *Stick puppet · skeleton* example.
+2. Press **J** (or **Animate** → *Skeleton rig*). In the **Rig** step click a child part (an upper arm), then click its parent (the torso) right where they join, or drag from the child and drop on the parent. The joint becomes the child's pivot; the first parent becomes the root. Rename bones in the list (names with *L/R* or *left/right* pair limbs for mirroring), add bend limits with *±°*, and press *Set rest pose*.
+3. In the **Pose** step, posing affects this frame only (the Edit switch chooses *All frames* if you want). Drag a part to rotate it at its joint, drag a hand or foot to place it with IK (*Limb* solves up to the body, *2/3/All* choose the chain length, Shift switches IK/rotate), drag the root to move the figure.
+4. Animate with key poses: *New key frame* (**D**) duplicates the frame to pose the next key; go back to an earlier key and use *In-between…* to choose the later key, how many frames to add and the easing; the Live Preview plays the result before you insert it.
+5. **Enter** or *Done* leaves the mode. Every drag or button is one undo step. Joints ignore skew and deform; PXA 1 and the compact `.pxs` file do not keep bones (export PXA 2).
 | 16 | **Gradient fills** – linear/radial/diamond/angle, bands or dithered, through a palette ramp. | Toolbox → **Gradient** (`N`): drag from → to; options choose shape, style, matrix, repeat, end colour and region (clicked area, selection or whole cel) |
 
 Effects that paint pixels write local edits on object cels, like the drawing tools, and skip cels holding locked objects.

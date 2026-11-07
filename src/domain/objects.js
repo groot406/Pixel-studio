@@ -3,6 +3,7 @@ import { validateProject, getAnimationLayers, insertProjectLayer, removeProjectL
 import { cloneArtwork, sourceForCel, renderParts, hasLockedInstances } from './artwork.js';
 import { linePoints, ellipsePoints, instancePixel, instanceSize, instanceBox, transformedSize, swapsAxes, composeTransform, transformPoint } from './geometry.js';
 import { nextPartId } from './parts.js';
+import { boneDescendants, relPose, layoutFrame } from './skeleton.js';
 
 export function celObjects(cel) {
   if (!cel.source) return [{key:'pixels',type:'pixels',name:'Pixels',start:0,end:0}];
@@ -163,14 +164,15 @@ export function resizeObject(project,target,key,box,scope='animation') {
   return validateProject(p);
 }
 
-/** Move each appearance by the same offset while preserving its authored pose. */
+/** Move each appearance by the same offset while preserving its authored pose; rigged parts below it come along. */
 export function translateObject(project,target,key,dx,dy,scope='animation') {
   if(!Number.isInteger(dx) || !Number.isInteger(dy))throw new Error('Object movement uses whole pixels.');
   const {p,layer,frames}=context(project,target,scope);
-  for(const frame of frames) {
-    const op=frame.cels.find(c=>c.layerId===layer.id).source?.ops.find(op=>op.type==='use' && op.id===key);
+  const refs=[{layerId:layer.id,instanceId:key},...boneDescendants(p,layer.id,key)];
+  for(const frame of frames) for(const ref of refs) {
+    const op=frame.cels.find(c=>c.layerId===ref.layerId)?.source?.ops.find(op=>op.type==='use' && op.id===ref.instanceId);
     if(!op)continue;
-    unlocked(layer,{instance:op}); op.x+=dx;op.y+=dy;
+    unlocked(p.layers.find(l=>l.id===ref.layerId),{instance:op}); op.x+=dx;op.y+=dy;
   }
   return validateProject(p);
 }
@@ -194,9 +196,11 @@ export function translateObjects(project,target,items,dx,dy,scope='animation') {
   const frame=project.animations.find(a=>a.id===target.animationId)?.frames.find(f=>f.id===target.frameId);
   if(!frame)throw new Error('This object no longer exists.');
   let p=project, moved=0;
+  const carried=new Set(items.flatMap(item=>boneDescendants(project,item.layerId,item.key)).map(r=>`${r.layerId}/${r.instanceId}`));
   for(const item of orderObjects(project,frame,items)) {
     const node=celObjects(frame.cels.find(c=>c.layerId===item.layerId)).find(n=>n.key===item.key);
     if(!node?.instance)continue;
+    if(carried.has(`${item.layerId}/${item.key}`)){moved++;continue;}
     p=translateObject(p,{...target,layerId:item.layerId},item.key,dx,dy,scope);moved++;
   }
   if(!moved)throw new Error('Only placed objects can be moved.');
@@ -208,7 +212,7 @@ function eachSelectedInstance(project,target,items,scope,change) {
   if(!frame)throw new Error('This object no longer exists.');
   const instances=orderObjects(project,frame,items).filter(item=>celObjects(frame.cels.find(c=>c.layerId===item.layerId)).find(n=>n.key===item.key)?.instance);
   if(!instances.length)throw new Error('Only placed objects can be turned or rotated.');
-  const {p,frames}=context(project,target,scope);
+  const {p,frames}=context(project,target,scope), poses=p.bones?new Map(frames.map(f=>[f,relPose(p,f)])):null;
   for(const item of instances) {
     const layer=p.layers.find(l=>l.id===item.layerId);
     const partId=frame.cels.find(c=>c.layerId===item.layerId).source.ops.find(op=>op.type==='use' && op.id===item.key).partId;
@@ -217,6 +221,13 @@ function eachSelectedInstance(project,target,items,scope,change) {
       if(!op || op.partId!==partId)continue;
       unlocked(layer,{instance:op});
       change(op,p.parts.find(part=>part.id===op.partId));
+    }
+  }
+  if(poses) {
+    const changed=new Set(instances.map(i=>`${i.layerId}/${i.key}`));
+    for(const [f,rels] of poses) {
+      for(const bone of p.bones) if(changed.has(`${bone.layerId}/${bone.instanceId}`))rels.delete(bone.id);
+      layoutFrame(p,f,rels);
     }
   }
   return validateProject(p);

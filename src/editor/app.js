@@ -25,6 +25,7 @@ import { initToolExtras, renderToolExtras, gradientStatus, unclampedDrawing, lin
 import { initObjectPose, renderObjectPose, renderPivotMarker } from './object-pose.js';
 import { initAnimatePanel, renderAnimatePanel } from './animate-panel.js';
 import { initMotionModes, syncMotionMode, drawMotionOverlay } from './motion-modes.js';
+import { initRigMode, syncRigMode, drawRigOverlay, toggleRigMode } from './rig-mode.js';
 import { initEffectsPanel, renderEffectsPanel } from './effects-panel.js';
 import { initPaletteTools } from './palette-tools.js';
 import { instancePivot } from '../domain/geometry.js';
@@ -425,6 +426,7 @@ function renderCanvas() {
   }
   drawCanvasOverlay(context);
   drawMotionOverlay(context);
+  drawRigOverlay(context);
   renderPivotMarker();
   renderTileGhost();
   $('zoom-value').textContent = `${state.scale * 100}%`;
@@ -1191,6 +1193,7 @@ function renderSampleCards(container) {
 function renderAll() {
   normalizeSelection();
   syncMotionMode();
+  syncRigMode();
   if (document.activeElement !== $('project-name')) $('project-name').value = state.project.name;
   renderProjectTabs();renderPanelState();renderTools(); renderPalette(); renderTimeline(); renderAnimations(); renderLayers(); renderSelection(); renderCanvas(); renderPreview(); renderPlaybackControls();renderInPlaceControls();renderEditScope();renderAnimatePanel();renderEffectsPanel();
 }
@@ -2328,7 +2331,7 @@ function samplesDialog() {
   render();
 }
 function helpDialog() {
-  const shortcuts = [['V','Select / move objects'],['B','Pencil'],['E','Eraser'],['L','Straight line'],['F','Flood fill'],['N','Gradient · ⇧ snaps to 45°'],['U','Replace color'],['I / Alt','Pick a color'],['R','Square / rectangle'],['C','Circle / ellipse'],['S','Select / move pixels'],['W','Magic wand · ⇧ adds'],['T','Dither brush'],['H','Shade · right-click lightens'],['K','Transform · resize, squash, rotate, flip'],[', / .','Turn selected objects 90° (Transform)'],['Shift-click','Select several objects (Object / Transform)'],['⌘ / Ctrl + G','Make object from selection'],['[ / ]','Smaller / larger brush'],['⌘ / Ctrl + A','Select all pixels'],['⌘ / Ctrl + C / X / V','Copy / cut / paste pixels, or the selected object'],['⌘ / Ctrl + ⇧ + V','Paste object as an independent copy'],['⌘ / Ctrl + D','Duplicate selected object'],['⇧ + click','Straight pencil / eraser line from the last stroke'],['Arrows / ⇧ + arrows','Nudge selection by 1 / 8 pixels'],['Delete','Clear selected pixels'],['Enter / Esc','Deselect pixels'],['Shift + drag','Square, circle, or 45° line'],['Drag object rows','Reorder, or drop into a group'],['Right-click object row','Object menu'],['G','Toggle grid'],['O','Onion skin'],['Space','Play / pause preview'],['D','Duplicate frame'],['← / →','Previous / next frame'],['+ / −','Zoom in / out'],['0','Fit canvas'],['⌘ / Ctrl + Z','Undo'],['⌘ / Ctrl + ⇧ + Z','Redo'],['⌘ / Ctrl + S','Export pixel data']];
+  const shortcuts = [['V','Select / move objects'],['B','Pencil'],['E','Eraser'],['L','Straight line'],['F','Flood fill'],['N','Gradient · ⇧ snaps to 45°'],['U','Replace color'],['I / Alt','Pick a color'],['R','Square / rectangle'],['C','Circle / ellipse'],['S','Select / move pixels'],['W','Magic wand · ⇧ adds'],['T','Dither brush'],['H','Shade · right-click lightens'],['K','Transform · resize, squash, rotate, flip'],['J','Skeleton: rig parts into bones and pose them'],[', / .','Turn selected objects 90° (Transform)'],['Shift-click','Select several objects (Object / Transform)'],['⌘ / Ctrl + G','Make object from selection'],['[ / ]','Smaller / larger brush'],['⌘ / Ctrl + A','Select all pixels'],['⌘ / Ctrl + C / X / V','Copy / cut / paste pixels, or the selected object'],['⌘ / Ctrl + ⇧ + V','Paste object as an independent copy'],['⌘ / Ctrl + D','Duplicate selected object'],['⇧ + click','Straight pencil / eraser line from the last stroke'],['Arrows / ⇧ + arrows','Nudge selection by 1 / 8 pixels'],['Delete','Clear selected pixels'],['Enter / Esc','Deselect pixels'],['Shift + drag','Square, circle, or 45° line'],['Drag object rows','Reorder, or drop into a group'],['Right-click object row','Object menu'],['G','Toggle grid'],['O','Onion skin'],['Space','Play / pause preview'],['D','Duplicate frame'],['← / →','Previous / next frame'],['+ / −','Zoom in / out'],['0','Fit canvas'],['⌘ / Ctrl + Z','Undo'],['⌘ / Ctrl + ⇧ + Z','Redo'],['⌘ / Ctrl + S','Export pixel data']];
   openDialog('Small canvas. Handy shortcuts.', `<p class="modal-body-text">Draw with a mouse, pen, or finger. Right-click to erase. Brush size and symmetry live below the tools; flip and rotate actions live in Transform. Use the palette picker to recolor a slot in every frame, or Swap to exchange two colors. AI prompt creates a complete generation brief with the pixel format and an ordered animation plan, even from an empty project.</p><div class="shortcut-grid">${shortcuts.map(([key,action])=>`<span>${action}</span><kbd>${key}</kbd>`).join('')}</div><div class="notice">Each project tab has its own artwork and Undo history. New projects and imports open in new tabs. Close a tab and reopen it from Saved projects; projects autosave on this device. Collapse individual panel headings, or hide either sidebar with the buttons above the canvas.</div><p class="helper-text">Tools edit the active pixel object. Transform can affect one frame or the active pixel object across an animation or project. Mirror animation copies each frame’s placements while retaining shared part definitions. Set individual frame holds in milliseconds below the timeline. Choose Object (V) to select and move part instances; double-click one to edit its shared artwork in every appearance. Object edits default to the current animation. Groups are optional; use Ungroup to expose their objects. Export PXA 2 for editable objects and timings; PNGs combine visible artwork.</p>`, 'QUICK GUIDE');
 }
 function accountDialog() {
@@ -2341,8 +2344,8 @@ function accountDialog() {
 function bindEvents() {
   bindFileDrop();
   const mathsDeps={state,$,icon,escapeHTML,mutate,snapshot,remember,renderAll,renderCanvas,renderPreview,renderTools,toast,openDialog,paintSprite,finishDrawing,
-    currentAnimation,currentFrame,currentLayer,selectedObject,selectedItems,transformItems,resizableObject,objectTarget,canEditPixels,canvasPixels,canvasPosition,normalizeSelection,selectObject,selectFrameAt,undo:()=>restore(state.undo,state.redo)};
-  initToolExtras(mathsDeps);initObjectPose(mathsDeps);initMotionModes(mathsDeps);initAnimatePanel(mathsDeps);initEffectsPanel(mathsDeps);initPaletteTools(mathsDeps);
+    currentAnimation,currentFrame,currentLayer,selectedObject,selectedItems,transformItems,resizableObject,objectTarget,canEditPixels,canvasPixels,canvasPosition,normalizeSelection,selectObject,selectFrameAt,addFrame,undo:()=>restore(state.undo,state.redo)};
+  initToolExtras(mathsDeps);initObjectPose(mathsDeps);initMotionModes(mathsDeps);initRigMode(mathsDeps);initAnimatePanel(mathsDeps);initEffectsPanel(mathsDeps);initPaletteTools(mathsDeps);
   // Holding Shift previews the straight line a pencil or eraser click will draw.
   const trackShift=event=>{if(state.shiftHeld!==event.shiftKey){state.shiftHeld=event.shiftKey;if(state.cursor)renderCanvas();}};
   window.addEventListener('keydown',trackShift);window.addEventListener('keyup',trackShift);
@@ -2557,6 +2560,7 @@ function bindEvents() {
     if (key==='escape' && state.objectSelection && !state.inPlaceEdit) { event.preventDefault(); state.objectSelection=null; renderAll(); return; }
     const tool = {v:'object',b:'pencil',e:'eraser',l:'line',f:'fill',n:'gradient',u:'replace',i:'eyedropper',r:'rectangle',c:'ellipse',s:'select',w:'wand',t:'dither',h:'shade',k:'resize'}[key];
     if (tool) { state.tool = tool; if(!SELECT_TOOLS.includes(tool) && tool!=='gradient')state.selection=null; renderTools(); renderSelection(); renderCanvas(); return; }
+    if (key === 'j') { event.preventDefault(); toggleRigMode(); return; }
     if (key === 'g') $('toggle-grid').click();
     else if((key==='[' || key===']') && BRUSH_TOOLS.includes(state.tool)){event.preventDefault();state.brushSize=Math.max(1,Math.min(8,state.brushSize+(key===']'?1:-1)));renderTools();renderCanvas();}
     else if (key === 'o') $('toggle-onion').click();

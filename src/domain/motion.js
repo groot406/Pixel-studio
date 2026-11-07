@@ -313,6 +313,30 @@ export function solveTwoBone(root, target, len1, len2, bendSign = 1) {
   return { angle1: normalizeAngle(a1 * DEG), angle2: normalizeAngle((a2 - a1) * DEG), joint, end, reached };
 }
 
+/**
+ * N-joint IK by cyclic coordinate descent. `points` are the joints J0…Jn−1 followed by the effector; J0 is pinned.
+ * Each sweep turns joint i (last to first) so the effector points at `target`, rotating everything after it.
+ * `limits[i]` ({min,max} or null) bounds joint i's total turn in degrees. Returns { deltas (degrees per joint,
+ * clockwise), points, reached }; unreachable targets end with the chain stretched toward them.
+ */
+export function solveChain(points, target, { limits = [], iterations = 32, tolerance = 0.25 } = {}) {
+  const pts = points.map(p => ({ x: p.x, y: p.y })), n = pts.length - 1, deltas = Array(Math.max(0, n)).fill(0);
+  const gap = () => Math.hypot(pts[n].x - target.x, pts[n].y - target.y);
+  for (let sweep = 0; sweep < iterations && n > 0 && gap() > tolerance; sweep++) {
+    for (let i = n - 1; i >= 0; i--) {
+      const c = pts[i], e = pts[n];
+      if (Math.hypot(e.x - c.x, e.y - c.y) < EPS || Math.hypot(target.x - c.x, target.y - c.y) < EPS) continue;
+      let turn = normalizeAngle((Math.atan2(target.y - c.y, target.x - c.x) - Math.atan2(e.y - c.y, e.x - c.x)) * DEG);
+      const limit = limits[i];
+      if (limit) turn = clamp(deltas[i] + turn, limit.min, limit.max) - deltas[i];
+      if (!turn) continue;
+      deltas[i] += turn;
+      for (let k = i + 1; k <= n; k++) pts[k] = rotatePoint(pts[k], c, turn);
+    }
+  }
+  return { deltas, points: pts, reached: gap() <= Math.max(tolerance, 1) };
+}
+
 // ---- Pivots -------------------------------------------------------------------------------------------------
 
 /** Rotate point p clockwise by angleDeg about centre c. */

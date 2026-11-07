@@ -194,7 +194,67 @@ export function validateProject(input) {
       }),
     };
   });
-  return { format: 'pixel-studio', version: input.version === 3 ? 3 : 2, name, width, height, palette, layers, animations, ...(input.version === 3 ? { parts } : {}) };
+  const bones = input.version === 3 ? readBones(input.bones, layerIds, animations) : [];
+  return { format: 'pixel-studio', version: input.version === 3 ? 3 : 2, name, width, height, palette, layers, animations, ...(input.version === 3 ? { parts } : {}), ...(bones.length ? { bones } : {}) };
+}
+
+const MAX_BONES = 256, BONE_ID = /^[A-Za-z0-9_-]{1,100}$/;
+/**
+ * Skeleton bones (version 3): {id, name?, layerId, instanceId, parent, anchor?, limit?, rest?}. A bone is one placed
+ * instance (stable across frames); `anchor` is the joint on the parent in the parent's part pixels (continuous). Bones
+ * whose instance is gone are dropped (or follow it to the one other layer that has it), cycles and orphans become
+ * roots, and roots without children are removed.
+ */
+function readBones(value, layerIds, animations) {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > MAX_BONES) throw new Error(`Skeletons hold at most ${MAX_BONES} bones.`);
+  const where = new Map();
+  for (const animation of animations) for (const frame of animation.frames) for (const cel of frame.cels) for (const op of cel.source?.ops || []) {
+    if (op.type !== 'use') continue;
+    if (!where.has(op.id)) where.set(op.id, new Set());
+    where.get(op.id).add(cel.layerId);
+  }
+  const seen = new Set(), used = new Set(), num = (v, label) => { if (!Number.isFinite(v) || Math.abs(v) > 4096) throw new Error(`${label} must be a number.`); return v; };
+  const angle = (v, label) => { if (!Number.isInteger(v) || v < -360 || v > 360) throw new Error(`${label} must be whole degrees (-360..360).`); return v; };
+  let bones = value.map((bone, index) => {
+    const label = `Bone ${index + 1}`;
+    if (!object(bone) || typeof bone.id !== 'string' || !BONE_ID.test(bone.id)) throw new Error(`${label} needs an ID of letters, digits, _ or -.`);
+    if (seen.has(bone.id)) throw new Error(`Duplicate bone ID ${bone.id}.`);
+    seen.add(bone.id);
+    if (typeof bone.layerId !== 'string' || typeof bone.instanceId !== 'string') throw new Error(`${label} needs a layer and instance ID.`);
+    if (bone.parent !== undefined && bone.parent !== null && typeof bone.parent !== 'string') throw new Error(`${label} has an invalid parent.`);
+    const out = { id: bone.id, layerId: layerIds.get(bone.layerId) ?? bone.layerId, instanceId: bone.instanceId, parent: bone.parent || null };
+    if (bone.name !== undefined) out.name = readName(bone.name, `${label} name`, 60);
+    if (bone.anchor !== undefined) {
+      if (!object(bone.anchor)) throw new Error(`${label} joint needs x and y.`);
+      out.anchor = { x: num(bone.anchor.x, `${label} joint x`), y: num(bone.anchor.y, `${label} joint y`) };
+    }
+    if (bone.limit !== undefined) {
+      if (!object(bone.limit)) throw new Error(`${label} limit needs min and max.`);
+      const min = angle(bone.limit.min, `${label} limit`), max = angle(bone.limit.max, `${label} limit`);
+      if (min > max) throw new Error(`${label} limit min must not exceed max.`);
+      out.limit = { min, max };
+    }
+    if (bone.rest !== undefined) out.rest = angle(bone.rest, `${label} rest angle`);
+    return out;
+  }).filter(bone => {
+    const layers = where.get(bone.instanceId);
+    if (!layers) return false;
+    if (!layers.has(bone.layerId)) { if (layers.size !== 1) return false; bone.layerId = [...layers][0]; }
+    const key = `${bone.layerId}\u0000${bone.instanceId}`;
+    if (used.has(key)) return false;
+    used.add(key);
+    return true;
+  });
+  const byId = new Map(bones.map(b => [b.id, b]));
+  for (const bone of bones) {
+    if (bone.parent && (!byId.has(bone.parent) || !bone.anchor)) bone.parent = null;
+    for (let at = bone.parent, steps = 0; at; at = byId.get(at).parent) if (at === bone.id || ++steps > bones.length) { bone.parent = null; break; }
+    if (!bone.parent) delete bone.anchor;
+  }
+  const parents = new Set(bones.map(b => b.parent).filter(Boolean));
+  bones = bones.filter(b => b.parent || parents.has(b.id));
+  return bones;
 }
 
 /** Return the actual editable cel array. Callers must pass a normalized layered frame. */

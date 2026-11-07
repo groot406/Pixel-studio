@@ -45,5 +45,14 @@
     "animations": 2,
     "frames": 5,
     "thumbnail": "key"
+  },
+  {
+    "id": "puppet",
+    "name": "Stick puppet \u00b7 skeleton",
+    "description": "PXA 2 rig: torso, head, arms and legs joined into a skeleton with jumping-jack and wave key poses. Press J to pose it.",
+    "file": "puppet.pxa",
+    "aiFile": "puppet.pxa",
+    "animations": 2,
+    "frames": 10
   }
 ]

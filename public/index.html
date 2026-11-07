@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="./src/editor/maths-tools.css">
   <link rel="stylesheet" href="./src/editor/palette-studio.css">
   <link rel="stylesheet" href="./src/editor/rig.css">
+  <link rel="stylesheet" href="./src/editor/export-dialog.css">
 </head>
 <body>
   <svg class="icon-defs" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
@@ -25,6 +26,9 @@
     <symbol id="i-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></symbol>
     <symbol id="i-select" viewBox="0 0 24 24"><path d="M3 9V3h6M13 3h4v4M3 13v4h4" stroke-dasharray="2.5 2.5"/><path d="m10 10 10 5-4 1-1 4-5-10Z"/></symbol>
     <symbol id="i-line" viewBox="0 0 24 24"><path d="m5 19 14-14"/><rect x="3" y="17" width="4" height="4" rx=".5"/><rect x="17" y="3" width="4" height="4" rx=".5"/></symbol>
+    <symbol id="i-curve" viewBox="0 0 24 24"><path d="M5 19C5 9 19 15 19 5"/><rect x="3" y="17" width="4" height="4" rx=".5"/><rect x="17" y="3" width="4" height="4" rx=".5"/></symbol>
+    <symbol id="i-path" viewBox="0 0 24 24"><path d="M4 18c3-9 6-9 8-4s5 5 8-4"/><circle cx="4" cy="18" r="1.6"/><circle cx="12" cy="14" r="1.6"/><circle cx="20" cy="10" r="1.6"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/><rect x="8.5" y="8.5" width="3" height="3"/></symbol>
     <symbol id="i-replace" viewBox="0 0 24 24"><rect x="3" y="3" width="6" height="6" rx="1"/><rect x="15" y="15" width="6" height="6" rx="1"/><path d="M13 5h6v6m-3-3 3 3 3-3M11 19H5v-6m-3 3 3-3 3 3"/></symbol>
     <symbol id="i-flip-h" viewBox="0 0 24 24"><path d="M12 3v18" stroke-dasharray="2 3"/><path d="m8 6-5 6 5 6ZM16 6l5 6-5 6Z"/></symbol>
     <symbol id="i-flip-v" viewBox="0 0 24 24"><path d="M3 12h18" stroke-dasharray="2 3"/><path d="m6 8 6-5 6 5ZM6 16l6 5 6-5Z"/></symbol>
@@ -120,6 +124,7 @@
           <button data-tool="pencil" class="tool active" title="Pencil (B)" aria-keyshortcuts="B" aria-pressed="true"><svg aria-hidden="true"><use href="#i-pencil"/></svg><span>Pencil</span><kbd>B</kbd></button>
           <button data-tool="eraser" class="tool" title="Eraser (E)" aria-keyshortcuts="E" aria-pressed="false"><svg aria-hidden="true"><use href="#i-eraser"/></svg><span>Eraser</span><kbd>E</kbd></button>
           <button data-tool="line" class="tool" title="Straight line (L)" aria-keyshortcuts="L" aria-pressed="false"><svg aria-hidden="true"><use href="#i-line"/></svg><span>Line</span><kbd>L</kbd></button>
+          <button data-tool="curve" class="tool" title="Curve and path: drag a line, then bend it (P)" aria-keyshortcuts="P" aria-pressed="false"><svg aria-hidden="true"><use href="#i-curve"/></svg><span>Curve</span><kbd>P</kbd></button>
           <button data-tool="fill" class="tool" title="Flood fill (F)" aria-keyshortcuts="F" aria-pressed="false"><svg aria-hidden="true"><use href="#i-fill"/></svg><span>Fill</span><kbd>F</kbd></button>
           <button data-tool="gradient" class="tool" title="Gradient: drag to fill with palette colours (N)" aria-keyshortcuts="N" aria-pressed="false"><svg aria-hidden="true"><use href="#i-gradient"/></svg><span>Gradient</span><kbd>N</kbd></button>
           <button data-tool="replace" class="tool" title="Replace color (U)" aria-keyshortcuts="U" aria-pressed="false"><svg aria-hidden="true"><use href="#i-replace"/></svg><span>Replace</span><kbd>U</kbd></button>
@@ -129,7 +134,7 @@
           <button data-tool="select" class="tool" title="Select / move pixels (S)" aria-keyshortcuts="S" aria-pressed="false"><svg aria-hidden="true"><use href="#i-select"/></svg><span>Select</span><kbd>S</kbd></button>
           <button data-tool="wand" class="tool" title="Magic wand: select a shape or color (W)" aria-keyshortcuts="W" aria-pressed="false"><svg aria-hidden="true"><use href="#i-wand"/></svg><span>Wand</span><kbd>W</kbd></button>
           <button data-tool="dither" class="tool" title="Dither brush: paints a checkerboard (T)" aria-keyshortcuts="T" aria-pressed="false"><svg aria-hidden="true"><use href="#i-dither"/></svg><span>Dither</span><kbd>T</kbd></button>
-          <button data-tool="shade" class="tool" title="Shade: darken, right-click to lighten (H)" aria-keyshortcuts="H" aria-pressed="false"><svg aria-hidden="true"><use href="#i-shade"/></svg><span>Shade</span><kbd>H</kbd></button>
+          <button data-tool="shade" class="tool" title="Shade along palette ramps; right-click reverses (H)" aria-keyshortcuts="H" aria-pressed="false"><svg aria-hidden="true"><use href="#i-shade"/></svg><span>Shade</span><kbd>H</kbd></button>
         </div>
         <div class="tool-options" aria-label="Selected tool settings">
           <h3 id="active-tool-name">Pencil</h3>
@@ -151,6 +156,21 @@
             </div>
           </div>
           <label class="check-row" id="pixel-perfect-row" hidden title="Removes the doubled corner pixels from freehand 1 px strokes"><input type="checkbox" id="pixel-perfect"><span>Pixel-perfect strokes</span></label>
+          <div id="curve-options" class="gradient-options" hidden>
+            <div class="gradient-row"><span class="gradient-label" id="curve-mode-label">Shape</span><div class="seg-control" role="radiogroup" aria-labelledby="curve-mode-label"><button type="button" role="radio" class="seg-option" data-curve-mode="curve" title="Curve: one bendable segment" aria-label="Curve" aria-checked="true"><svg aria-hidden="true"><use href="#i-curve"/></svg></button><button type="button" role="radio" class="seg-option" data-curve-mode="path" title="Path: a smooth line through clicked points" aria-label="Path" aria-checked="false"><svg aria-hidden="true"><use href="#i-path"/></svg></button></div></div>
+            <label class="check-row" id="curve-closed-row" hidden><input type="checkbox" id="curve-closed"><span>Closed path</span></label>
+            <label class="check-row" id="curve-fill-row" hidden><input type="checkbox" id="curve-fill"><span>Fill inside</span></label>
+            <label class="check-row" id="curve-aa-row"><input type="checkbox" id="curve-antialias"><span>Anti-alias</span></label>
+            <div id="curve-actions" class="resize-buttons" hidden><button id="curve-apply" class="button small primary" type="button" title="Apply the curve (Enter)">Apply</button><button id="curve-cancel" class="button small" type="button" title="Discard the curve (Esc)">Cancel</button></div>
+          </div>
+          <div id="shade-options" class="gradient-options" hidden>
+            <div class="tool-option-grid">
+              <label class="tool-option"><span>Ramp</span><select id="shade-mode" aria-label="Shade ramp"><option value="hue-shift">Hue-shift ramp</option><option value="lightness">Lightness only</option></select></label>
+              <label class="tool-option"><span>Click</span><select id="shade-direction" aria-label="Click direction"><option value="-1">Darkens</option><option value="1">Lightens</option></select></label>
+            </div>
+            <div class="gradient-row"><span class="gradient-label">Ramp</span><span id="shade-ramp" class="gradient-stops shade-ramp" aria-label="Detected ramp for the current colour"></span></div>
+            <p id="shade-ramp-note" class="tool-hint"></p>
+          </div>
           <div id="object-resize-options" class="resize-options" hidden>
             <label class="tool-option inline-option"><span>Mode</span><select id="object-resize-mode" aria-label="Resize mode"><option value="free">Free resize</option><option value="area">Keep area (squash)</option></select></label>
             <p id="object-resize-size" class="resize-size" aria-live="polite">Select an object</p>
@@ -164,6 +184,7 @@
           <div id="wand-options" class="tool-option-grid" hidden>
             <label class="tool-option"><span>Select</span><select id="wand-mode" aria-label="Magic wand mode"><option value="shape">Whole shape</option><option value="color">Same color</option></select></label>
           </div>
+          <label class="check-row" id="shape-aa-row" hidden title="Softens the stair steps of 1 px lines and ellipses with in-between palette colours (skipped where the palette has none)"><input type="checkbox" id="shape-antialias"><span>Anti-alias</span></label>
           <label class="check-row" id="filled-row" hidden><input type="checkbox" id="filled-shape"><span>Filled shape</span><span class="shape-hint">Shift for 1:1</span></label>
           <div id="symmetry-options"><label class="tool-option inline-option"><span>Mirror</span><select id="symmetry-mode" aria-label="Drawing symmetry"><option value="none">Off</option><option value="x">Left / right</option><option value="y">Top / bottom</option><option value="both">Both axes</option></select></label></div>
         </div>
@@ -197,7 +218,7 @@
           <label class="pose-row pose-wide" title="How strongly the far edge shrinks and the near edge grows during a 3D turn. 0 is flat."><span class="pose-label">Perspective</span><input id="pose-perspective" type="range" min="0" max="100" step="1" value="30" aria-label="3D turn perspective in percent"><input id="pose-perspective-value" class="pose-number" type="number" min="0" max="100" step="1" value="30" aria-label="3D turn perspective in percent"></label>
           <label class="tool-option inline-option pose-deform"><span>Deform</span><select id="pose-deform" aria-label="Deform"><option value="none">None</option><option value="wave">Wave</option><option value="bulge">Bulge</option><option value="pinch">Pinch</option><option value="twist">Twist</option></select></label>
           <div id="pose-deform-params" class="pose-params"></div>
-          <label class="check-row pose-check" title="Rotate with the RotSprite algorithm: smoother edges at free angles, the artwork itself never changes"><input type="checkbox" id="pose-rotsprite"><span>Smooth rotation (RotSprite)</span></label>
+          <label class="tool-option inline-option pose-deform" title="How rotated, skewed, turned, deformed or resized pixels are drawn. Every mode keeps 1px lines unbroken and uses only palette colours; the artwork itself never changes."><span>Sampling</span><select id="pose-sampling" aria-label="Sampling"><option value="nearest">Nearest (crisp)</option><option value="rotsprite">RotSprite (smooth edges)</option><option value="aa">Smooth AA (palette blends)</option></select></label>
           <p id="pose-scope" class="resize-note"></p>
         </div>
       </details>
@@ -284,12 +305,16 @@
         <div class="object-action-list" role="group" aria-label="Pixel effects">
           <button id="effect-outline" class="object-action" type="button"><svg aria-hidden="true"><use href="#i-outline"/></svg><span class="object-action-copy"><strong>Outline</strong><small>One colour around or inside the art</small></span></button>
           <button id="effect-selOut" class="object-action" type="button"><svg aria-hidden="true"><use href="#i-selout"/></svg><span class="object-action-copy"><strong>Selective outline</strong><small>Darker edge from each fill colour</small></span></button>
+          <button id="effect-autoOutline" class="object-action" type="button"><svg aria-hidden="true"><use href="#i-outline"/></svg><span class="object-action-copy"><strong>Auto outline</strong><small>Darkest ramp colour of each fill</small></span></button>
           <button id="effect-innerGlow" class="object-action" type="button"><svg aria-hidden="true"><use href="#i-glow"/></svg><span class="object-action-copy"><strong>Inner glow</strong><small>Recolour just inside the edge</small></span></button>
           <button id="effect-rimLight" class="object-action" type="button"><svg aria-hidden="true"><use href="#i-rim"/></svg><span class="object-action-copy"><strong>Rim light</strong><small>Lit edge facing the light</small></span></button>
           <button id="effect-autoShade" class="object-action" type="button"><svg aria-hidden="true"><use href="#i-shade"/></svg><span class="object-action-copy"><strong>Auto shade</strong><small>Bevel shading from palette ramps</small></span></button>
           <button id="effect-dither" class="object-action" type="button"><svg aria-hidden="true"><use href="#i-dither"/></svg><span class="object-action-copy"><strong>Dither</strong><small>Mix two colours in a pattern</small></span></button>
           <button id="effect-cleanup" class="object-action" type="button"><svg aria-hidden="true"><use href="#i-cleanup"/></svg><span class="object-action-copy"><strong>Clean up lines</strong><small>Remove doubled corner pixels</small></span></button>
+          <button id="effect-smoothJaggies" class="object-action" type="button"><svg aria-hidden="true"><use href="#i-cleanup"/></svg><span class="object-action-copy"><strong>Smooth jaggies</strong><small>Anti-alias edges with palette colours</small></span></button>
+          <button id="effect-check" class="object-action" type="button" aria-pressed="false" aria-controls="cleanup-results"><svg aria-hidden="true"><use href="#i-check"/></svg><span class="object-action-copy"><strong>Pixel cleanup</strong><small>Find strays, corners, jaggies, banding</small></span></button>
         </div>
+        <div id="cleanup-results" class="cleanup-results" hidden></div>
       </details>
       <details class="animations-section panel-section" data-panel="animations" open>
         <summary class="section-heading"><h2>ANIMATIONS <span id="animation-count" class="inline-count">3</span></h2><svg class="panel-chevron" aria-hidden="true"><use href="#i-chevron"/></svg></summary>

@@ -1,6 +1,7 @@
 /** Deterministic integer-grid geometry shared by tools and retained artwork. */
 import { SIZE, MAX_TOTAL_PIXELS, pixelCount } from './limits.js';
 import { rotspriteImage, ROTSPRITE_SCALE } from './rotsprite.js';
+import { paletteBlend } from './antialias.js';
 
 function coordinates(...values) {
   if (!values.every(Number.isFinite)) return null;
@@ -150,7 +151,7 @@ export function instanceTilt(instance) {
   const t = instance.tilt;
   return t && (t.x || t.y) ? { x: t.x || 0, y: t.y || 0, perspective: t.perspective ?? DEFAULT_PERSPECTIVE } : null;
 }
-export const SAMPLING_MODES = ['nearest', 'rotsprite'];
+export const SAMPLING_MODES = ['nearest', 'rotsprite', 'aa'];
 export const DEFORM_KINDS = ['wave', 'bulge', 'twist'];
 /** Deep copy of an instance's pose properties (absent ones omitted). */
 export function instancePose(instance) {
@@ -182,6 +183,15 @@ function undeform(d, box, x, y) {
   if (d.kind === 'bulge') { const f = r ** (2 ** (d.strength / 100) - 1); return [hw + nx * f * hw, hh + ny * f * hh]; }
   const a = d.angle * (1 - r) * Math.PI / 180, cos = Math.cos(a), sin = Math.sin(a);
   return [hw + (nx * cos + ny * sin) * hw, hh + (-nx * sin + ny * cos) * hh];
+}
+/** Forward deform in box space (inverse of undeform). */
+function redeform(d, box, x, y) {
+  if (d.kind === 'wave') return d.axis === 'x' ? [x + waveShift(d, Math.floor(y + EPSILON)), y] : [x, y + waveShift(d, Math.floor(x + EPSILON))];
+  const hw = box.width / 2, hh = box.height / 2, nx = (x - hw) / hw, ny = (y - hh) / hh, r = Math.hypot(nx, ny);
+  if (!(r > 0) || r >= 1) return [x, y];
+  if (d.kind === 'bulge') { const f = r ** (1 / 2 ** (d.strength / 100) - 1); return [hw + nx * f * hw, hh + ny * f * hh]; }
+  const a = d.angle * (1 - r) * Math.PI / 180, cos = Math.cos(a), sin = Math.sin(a);
+  return [hw + (nx * cos - ny * sin) * hw, hh + (nx * sin + ny * cos) * hh];
 }
 /** Pivot-relative corners of the box (widened by a wave) after skew: what the 3D turn and rotation act on. */
 function skewedCorners(instance, box, c) {
@@ -282,23 +292,184 @@ export function canvasToPartPoint(instance, part, point) {
 export function smoothSampling(instance) {
   return instance.sampling === 'rotsprite' && Boolean((instance.angle && instance.angle % 90) || instance.skew || instance.deform || instanceTilt(instance));
 }
+/** Whether the instance resamples its part (free angle, skew, 3D turn, deform or a resize); flips and quarter turns only move pixels. */
+export function resamples(instance, part) {
+  const size = instanceSize(instance, part);
+  return Boolean((instance.angle && instance.angle % 90) || instance.skew || instance.deform || instanceTilt(instance) || size.width !== part.width || size.height !== part.height);
+}
+/** Continuous part coordinates (part pixel units) under the instance-relative point (px,py). */
+function partPoint(instance, part, size, box, px, py) {
+  const [u, v] = boxPoint(instance, box, px, py), [a, b, c, d] = matrix(instance.transform);
+  // Continuous inverse of the dihedral transform (transpose), measured to box edges rather than pixel indices.
+  const lx = a*u + c*v + (a < 0 ? size.width : 0) + (c < 0 ? size.width : 0), ly = b*u + d*v + (b < 0 ? size.height : 0) + (d < 0 ? size.height : 0);
+  return [lx * part.width / size.width, ly * part.height / size.height];
+}
+/** Instance-relative canvas point of the continuous part point (sx,sy): the forward map resize → transform → deform → skew → 3D turn → rotate. */
+export function partToInstancePoint(instance, part, sx, sy) {
+  const size = instanceSize(instance, part), box = transformedSize(instance, part), [a, b, c, d] = matrix(instance.transform);
+  const lx = sx * size.width / part.width, ly = sy * size.height / part.height;
+  let x = a*lx + b*ly + (a < 0 ? size.width : 0) + (b < 0 ? size.height : 0), y = c*lx + d*ly + (c < 0 ? size.width : 0) + (d < 0 ? size.height : 0);
+  if (instance.deform) [x, y] = redeform(instance.deform, box, x, y);
+  if (instance.angle || instance.skew || instanceTilt(instance)) {
+    const p = pivotPoint(instance, box), v = poseVector(instance, part, { x: x - p.x, y: y - p.y });
+    x = v.x + p.x; y = v.y + p.y;
+  }
+  return [x, y];
+}
+/** RotSprite: the cached 8× Scale2x³ image sampled at the pixel centre. */
+function rotspritePixel(instance, part, size, box, x, y) {
+  const [lx, ly] = partPoint(instance, part, size, box, x + .5, y + .5), image = rotspriteImage(part);
+  const sx = Math.floor(lx * ROTSPRITE_SCALE + EPSILON), sy = Math.floor(ly * ROTSPRITE_SCALE + EPSILON);
+  return sx < 0 || sy < 0 || sx >= image.width || sy >= image.height ? -1 : image.pixels[sy * image.width + sx];
+}
+const AA_GRID = 4;
+/**
+ * Smooth AA: 4×4 supersampled coverage of one pixel. Below 50% coverage the pixel is transparent, else it takes the
+ * most covered colour; where a second part colour covers 25–75% of the opaque samples, the palette colour between the
+ * two (antialias.paletteBlend) is used instead. Partly covered silhouette pixels (25–75%) also report `edge` coverage
+ * so compositing can blend them with what is already beneath in the cel.
+ */
+function aaPixel(instance, part, size, box, x, y) {
+  const counts = new Map();
+  let opaque = 0;
+  for (let j = 0; j < AA_GRID; j++) for (let i = 0; i < AA_GRID; i++) {
+    const [lx, ly] = partPoint(instance, part, size, box, x + (i + .5) / AA_GRID, y + (j + .5) / AA_GRID);
+    const sx = Math.floor(lx + EPSILON), sy = Math.floor(ly + EPSILON);
+    const v = sx < 0 || sy < 0 || sx >= part.width || sy >= part.height ? -1 : part.pixels[sy * part.width + sx];
+    if (v >= 0) { opaque++; counts.set(v, (counts.get(v) || 0) + 1); }
+  }
+  if (!opaque) return { color: -1 };
+  const [[d, nd], [e, ne] = [-1, 0]] = [...counts].sort((p, q) => q[1] - p[1] || p[0] - q[0]);
+  const share = ne / (nd + ne);
+  let color = d;
+  if (share >= .25 && part.palette) { const mix = paletteBlend(part.palette, d, e, share); if (mix >= 0) color = mix; }
+  const coverage = opaque / AA_GRID ** 2;
+  return { color: coverage >= .5 ? color : -1, raw: d, edge: coverage >= .25 && coverage < .75 ? coverage : 0 };
+}
+
+const imageCache = new WeakMap(), IMAGE_CACHE = 48;
+/**
+ * The instance drawn into its own box (relative to the instance origin), for instances that resample their part:
+ * `{x, y, width, height, pixels, edge?}`, cached per part image and pose. Every pixel is inverse-mapped from its centre
+ * (nearest, RotSprite or Smooth AA), then thin features are repaired so resampling never opens gaps:
+ * 1. a part pixel no canvas pixel shows (squashed away, or a rotated pixel whose square holds no pixel centre) is drawn
+ *    at its forward-mapped centre, over transparency or over a pixel whose own part pixel shows elsewhere too;
+ * 2. two 8-adjacent part pixels of one colour whose canvas pixels no longer touch are bridged with a short line.
+ * So 1px lines stay 8-connected and outlines closed under rotation, skew, 3D turns, deforms and squash.
+ */
+export function instanceImage(instance, part) {
+  const key = [instance.transform, instance.width, instance.height, instance.angle, instance.pivot?.x, instance.pivot?.y, JSON.stringify(instance.skew),
+    JSON.stringify(instance.tilt), JSON.stringify(instance.deform), instance.sampling, instance.sampling === 'aa' ? part.palette?.join() : ''].join('|');
+  let byPose = imageCache.get(part.pixels);
+  if (!byPose) imageCache.set(part.pixels, byPose = new Map());
+  const cached = byPose.get(key);
+  if (cached) return cached;
+  const rect = instanceBox({ ...instance, x: 0, y: 0 }, part), size = instanceSize(instance, part), box = transformedSize(instance, part);
+  const { width, height } = rect, n = width * height, pixels = new Array(n).fill(-1), owner = new Int32Array(n).fill(-1);
+  const pw = part.width, ph = part.height, P = part.pixels, count = new Int32Array(pw * ph), best = new Int32Array(pw * ph).fill(-1), bestD = new Float64Array(pw * ph).fill(Infinity);
+  const sampling = instance.sampling === 'rotsprite' && smoothSampling(instance) ? 'rotsprite' : instance.sampling === 'aa' ? 'aa' : 'nearest';
+  const edge = sampling === 'aa' ? new Map() : null;
+  const forward = s => {
+    const [fx, fy] = partToInstancePoint(instance, part, s % pw + .5, Math.floor(s / pw) + .5), x = Math.floor(fx + EPSILON) - rect.x, y = Math.floor(fy + EPSILON) - rect.y;
+    return x < 0 || y < 0 || x >= width || y >= height ? -1 : y * width + x;
+  };
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    const t = y * width + x, cx = rect.x + x, cy = rect.y + y, local = canvasToPartPoint({ ...instance, x: 0, y: 0 }, part, { x: cx, y: cy });
+    const s = local.x < 0 || local.y < 0 || local.x >= pw || local.y >= ph ? -1 : local.y * pw + local.x;
+    let color;
+    if (sampling === 'nearest') color = s < 0 ? -1 : P[s];
+    else if (sampling === 'rotsprite') color = rotspritePixel(instance, part, size, box, cx, cy);
+    else { const aa = aaPixel(instance, part, size, box, cx, cy); color = aa.color; if (aa.edge) edge.set(t, { color: aa.raw, coverage: aa.edge }); }
+    pixels[t] = color;
+    if (color < 0) continue;
+    owner[t] = -2;
+    if (s < 0) continue;
+    // Smoothing may show a neighbouring part pixel's colour: credit the nearest neighbour of that colour that maps next to it.
+    const [lx, ly] = partPoint(instance, part, size, box, cx + .5, cy + .5);
+    let o = P[s] === color ? s : -1, od = Infinity;
+    if (o < 0) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const qx = local.x + dx, qy = local.y + dy, q = qy * pw + qx, dist = Math.hypot(lx - qx - .5, ly - qy - .5);
+      if (qx < 0 || qy < 0 || qx >= pw || qy >= ph || P[q] !== color || dist >= od) continue;
+      const f = forward(q);
+      if (f >= 0 && Math.abs(f % width - x) <= 1 && Math.abs(Math.floor(f / width) - y) <= 1) { o = q; od = dist; }
+    }
+    if (o < 0) continue;
+    owner[t] = o; count[o]++;
+    const dist = Math.hypot(lx - o % pw - .5, ly - Math.floor(o / pw) - .5);
+    if (dist < bestD[o]) { bestD[o] = dist; best[o] = t; }
+  }
+  const shown = Array.from({ length: P.length }, () => []);
+  owner.forEach((o, t) => { if (o >= 0) shown[o].push(t); });
+  const touches = (s, q) => { const near = new Set(shown[q]); return shown[s].some(t => { const x = t % width, y = Math.floor(t / width); for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+    const nx = x + dx, ny = y + dy; if (nx >= 0 && ny >= 0 && nx < width && ny < height && near.has(ny * width + nx)) return true; } return false; }); };
+  // A part pixel whose same-coloured neighbours stay 8-connected without it (and has at least two) can give up its only canvas pixel.
+  const RING = [[-1, -1], [0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0]];
+  const removable = s => {
+    const x = s % pw, y = Math.floor(s / pw), on = RING.map(([dx, dy]) => x + dx >= 0 && y + dy >= 0 && x + dx < pw && y + dy < ph && P[(y + dy) * pw + x + dx] === P[s]);
+    if (on.filter(Boolean).length < 2) return false;
+    // 8-components among the ring: ring neighbours touch, and so do two edge neighbours across a corner.
+    const group = [0, 1, 2, 3, 4, 5, 6, 7], root = i => (group[i] === i ? i : (group[i] = root(group[i])));
+    for (let i = 0; i < 8; i++) for (const j of [(i + 1) % 8, i % 2 ? (i + 2) % 8 : -1]) if (j >= 0 && on[i] && on[j]) group[root(i)] = root(j);
+    return new Set(on.flatMap((v, i) => (v ? [root(i)] : []))).size === 1;
+  };
+  const locked = new Uint8Array(n);
+  // A pixel may be repainted unless it was repaired already or is the only one showing a part pixel on an edge or line.
+  const free = t => !locked[t] && (owner[t] < 0 || (count[owner[t]] >= 2 && best[owner[t]] !== t) || removable(owner[t]));
+  const paint = (t, s) => {
+    const o = owner[t];
+    if (o >= 0) { count[o]--; shown[o] = shown[o].filter(k => k !== t); if (best[o] === t) best[o] = shown[o][0] ?? -1; }
+    pixels[t] = P[s]; owner[t] = s; count[s]++; shown[s].push(t); locked[t] = 1;
+    if (best[s] < 0) best[s] = t;
+    edge?.delete(t);
+  };
+  // Only pixels of features that otherwise survive come back: a stripe squashed away entirely stays away, as nearest sampling has it.
+  const linked = s => RING.some(([dx, dy]) => { const x = s % pw + dx, y = Math.floor(s / pw) + dy; return x >= 0 && y >= 0 && x < pw && y < ph && P[y * pw + x] === P[s] && count[y * pw + x] > 0; });
+  const queue = [], tried = new Uint8Array(P.length);
+  for (let s = 0; s < P.length; s++) if (P[s] >= 0 && !count[s] && linked(s)) queue.push(s);
+  while (queue.length) {
+    const s = queue.shift();
+    if (tried[s] || shown[s].length) continue;
+    tried[s] = 1;
+    const t = forward(s);
+    if (t < 0) continue;
+    // Where the same colour already shows, that pixel stands in for this one; elsewhere it is drawn if the pixel is free.
+    if (pixels[t] === P[s]) { shown[s].push(t); best[s] = t; } else if (free(t)) paint(t, s); else continue;
+    for (const [dx, dy] of RING) { const x = s % pw + dx, y = Math.floor(s / pw) + dy, q = y * pw + x; if (x >= 0 && y >= 0 && x < pw && y < ph && P[q] === P[s] && !shown[q].length && !tried[q]) queue.push(q); }
+  }
+  const rep = s => (best[s] >= 0 ? best[s] : forward(s));
+  for (let s = 0; s < P.length; s++) {
+    if (P[s] < 0) continue;
+    const sx = s % pw, sy = Math.floor(s / pw);
+    for (const [dx, dy] of [[1, 0], [-1, 1], [0, 1], [1, 1]]) {
+      const qx = sx + dx, qy = sy + dy, q = qy * pw + qx;
+      if (qx < 0 || qx >= pw || qy >= ph || P[q] !== P[s] || (!shown[s].length && !shown[q].length)) continue;
+      const a = rep(s), b = rep(q);
+      if (a < 0 || b < 0 || touches(s, q)) continue;
+      const ax = a % width, ay = Math.floor(a / width), bx = b % width, by = Math.floor(b / width);
+      if (Math.max(Math.abs(ax - bx), Math.abs(ay - by)) <= 1) continue;
+      const path = linePoints(ax, ay, bx, by);
+      for (let k = 1; k < path.length - 1; k++) {
+        const t = path[k].y * width + path[k].x;
+        if (pixels[t] !== P[s] && free(t)) paint(t, k < path.length / 2 ? s : q);
+      }
+    }
+  }
+  const image = { ...rect, pixels, edge: edge?.size ? edge : null };
+  if (byPose.size >= IMAGE_CACHE) byPose.delete(byPose.keys().next().value);
+  byPose.set(key, image);
+  return image;
+}
 /**
  * Palette index (-1 transparent) a placed instance shows at canvas pixel `point`; `part` is a rendered part with pixels.
- * Shared by rendering and hit-testing. RotSprite instances sample the cached 8× Scale2x³ image at the pixel centre.
+ * Shared by rendering and hit-testing. Instances that resample read their cached instanceImage; the rest map exactly.
  */
 export function instancePixel(instance, part, point) {
-  if (!smoothSampling(instance)) {
+  if (!resamples(instance, part)) {
     const local = canvasToPartPoint(instance, part, point);
     return local.x < 0 || local.y < 0 || local.x >= part.width || local.y >= part.height ? -1 : part.pixels[local.y * part.width + local.x];
   }
-  const size = instanceSize(instance, part), box = transformedSize(instance, part);
-  const [u, v] = boxPoint(instance, box, point.x - instance.x + .5, point.y - instance.y + .5);
-  const [a, b, c, d] = matrix(instance.transform);
-  // Continuous inverse of the dihedral transform (transpose), measured to box edges rather than pixel indices.
-  const lx = a*u + c*v + (a < 0 ? size.width : 0) + (c < 0 ? size.width : 0), ly = b*u + d*v + (b < 0 ? size.height : 0) + (d < 0 ? size.height : 0);
-  const image = rotspriteImage(part);
-  const sx = Math.floor(lx * part.width / size.width * ROTSPRITE_SCALE + EPSILON), sy = Math.floor(ly * part.height / size.height * ROTSPRITE_SCALE + EPSILON);
-  return sx < 0 || sy < 0 || sx >= image.width || sy >= image.height ? -1 : image.pixels[sy * image.width + sx];
+  const image = instanceImage(instance, part), x = point.x - instance.x - image.x, y = point.y - instance.y - image.y;
+  return x < 0 || y < 0 || x >= image.width || y >= image.height ? -1 : image.pixels[y * image.width + x];
 }
 
 /** Canvas position of part pixel (x,y) relative to its instance origin, matching the renderer's transforms. */
@@ -313,7 +484,7 @@ export function grownInstanceShift(transform, before, after, left, top) {
 }
 
 /** Skew, 3D turn, then rotate a pivot-relative point as rendering does (`inverse` undoes it). */
-function poseVector(instance, part, v, inverse = false) {
+export function poseVector(instance, part, v, inverse = false) {
   const [cos, sin] = turned(instanceAngle(instance)), skew = instance.skew, box = transformedSize(instance, part);
   const map = instanceTilt(instance) && tiltMap(instance, box, pivotPoint(instance, box));
   let { x, y } = v;

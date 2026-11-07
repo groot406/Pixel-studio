@@ -22,7 +22,7 @@ Object transforms (combine freely; they never change the part itself, so edits t
 - Skew (shear): SKEW instance-id sx sy (whole degrees, -60..60 each; SKEW id 0 0 resets) slants about the pivot: first x moves by tan(sx)·(y − pivot y), then y moves by tan(sy)·(x − pivot x). SKEW id -15 0 leans the top to the right (positive leans it left); good for running lean, wind and fake perspective.
 - 3D turn (pseudo-3D rotation about the other axes): TILT instance-id x y [PERSPECTIVE p] (whole degrees, -180..180 each; TILT id 0 0 resets). y turns the object about a vertical axis through the pivot like a door, coin or a character turning round: its width shrinks by cos(y), at 90 it is edge-on (invisible) and past 90 the back shows (the artwork mirrored); positive y moves the right side away. x tips it about a horizontal axis (head over heels, a card flipping vertically): height shrinks by cos(x), positive x moves the top away. PERSPECTIVE p (0..100, default 30) makes the far edge shorter and the near edge taller; 0 is flat. TILT id 0 180 is a horizontal mirror and TILT id 180 0 a vertical one. A coin spin: TILT coin 0 45, then 0 90, 0 135, ... in successive frames.
 - Deform: DEFORM instance-id NONE | WAVE X|Y amplitude wavelength phase | BULGE strength | TWIST degrees, in box space about the box centre. WAVE X shifts each row y sideways by round(amplitude·sin(360°·y/wavelength + phase)); WAVE Y shifts each column vertically the same way (amplitude 1..32, wavelength 2..256, phase 0..359 degrees; the box grows by the amplitude). BULGE strength (-100..100; positive bulges/magnifies the centre, negative pinches) and TWIST degrees (-360..360; full turn at the centre fading to none at the edge) act inside the ellipse that fits the box. NONE, BULGE 0 and TWIST 0 reset. Animate a flag or water by stepping the WAVE phase each frame: FRAME wave_1 100 FROM wave_0, CEL fx, DEFORM flag WAVE X 2 8 45, then phase 90, 135, ...
-- Sampling: SAMPLE instance-id NEAREST|ROTSPRITE. NEAREST (default) picks one part pixel per canvas pixel. ROTSPRITE smooths free angles, skew, 3D turns and deforms like the RotSprite algorithm (Scale2x three times to 8×, then sampling); it uses only existing palette colours and is identical to NEAREST for unrotated or quarter-turned objects.
+- Sampling: SAMPLE instance-id NEAREST|ROTSPRITE|AA. NEAREST (default) picks one part pixel per canvas pixel. ROTSPRITE smooths free angles, skew, 3D turns and deforms like the RotSprite algorithm (Scale2x three times to 8×, then sampling). AA (smooth anti-aliasing) takes 4×4 samples per pixel: where two part colours meet it uses the palette colour between them, and partly covered edge pixels blend with the artwork already beneath in the cel. All modes use only palette colours, keep 1px lines and outlines unbroken, and are identical to NEAREST for unrotated, unscaled or quarter-turned objects.
 - Order: resize, then flip/quarter turn, then deform, then skew, then 3D turn (TILT), then free rotation about the pivot. x y is the top-left of the unrotated box; with no PIVOT, rotation keeps that box's centre.
 To place a transformed object, write its USE line, then RESIZE/ROTATE/PIVOT/SKEW/TILT/DEFORM/SAMPLE lines for the same instance-id in that cel.
 Changing an existing object in a later cel (for example after FRAME FROM): AT instance-id x y sets its absolute position. TURN instance-id transform changes its flip/quarter turn. RESIZE, ROTATE, PIVOT, SKEW, TILT, DEFORM and SAMPLE as above. SWAP instance-id part-id changes its part (keeping position and transforms). DROP instance-id removes it. These keep draw order and do not paint trails.
@@ -41,6 +41,7 @@ ANIM id "name" fps starts an animation. FRAME id duration-ms CLEAR starts blank;
 ORDER layer-id layer-id ... optionally appears once immediately after ANIM, before its first FRAME. Include every declared layer ID exactly once, bottom to top. This overrides declaration order only for that animation; omitted ORDER uses declaration order. FRAME FROM copies cels, not the source animation's order. Older readers without ORDER support cannot read files containing it.
 FRAMEORDER layer-id layer-id ... optionally appears once after FRAME, before CEL. It overrides that frame's bottom-to-top stack with every layer exactly once. Omission uses animation order. FRAME FROM does not inherit frame order.
 BONE id layer-id instance-id PARENT parent-bone-id|- [JOINT x y] [LIMIT min max] [REST degrees] [NAME "name"] rigs a skeleton (after the animations, before END). A bone is one object (instance-id in layer-id, the same object in every frame); its joint is that object's PIVOT, pinned to point JOINT x y of the parent's part (part pixels, decimals allowed, 0.5 = a pixel centre). Omit JOINT to use where the child's pivot sits on the parent in the first frame showing both. A root bone uses PARENT - and no JOINT. LIMIT bounds the angle relative to the parent (a root: its own ROTATE), REST is the relative angle of the rest pose. Posing a rig = ROTATE each part per frame (children keep their joints on the parent); place each child so its PIVOT lies on the parent's joint. Example: BONE torso fig body PARENT -, BONE arm fig arm PARENT torso JOINT 2.5 1.5 LIMIT -120 120.
+POSE id "name" bone-id=degrees ... [MOVE root-bone-id dx dy] saves a named pose in the pose library (after the BONE lines): each bone's angle relative to its parent (a root: its own ROTATE), whole degrees; MOVE offsets a root's pivot from where it stands in its animation's first frame. Poses are not frames: the editor applies them to frames (Skeleton mode → Poses). Example: POSE crouch "Crouch" body=0 leg-l=40 shin-l=-80 leg-r=-40 shin-r=80 MOVE body 0 3.
 CEL layer-id selects a frame's layer. CEL layer-id CLEAR resets that cel. CEL layer-id RASTER selects raw pixels (an empty or already raster cel); SPAN and SHIFT dx dy are allowed until another CEL. SHIFT translates only the selected raster cel, clips edges and clears exposed pixels. RASTER retains compact pixel deltas without creating shared parts.
 Limits: canvas/parts 1–128 per dimension; 1–64 colors; 1–32 layers; at most 256 parts; 1–100 animations, 1–256 frames each, 1024 total; 1,048,576 canvas pixel slots across all cels; same budget for part pixels; 32,768 expanded operations and 8,388,608 rendering work units. FPS 1–60; duration 1–60000 ms. Names: project 120, layer/animation 80 characters. Text 4 MiB; line 4096 characters. END is required. Preserve hidden artwork and deliberate blank frames.`;
 
@@ -181,7 +182,7 @@ export function applyCelCommand(source, tokens) {
   }
   if (command === 'DEFORM') { op.deform = deformToken(tokens.slice(2)); if (!op.deform) delete op.deform; }
   if (command === 'SAMPLE') {
-    if (!['NEAREST', 'ROTSPRITE'].includes(tokens[2])) throw new Error('SAMPLE expects NEAREST or ROTSPRITE.');
+    if (!['NEAREST', 'ROTSPRITE', 'AA'].includes(tokens[2])) throw new Error('SAMPLE expects NEAREST, ROTSPRITE or AA.');
     op.sampling = tokens[2].toLowerCase();
   }
   if (command === 'AT') { op.x = numberToken(tokens[2]); op.y = numberToken(tokens[3]); }
@@ -194,7 +195,7 @@ export function applyCelCommand(source, tokens) {
 
 export function decodePXA2(text) {
   const project = { format: 'pixel-studio', version: 3, layers: [], parts: [], animations: [] };
-  const frames = new Map(), bones = [];
+  const frames = new Map(), bones = [], poses = [];
   let animation, frame, source, raster, part, stage = 0, totalFrames = 0, expandedOps = 0, rasterWork = 0;
   const spendRasterWork = count => {
     rasterWork += count;
@@ -240,6 +241,10 @@ export function decodePXA2(text) {
         if (!animation) throw new Error('Declare BONE after the animations.');
         if (bones.length >= 256) throw new Error('At most 256 bones.');
         bones.push(boneDeclaration(t)); frame = source = raster = null;
+      } else if (cmd === 'POSE') {
+        if (!bones.length) throw new Error('Declare POSE after the BONE lines.');
+        if (poses.length >= 64) throw new Error('At most 64 poses.');
+        poses.push(poseDeclaration(t)); frame = source = raster = null;
       } else if (cmd === 'ORDER') {
         if (!animation || animation.frames.length || animation.layerOrder) throw new Error('ORDER is allowed once after ANIM, before its first FRAME.');
         argumentsCount(t, project.layers.length);
@@ -303,7 +308,18 @@ export function decodePXA2(text) {
     } catch (error) { throw new Error(`Line ${number}: ${error.message}`); }
   }
   if (part) throw new Error('Missing ENDPART.');
-  return bones.length ? rigBones(validateProject(project), bones) : validateProject(project);
+  return bones.length ? rigBones(validateProject(project), bones, poses) : validateProject(project);
+}
+function poseDeclaration(t) {
+  if (t.length < 4) throw new Error('POSE needs id "name" and bone-id=degrees.');
+  const pose = { id: artworkId(t[1]), name: quoted(t[2]), bones: {} };
+  for (let i = 3; i < t.length;) {
+    if (t[i] === 'MOVE') { (pose.moves ||= {})[artworkId(t[i + 1])] = { x: numberToken(t[i + 2]), y: numberToken(t[i + 3]) }; i += 4; continue; }
+    const m = /^([A-Za-z0-9_-]{1,100})=(-?\d+)$/.exec(t[i]);
+    if (!m) throw new Error(`Expected bone-id=degrees or MOVE, not ${t[i]}.`);
+    pose.bones[m[1]] = numberToken(m[2]); i++;
+  }
+  return pose;
 }
 const decimal = value => { if (!/^-?\d+(?:\.\d+)?$/.test(value ?? '')) throw new Error(`Invalid number ${value}.`); return Number(value); };
 function boneDeclaration(t) {
@@ -320,7 +336,7 @@ function boneDeclaration(t) {
   return bone;
 }
 /** Attach decoded bones; a missing JOINT comes from the child's pivot on the parent in the first frame showing both. */
-function rigBones(project, bones) {
+function rigBones(project, bones, poses = []) {
   const opIn = (frame, layerId, id) => frame.cels.find(c => c.layerId === layerId)?.source?.ops.find(op => op.type === 'use' && op.id === id);
   const byId = new Map(bones.map(b => [b.id, b])), partOf = op => project.parts.find(part => part.id === op.partId);
   for (const bone of bones) {
@@ -334,7 +350,7 @@ function rigBones(project, bones) {
       break;
     }
   }
-  return validateProject({ ...project, bones });
+  return validateProject({ ...project, bones, ...(poses.length ? { poses } : {}) });
 }
 
 export function encodeOperation(op) {
@@ -429,6 +445,7 @@ export function encodePXA2(input) {
   }
   const num = v => String(Math.round(v * 1000) / 1000);
   for (const b of p.bones || []) lines.push(`BONE ${b.id} ${b.layerId} ${b.instanceId} PARENT ${b.parent || '-'}${b.anchor ? ` JOINT ${num(b.anchor.x)} ${num(b.anchor.y)}` : ''}${b.limit ? ` LIMIT ${b.limit.min} ${b.limit.max}` : ''}${b.rest ? ` REST ${b.rest}` : ''}${b.name !== undefined ? ` NAME ${q(b.name)}` : ''}`);
+  for (const pose of p.poses || []) lines.push(`POSE ${pose.id} ${q(pose.name)} ${Object.entries(pose.bones).map(([id, a]) => `${id}=${a}`).join(' ')}${Object.entries(pose.moves || {}).map(([id, m]) => ` MOVE ${id} ${m.x} ${m.y}`).join('')}`);
   const text = [...lines, 'END', ''].join('\n');
   if (new TextEncoder().encode(text).length > PXA2_MAX_BYTES) throw new Error('PXA export exceeds 4 MiB.');
   return text;

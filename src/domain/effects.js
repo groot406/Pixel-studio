@@ -13,6 +13,9 @@ import {
 } from './pixel-fx.js';
 import { rampFromPalette, darkerMap, lighterMap, shadingRamp, addRampToPalette, cycleRamp, cycleLoopLength } from './colour.js';
 import { canInsertFrames } from './animate.js';
+import { autoOutline } from './shading.js';
+import { applyFixes } from './cleanup.js';
+import { smoothJaggies } from './antialias.js';
 
 /** Map palette index → its hue-family ramp (indices, dark → light), the `ramps` autoShade and selOut take. */
 export function rampsForPalette(palette, { hueTolerance = 35 } = {}) {
@@ -25,7 +28,7 @@ export function gradientStops(palette, fromIndex, toIndex) {
   return ramp.includes(toIndex) ? gradientStopsBetween(ramp, fromIndex, toIndex) : [fromIndex, toIndex];
 }
 
-export const PIXEL_EFFECTS = ['outline', 'selOut', 'innerGlow', 'rimLight', 'autoShade', 'cleanup', 'offsetWrap', 'gradient', 'dither'];
+export const PIXEL_EFFECTS = ['outline', 'selOut', 'innerGlow', 'rimLight', 'autoShade', 'cleanup', 'offsetWrap', 'gradient', 'dither', 'autoOutline', 'pixelFix', 'smoothJaggies'];
 
 /** One effect on one cel's pixels; palette-derived maps/ramps fill in missing options. */
 function run(effect, pixels, width, height, palette, o) {
@@ -36,6 +39,9 @@ function run(effect, pixels, width, height, palette, o) {
     case 'rimLight': return rimLight(pixels, width, height, o);
     case 'autoShade': return autoShade(pixels, width, height, { ramps: rampsForPalette(palette), ...o });
     case 'cleanup': return cleanupDoubles(pixels, width, height, o.color);
+    case 'autoOutline': return autoOutline(pixels, width, height, palette, o);
+    case 'pixelFix': return applyFixes(pixels, o.fixes || []);
+    case 'smoothJaggies': return smoothJaggies(pixels, width, height, palette, { strength: o.strength ?? 1, background: o.background ?? -1 });
     case 'offsetWrap': return offsetWrap(pixels, width, height, o.dx ?? Math.floor(width / 2), o.dy ?? Math.floor(height / 2));
     case 'gradient': return gradientFill(pixels, width, height, { ...o, colors: o.colors ?? gradientStops(palette, o.fromIndex, o.toIndex) });
     case 'dither': {
@@ -66,6 +72,8 @@ function scopeMask({ mask, rect }, width, height) {
  * - gradient {from, to, shape:'linear'|'radial'|'diamond'|'angle', colors | fromIndex+toIndex, style:'bands'|'dither',
  *   matrix:2|4|8, repeat:'clamp'|'repeat'|'mirror', region:'all'|'flood'|'mask', seed (flood start)}
  * - dither {a, b, ratio 0..1, matrix, region:'all'|'opaque'|'flood', seed} ordered (Bayer) two-colour fill
+ * - autoOutline {mode:'outside'|'inside', corners, style:'selective'|'single', color} darkest-of-ramp outline (shading.js)
+ * - pixelFix {fixes:[{index, value}]} applies Pixel cleanup fixes (cleanup.js)
  * Errors: locked/hidden container, unknown effect or invalid options (messages from pixel-fx), a locked object in
  * frame scope. Returns { project, frameIds (changed frames), skipped (frames with locked objects) }.
  */

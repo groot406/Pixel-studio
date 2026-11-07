@@ -2,7 +2,8 @@
  * Skeleton mode: rig placed objects into bone trees and pose them on the canvas (src/domain/skeleton.js). Rig step:
  * click a child part, then its parent where they join (or drag from the child onto the parent). Pose step: drag a part
  * to turn it about its joint (FK, children follow), drag a hand or foot to solve the chain (IK), drag the root to move
- * the figure; key frames, pose clipboard and in-betweens live in the bar (#rig-bar). Every drag is one undo step.
+ * the figure; key frames, pose clipboard and in-betweens live in the bar (#rig-bar), the pose library, templates and
+ * retargeting in rig-library.js. Every drag is one undo step.
  */
 import {
   attachBone, removeBone, renameBone, setBoneLimit, setRestPose, rotateBone, moveSkeleton, ikChain, copyPose, pastePose,
@@ -12,6 +13,8 @@ import { instanceBox, instancePixel } from '../domain/geometry.js';
 import { frameObjects } from '../domain/objects.js';
 import { renderParts } from '../domain/artwork.js';
 import { closeMotionMode } from './motion-modes.js';
+import { characters } from '../domain/poses.js';
+import { initRigLibrary, libraryHTML, paintThumbs, libraryAction, libraryChange } from './rig-library.js';
 
 const PINK = '#ff2d87';
 const EASES = [['easeInOut', 'Smooth'], ['easeIn', 'Speed up'], ['easeOut', 'Slow down'], ['linear', 'Linear']];
@@ -29,6 +32,14 @@ const view = () => rigView(st().project, animation().id, st().frameId);
 const bones = () => st().project.bones || [];
 const boneName = b => d.escapeHTML(b?.name || b?.id || '');
 const boneFor = item => item && boneOf(st().project, item.layerId, item.key);
+const characterList = () => characters(st().project, animation().id, st().frameId);
+/** The character being posed: the selected bone's root, else the first rigged figure in the frame. */
+function character() {
+  const list = characterList();
+  let at = bones().find(b => b.id === r?.bone);
+  while (at?.parent) at = bones().find(b => b.id === at.parent);
+  return list.find(c => c.id === at?.id)?.id || list[0]?.id;
+}
 
 /** Visible, unlocked placed objects showing a pixel at (or near) canvas point p, topmost first. */
 function objectsAt(p, exclude) {
@@ -167,7 +178,8 @@ function controls() {
     <span class="rig-row"><span class="motion-label">Angle</span>${chips('snap', [[0, 'Free'], [5, '5°'], [15, '15°']], r.snap)}${toggle('rotsprite', 'RotSprite', rot, 'Smooth rotated pixels (RotSprite sampling)')}</span>
     <span class="rig-row">${toggle('ik', 'IK hands & feet', r.ik, 'Drag the end of a limb to reach; Shift-drag switches between IK and rotate')}${r.ik ? chips('chain', [['auto', 'Limb'], [2, '2'], [3, '3'], ['all', 'All']], r.chain) : ''}</span>
     <span class="rig-row rig-pose">${button('copy', 'Copy', { icon: 'copy', title: 'Copy this frame’s pose' })}${button('paste', 'Paste', { icon: 'paste', disabled: !clipboard, title: 'Paste the copied pose' })}${button('mirror', 'Mirror', { icon: 'flip-h', title: 'Flip the pose left-right (front views)' })}${button('swap', 'Swap L/R', { icon: 'swap', title: 'Exchange left and right limbs (side-view walk cycles); pairs bones named L/R or left/right' })}${button('reset', 'Reset', { icon: 'undo', title: 'Back to the rest pose' })}</span>
-    ${button('tween', 'In-between…', { icon: 'tween', disabled: !later.length, className: r.tween ? 'active' : '', title: later.length ? 'Fill frames between this key pose and a later one' : 'Add a later key frame first' })}${tween}`;
+    ${button('tween', 'In-between…', { icon: 'tween', disabled: !later.length, className: r.tween ? 'active' : '', title: later.length ? 'Fill frames between this key pose and a later one' : 'Add a later key frame first' })}${tween}
+    ${bones().length ? libraryHTML() : ''}`;
 }
 function renderBar() {
   const bar = d.$('rig-bar');
@@ -178,6 +190,7 @@ function renderBar() {
     <span class="motion-hint">${hint()}</span><span class="motion-actions">${button('done', 'Done <kbd>Enter</kbd>', { primary: true, icon: 'check' })}</span></div>
     <div class="motion-controls">${controls()}</div><p class="motion-info" aria-live="polite"></p>`;
   bar.hidden = false;
+  if (r.step === 'pose' && bones().length) paintThumbs(bar);
   bar.querySelector('.rig-tween')?.scrollIntoView({ block: 'nearest' });
   if (focus) bar.querySelector(`input[data-bone="${focus}"][data-field="name"]`)?.focus();
   placeBar(); info();
@@ -204,7 +217,7 @@ export function openRigMode() {
   const { state } = d;
   if (state.inPlaceEdit) { d.toast('Finish editing the object on the canvas first.'); return; }
   closeMotionMode(); d.finishDrawing();
-  r = { step: bones().length ? 'pose' : 'rig', snap: 0, ik: true, chain: 'auto', playing: state.playing, scope: state.objectScope, tween: null };
+  r = { step: bones().length ? 'pose' : 'rig', snap: 0, ik: true, chain: 'auto', playing: state.playing, scope: state.objectScope, tween: null, poseMove: true, blend: 100 };
   Object.assign(state, { selection: null, cursor: null, objectSelection: null, playing: true, previewTime: 0, objectScope: 'frame' });
   d.$('workbench').classList.add('motion-active'); d.$('workbench').dataset.motion = 'rig';
   renderBar(); d.renderAll();
@@ -252,6 +265,7 @@ const poseOpts = () => ({ animationId: animation().id, frameId: st().frameId, fr
 function act(name, el) {
   const { state } = d;
   if (name === 'done') return closeRigMode();
+  if (libraryAction(name, el)) return;
   if (name === 'pose') { Object.assign(r, { step: 'pose', child: null, info: '' }); renderBar(); d.renderAll(); return; }
   if (name === 'prev' || name === 'next') { d.selectFrameAt(frameIndex() + (name === 'prev' ? -1 : 1)); return; }
   if (name === 'key') { d.addFrame(true); return; }
@@ -286,6 +300,7 @@ function setParam(name, value) {
     const ids = new Set(bones().map(b => `${b.layerId}/${b.instanceId}`));
     return commit(p => { for (const f of p.animations.find(a => a.id === animation().id).frames) for (const cel of f.cels) for (const op of cel.source?.ops || []) if (op.type === 'use' && ids.has(`${cel.layerId}/${op.id}`)) { if (value) op.sampling = 'rotsprite'; else delete op.sampling; } return p; });
   }
+  if (name === 'character') { r.bone = String(value); renderBar(); d.renderCanvas(); return; }
   if (['count', 'easing'].includes(name)) { r.tween[name] = value; computeTween(); renderBar(); d.renderPreview(); return; }
   r[name] = value; renderBar(); d.renderCanvas();
 }
@@ -403,6 +418,7 @@ function keydown(event) {
 
 export function initRigMode(deps) {
   d = deps;
+  initRigLibrary({ d, r: () => r, button, chips, toggle, animation, characters: characterList, character, poseOpts, commit });
   const stage = d.$('canvas-stage'), bar = d.$('rig-bar');
   for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'dblclick', 'contextmenu']) stage.addEventListener(type, pointer, true);
   stage.addEventListener('pointerleave', () => { if (r?.hover && !r.drag) { r.hover = null; d.renderCanvas(); } });
@@ -418,10 +434,10 @@ export function initRigMode(deps) {
   });
   bar.addEventListener('change', event => {
     const el = event.target;
-    if (!r) return;
+    if (!r || libraryChange(el)) return;
     if (el.dataset.field === 'name') commit(p => renameBone(p, el.dataset.bone, el.value));
     if (el.dataset.field === 'tween-to') { r.tween.to = el.value; computeTween(); renderBar(); d.renderPreview(); }
   });
   bar.addEventListener('focusin', event => { const row = event.target.closest('.rig-bone'); if (row && r && r.bone !== row.dataset.bone) { r.bone = row.dataset.bone; d.renderCanvas(); } });
-  bar.addEventListener('keydown', event => { if (event.key === 'Enter' && event.target.dataset?.field === 'name') { event.preventDefault(); event.target.blur(); } });
+  bar.addEventListener('keydown', event => { if (event.key === 'Enter' && ['name', 'pose-name'].includes(event.target.dataset?.field)) { event.preventDefault(); event.target.blur(); } });
 }

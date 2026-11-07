@@ -159,3 +159,22 @@
 #pixel-canvas.picking-point { cursor: crosshair; outline: 2px dashed #ff2d87; outline-offset: 2px; }
 .maths-form .form-grid { margin-top: 12px; }
 .maths-form > .button.small { margin-top: 10px; }
+
+/* Shade tool ramp and the Pixel cleanup checker. */
+.shade-ramp i.current { flex-grow: 1.6; box-shadow: inset 0 0 0 2px #fff, inset 0 0 0 3px var(--green); }
+.tool-options .gradient-options .tool-hint { margin: 0; }
+.cleanup-results { display: grid; gap: 8px; margin-top: 10px; padding: 9px; border: 1px solid #dce4d5; border-radius: 8px; background: #fffefb; font-size: 11px; color: #52664d; }
+.cleanup-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; }
+.cleanup-head strong { color: #385440; font-weight: 650; line-height: 1.4; }
+.cleanup-actions { display: flex; gap: 5px; }
+.cleanup-list { display: grid; gap: 2px; max-height: 220px; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+.cleanup-list li { display: flex; align-items: center; gap: 4px; padding: 1px 2px; border-radius: 5px; }
+.cleanup-list li.focused, .cleanup-list li:hover { background: #f3f6ee; }
+.cleanup-go { display: flex; flex: 1 1 auto; align-items: center; gap: 7px; min-width: 0; padding: 4px; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.cleanup-go small { margin-left: auto; color: #829674; font-variant-numeric: tabular-nums; }
+.cleanup-mark { flex: 0 0 auto; width: 9px; height: 9px; border: 2px solid; border-radius: 2px; }
+.cleanup-mark.stray { border-color: #e0344a; border-radius: 50%; }
+.cleanup-mark.corner { border-color: #e8892c; }
+.cleanup-mark.jaggy { border-color: #2f7de1; }
+.cleanup-mark.banding { border-color: #8a4fd6; border-style: dashed; }
+.gradient-options > .check-row { margin: 0; }

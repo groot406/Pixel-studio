@@ -139,7 +139,7 @@ export function validateProject(input) {
   }
   const budget = artworkBudget();
   const parts = input.version === 3 ? validateParts(input.parts, palette.length, budget) : [];
-  const partImages = renderParts(parts);
+  const partImages = renderParts(parts, palette);
   const readLayerOrder=(value,label)=>{
     if(value===undefined)return undefined;
     if(!Array.isArray(value) || value.length!==layers.length || new Set(value).size!==layers.length || Array.from(value).some(id=>!layerIds.has(id))) throw new Error(`${label} layer order must contain every layer ID exactly once.`);
@@ -195,7 +195,8 @@ export function validateProject(input) {
     };
   });
   const bones = input.version === 3 ? readBones(input.bones, layerIds, animations) : [];
-  return { format: 'pixel-studio', version: input.version === 3 ? 3 : 2, name, width, height, palette, layers, animations, ...(input.version === 3 ? { parts } : {}), ...(bones.length ? { bones } : {}) };
+  const poses = bones.length ? readPoses(input.poses, bones) : [];
+  return { format: 'pixel-studio', version: input.version === 3 ? 3 : 2, name, width, height, palette, layers, animations, ...(input.version === 3 ? { parts } : {}), ...(bones.length ? { bones } : {}), ...(poses.length ? { poses } : {}) };
 }
 
 const MAX_BONES = 256, BONE_ID = /^[A-Za-z0-9_-]{1,100}$/;
@@ -255,6 +256,33 @@ function readBones(value, layerIds, animations) {
   const parents = new Set(bones.map(b => b.parent).filter(Boolean));
   bones = bones.filter(b => b.parent || parents.has(b.id));
   return bones;
+}
+
+const MAX_POSES = 64;
+/**
+ * Pose library (needs bones): {id, name, bones: {boneId: relative degrees}, moves?: {rootBoneId: {x, y}}}. Angles are
+ * whole degrees relative to the parent (a root: its own angle); moves offset a root's pivot from its place in the
+ * animation's first frame. Entries for missing bones are dropped, then poses left empty.
+ */
+function readPoses(value, bones) {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > MAX_POSES) throw new Error(`The pose library holds at most ${MAX_POSES} poses.`);
+  const known = new Set(bones.map(b => b.id)), roots = new Set(bones.filter(b => !b.parent).map(b => b.id)), seen = new Set();
+  const int = (v, max, label) => { if (!Number.isInteger(v) || Math.abs(v) > max) throw new Error(`${label} must be a whole number (±${max}).`); return v; };
+  return value.map((pose, index) => {
+    const label = `Pose ${index + 1}`;
+    if (!object(pose) || typeof pose.id !== 'string' || !BONE_ID.test(pose.id)) throw new Error(`${label} needs an ID of letters, digits, _ or -.`);
+    if (seen.has(pose.id)) throw new Error(`Duplicate pose ID ${pose.id}.`);
+    seen.add(pose.id);
+    if (!object(pose.bones)) throw new Error(`${label} needs bone angles.`);
+    const out = { id: pose.id, name: readName(pose.name, `${label} name`, 60), bones: {} };
+    for (const [id, angle] of Object.entries(pose.bones)) if (known.has(id)) out.bones[id] = int(angle, 360, `${label} angle`);
+    if (pose.moves !== undefined) {
+      if (!object(pose.moves)) throw new Error(`${label} moves need x and y.`);
+      for (const [id, m] of Object.entries(pose.moves)) if (roots.has(id) && object(m)) (out.moves ||= {})[id] = { x: int(m.x, 256, `${label} move`), y: int(m.y, 256, `${label} move`) };
+    }
+    return out;
+  }).filter(pose => Object.keys(pose.bones).length);
 }
 
 /** Return the actual editable cel array. Callers must pass a normalized layered frame. */

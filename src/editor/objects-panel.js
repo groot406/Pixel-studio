@@ -29,7 +29,7 @@ export function renderObjectsPanel({project,animation,frame,selected,selection=[
     const children=stack.grouped?stack.children.filter(node=>!isEmptyNode(cel,node)):stack.children;
     return {...stack,children,empty:stack.children.every(node=>isEmptyNode(cel,node))};
   });
-  const images=renderParts(project.parts || []);
+  const images=renderParts(project.parts || [], project.palette);
   const row=(stack,node,group=false)=>{
     const {layer}=stack, instance=node?.instance, key=group?'@group':node.key;
     const active=selection.some(item=>item.layerId===layer.id && item.key===key) || (selected?.layerId===layer.id && selected.key===key && !selection.length);

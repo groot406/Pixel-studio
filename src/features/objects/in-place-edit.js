@@ -15,7 +15,7 @@ export function createInPlaceEdit(project,target,scope='shared') {
   const instance=frame?.cels.find(c=>c.layerId===layer?.id)?.source?.ops.find(op=>op.type==='use' && op.id===target.instanceId);
   if(!instance || !layer)throw new Error('Choose a part instance to edit on the canvas.');
   if(!layer.visible || layer.locked || instance.visible===false || instance.locked)throw new Error('Show and unlock this object and its group before editing it.');
-  const images=renderParts(sourceProject.parts), image=images.get(instance.partId);
+  const images=renderParts(sourceProject.parts, sourceProject.palette), image=images.get(instance.partId);
   let previewId='in_place_preview';
   while(images.has(previewId))previewId+='_';
   const session={sourceProject,target:{...target},frame,placed:instance,posed:posed(instance),partId:instance.partId,
@@ -140,7 +140,7 @@ function stamp(session,stroke,points) {
       if(!insidePart(session,local) || stroke.touched.has(key))continue;
       stroke.touched.add(key);
       const index=local.y*session.width+local.x, color=session.pixels[index];
-      if(color>=0)session.pixels[index]=shadeIndex(session.sourceProject.palette,color,stroke.shade || -1);
+      if(color>=0)session.pixels[index]=stroke.shadeStep?stroke.shadeStep(color,stroke.shade || -1):shadeIndex(session.sourceProject.palette,color,stroke.shade || -1);
     }
     return;
   }

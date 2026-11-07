@@ -31,3 +31,44 @@
 .rig-tween .motion-chips { flex-wrap: wrap; }
 .motion-bar.docked .rig-tween { flex-direction: column; align-items: stretch; }
 .motion-bar .button.small.active { border-color: var(--green); background: #e3efe0; }
+/* Pose library cards and the template / retarget dialogs (rig-library.js). */
+.rig-library { display: flex; flex: 1 0 100%; flex-direction: column; gap: 6px; padding-top: 8px; border-top: 1px solid #e3e9dc; }
+.rig-library .rig-row { align-items: center; }
+.rig-blend { display: inline-flex; align-items: center; gap: 5px; color: #65735e; font-size: 11px; }
+.rig-blend input { width: 74px; accent-color: var(--green); }
+.rig-blend output { min-width: 32px; font-variant-numeric: tabular-nums; }
+.rig-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 6px; max-height: 196px; margin: 0; padding: 0; overflow: auto; list-style: none; }
+.motion-bar:not(.docked) .rig-cards { grid-auto-flow: column; grid-template-columns: none; grid-auto-columns: 82px; max-height: none; overflow-x: auto; }
+.rig-card { position: relative; display: flex; flex-direction: column; gap: 2px; padding: 4px; border: 1px solid #dce4d5; border-radius: 9px; background: #fff; }
+.rig-card:hover { border-color: var(--green); }
+.rig-card-apply { display: grid; place-items: center; height: 64px; padding: 2px; border: 0; border-radius: 6px; background: #f4f8f0; cursor: pointer; }
+.rig-card-apply:hover { background: #e3efe0; }
+.rig-card-apply canvas { width: auto; max-width: 100%; height: 58px; object-fit: contain; image-rendering: pixelated; }
+.rig-card .rig-name { flex: none; height: 20px; padding: 0 3px; font-size: 10px; text-align: center; }
+.rig-card-tools { position: absolute; top: 6px; right: 6px; display: none; gap: 2px; }
+.rig-card:hover .rig-card-tools, .rig-card:focus-within .rig-card-tools { display: flex; }
+.rig-card-tools .rig-mini { min-width: 20px; height: 18px; padding: 0 3px; }
+.rig-dialog .rig-row { align-items: center; margin: 4px 0 2px; }
+.rig-template-pick { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.rig-template-pick .motion-chip { padding: 6px 12px; font-size: 12px; }
+.rig-dialog-main { display: grid; grid-template-columns: 240px 1fr; gap: 16px; align-items: start; margin-top: 10px; }
+.rig-dialog-stage { display: grid; justify-items: center; gap: 6px; padding: 10px; border-radius: 12px; background: #f4f8f0; }
+.rig-dialog-stage canvas { max-width: 220px; image-rendering: pixelated; }
+.rig-dialog-stage small { color: #7b8a72; font-size: 10px; text-align: center; }
+.rig-range { display: flex; align-items: center; gap: 8px; }
+.rig-range input { flex: 1; accent-color: var(--green); }
+.rig-range output { min-width: 32px; color: #65735e; font-size: 11px; font-variant-numeric: tabular-nums; }
+.rig-roles { margin-top: 12px; }
+.rig-roles summary { color: #627558; font-size: 12px; font-weight: 600; cursor: pointer; }
+.rig-roles summary small { margin-left: 6px; color: #9aa88e; font-weight: 400; }
+.rig-map { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 4px 14px; margin-top: 8px; }
+.rig-retarget-map { grid-template-columns: 1fr; max-height: 300px; margin: 0; overflow: auto; }
+.rig-map-head { display: grid; grid-template-columns: 1fr 1fr; margin: 0 0 2px; color: #9aa88e; font-size: 10px; }
+.rig-map-row { display: grid; grid-template-columns: 1fr 1fr; align-items: center; gap: 6px; color: #4d5d46; font-size: 11px; }
+.rig-retarget-map .rig-map-row { grid-template-columns: 1fr 1fr 52px; }
+.rig-map-row select { height: 24px; min-width: 0; border: 1px solid #dce4d5; border-radius: 6px; background: #fff; font: inherit; font-size: 11px; }
+.rig-map-row small { color: #9aa88e; font-size: 9px; }
+.rig-check { display: inline-flex; align-items: center; gap: 6px; color: #4d5d46; font-size: 12px; }
+@media (max-width: 760px) { .rig-dialog-main { grid-template-columns: 1fr; } }
+.motion-bar:not(.docked) .rig-library { flex-direction: row; flex-wrap: wrap; align-items: center; column-gap: 14px; }
+.motion-bar:not(.docked) .rig-cards { flex: 1 0 100%; }

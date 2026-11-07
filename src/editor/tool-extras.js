@@ -7,6 +7,9 @@ import { applyGradient, applyPixelEffect, gradientStops, strokePoints, toolLineP
 import { gradientFill, applyMask, wrapPoint } from '../domain/pixel-fx.js';
 import { rampFromPalette } from '../domain/colour.js';
 import { brushPoints, snapLineEnd } from '../domain/toolbox.js';
+import { paletteRamp, shadeMap } from '../domain/shading.js';
+import { initCurveTool, renderCurveOptions, drawCurveOverlay } from './curve-tool.js';
+import { initCleanupPanel, drawCleanupOverlay } from './cleanup-panel.js';
 
 let d;
 const SHAPE_NAMES = { linear: 'Linear', radial: 'Radial', diamond: 'Diamond', angle: 'Angle' };
@@ -25,6 +28,10 @@ export function initToolExtras(deps) {
   state.gradient = { shape: 'linear', style: 'bands', matrix: 4, repeat: 'clamp', region: 'flood', to: null };
   state.cleanLines = false;
   state.tileMode = false;
+  state.shade = { mode: 'hue-shift', direction: -1 };
+  initCurveTool(deps); initCleanupPanel(deps);
+  $('shade-mode').onchange = e => { state.shade.mode = e.target.value; renderToolExtras(); };
+  $('shade-direction').onchange = e => { state.shade.direction = Number(e.target.value); renderToolExtras(); };
   for (const button of document.querySelectorAll('[data-gradient-shape]')) button.onclick = () => { state.gradient.shape = button.dataset.gradientShape; renderToolExtras(); };
   document.querySelector('.gradient-options .seg-control').addEventListener('keydown', event => {
     const keys = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 };
@@ -61,6 +68,26 @@ function gradientTo() {
 }
 function gradientColors() { return gradientStops(d.state.project.palette, d.state.color, gradientTo()); }
 
+let shadeCache = { key: '', maps: {} };
+/** The Shade tool's next colour for `index` one step along its palette ramp (-1 darker, 1 lighter). */
+export function shadeColour(index, direction) {
+  const { palette } = d.state.project, mode = d.state.shade.mode, key = `${mode}|${palette.join()}`;
+  if (shadeCache.key !== key) shadeCache = { key, maps: {} };
+  return (shadeCache.maps[direction] ||= shadeMap(palette, direction, { mode }))[index] ?? index;
+}
+/** Shade step for a click: the chosen direction, reversed by the right button. */
+export const shadeDirection = reversed => d.state.shade.direction * (reversed ? -1 : 1);
+
+function renderShadeOptions() {
+  const { state, $ } = d, on = state.tool === 'shade';
+  $('shade-options').hidden = !on;
+  if (!on) return;
+  const { palette } = state.project, ramp = state.color >= 0 ? paletteRamp(palette, state.color, { mode: state.shade.mode }) : [];
+  $('shade-mode').value = state.shade.mode; $('shade-direction').value = String(state.shade.direction);
+  $('shade-ramp').innerHTML = ramp.map(i => `<i style="--swatch:${palette[i]}"${i === state.color ? ' class="current"' : ''} title="Colour ${i + 1} · ${palette[i].toUpperCase()}"></i>`).join('');
+  $('shade-ramp-note').textContent = !ramp.length ? 'Pick a colour to see its ramp.' : ramp.length < 2 ? 'No ramp for this colour: steps to the nearest darker or lighter colour.' : `${ramp.length} colours, dark → light. Painted pixels step along their own ramp.`;
+}
+
 /** Show the options that belong to the active tool; called from renderTools. */
 export function renderToolExtras() {
   const { state, $ } = d, inPlace = Boolean(state.inPlaceEdit);
@@ -91,6 +118,7 @@ export function renderToolExtras() {
   $('toggle-tile').setAttribute('aria-pressed', String(state.tileMode));
   $('workbench').classList.toggle('tile-mode', state.tileMode);
   $('tile-status').hidden = !state.tileMode || inPlace;
+  renderShadeOptions(); renderCurveOptions();
 }
 
 /** Status text for the gradient tool in the canvas footer. */
@@ -192,6 +220,7 @@ export function drawCanvasOverlay(context) {
     context.restore();
   }
   if (state.tileMode && !state.inPlaceEdit) drawSeams(context);
+  drawCleanupOverlay(context); drawCurveOverlay(context);
 }
 /** Mark edge pixels that differ from the pixel they meet across the wrap. */
 function drawSeams(context) {

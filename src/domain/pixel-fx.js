@@ -486,15 +486,16 @@ export function cleanLinePoints(x0, y0, x1, y1) {
 /**
  * Smear frame: union of copies of B swept back along -offset (B moved by `offset` since A), with
  * nearest-in-time priority (B itself on top). color:'source' keeps B's colours on the trail, an
- * index paints the trail solid. Optional `a` (pixels of the previous frame, or null) sits underneath.
+ * index paints the trail solid. Optional `a` (pixels of the previous frame, or null) sits underneath. `steps` (default
+ * the distance) is never fewer than the distance in whole pixels, so consecutive copies touch and the trail has no gaps.
  */
 export function smear(a, b, width, height, { offset, steps, color = 'source' } = {}) {
   const count = readPixels(b, width, height, 'pixels for frame B');
   if (a != null) readPixels(a, width, height, 'pixels for frame A');
   const o = readPoint(offset, 'Smear offset');
   if (color !== 'source') colorIndex(color, 'Smear colour', false);
-  const n = steps ?? Math.max(1, Math.ceil(Math.max(Math.abs(o.x), Math.abs(o.y))));
-  positiveInt(n, 'Smear steps', 1024);
+  if (steps != null) positiveInt(steps, 'Smear steps', 1024);
+  const n = Math.max(steps ?? 1, Math.ceil(Math.max(Math.abs(o.x), Math.abs(o.y))));
   const result = a ? a.slice() : Array(count).fill(-1);
   for (let s = n; s >= 0; s -= 1) {
     const shx = Math.round((-o.x * s) / n), shy = Math.round((-o.y * s) / n);

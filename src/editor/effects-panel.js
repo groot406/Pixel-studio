@@ -1,15 +1,16 @@
 /**
  * Effects panel: pixel effects (src/domain/effects.js) on the active container's cel — outline, selective outline,
- * inner glow, rim light, auto shade, dither and line clean-up — in the Edit scope (this frame / every frame), limited
+ * inner glow, rim light, auto shade, dither, line clean-up and smooth jaggies — in the Edit scope (this frame / every frame), limited
  * to the selection when there is one. Each dialog shows a live before/after preview of the current frame.
  */
 import { applyPixelEffect } from '../domain/effects.js';
 import { compositeFrame } from '../domain/project.js';
 import { rampFromPalette } from '../domain/colour.js';
 import { selectionTarget } from './tool-extras.js';
+import { renderCleanupPanel } from './cleanup-panel.js';
 
 let d;
-const EFFECTS = ['outline', 'selOut', 'innerGlow', 'rimLight', 'autoShade', 'dither', 'cleanup'];
+const EFFECTS = ['outline', 'selOut', 'autoOutline', 'innerGlow', 'rimLight', 'autoShade', 'dither', 'cleanup', 'smoothJaggies'];
 const DIRECTIONS = [[-1, -1, 'top left'], [0, -1, 'top'], [1, -1, 'top right'], [-1, 0, 'left'], null, [1, 0, 'right'], [-1, 1, 'bottom left'], [0, 1, 'bottom'], [1, 1, 'bottom right']];
 const ARROWS = ['↖', '↑', '↗', '←', '', '→', '↙', '↓', '↘'];
 
@@ -36,6 +37,7 @@ export function renderEffectsPanel() {
   $('effects-hint').textContent = reason || `Applies to ${scopeText()}.`;
   $('effects-hint').classList.toggle('maths-reason', Boolean(reason));
   for (const effect of EFFECTS) { const button = $(`effect-${effect}`); button.disabled = Boolean(reason); button.title = reason; }
+  renderCleanupPanel(reason);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -79,6 +81,10 @@ function definition(effect) {
       title: 'Selective outline', intro: 'Outline each area with a darker shade of its own colour (sel-out), optionally lighter or open on the lit side.',
       body: `<div class="form-grid">${lightPicker('fx-light', 'Light from', 0, true)}<div>${select('fx-lit', 'Lit side', [['omit', 'Leave open'], ['lighter', 'Lighter shade'], ['fill', 'Same as the fill']], 'omit')}${select('fx-mode', 'Where', [['outside', 'Outside the art'], ['inside', 'Inside the edge']], 'inside')}</div></div>` + check('fx-corners', 'Fill the corners', false),
       options: () => ({ light: lightOf('fx-light'), lit: d.$('fx-lit').value, mode: d.$('fx-mode').value, corners: d.$('fx-corners').checked }) };
+    case 'autoOutline': return {
+      title: 'Auto outline', intro: 'Outline the artwork and pick each outline pixel’s colour automatically: the darkest shade in the ramp of the colour it touches.',
+      body: `<div class="form-grid">${select('fx-style', 'Colour', [['selective', 'Selective (ramp-darkened)'], ['single', 'One colour']], 'selective')}${select('fx-mode', 'Where', [['outside', 'Outside the art'], ['inside', 'Inside the edge']], 'outside')}</div>${select('fx-ramp', 'Ramps', [['hue-shift', 'Hue-shifted ramps'], ['lightness', 'Lightness only']], 'hue-shift')}${check('fx-corners', 'Fill diagonal corners', true)}` + colourPicker('fx-color', 'Colour for “One colour”', darkest),
+      options: () => ({ style: d.$('fx-style').value, mode: d.$('fx-mode').value, rampMode: d.$('fx-ramp').value, corners: d.$('fx-corners').checked, color: Number(pick('fx-color')) }) };
     case 'innerGlow': return {
       title: 'Inner glow', intro: 'Recolour the pixels just inside the edge of the artwork, like a glow or a soft rim.',
       body: colourPicker('fx-color', 'Colour', lightest) + slider('fx-size', 'Size', 1, 4, 1, 1, px),
@@ -99,6 +105,10 @@ function definition(effect) {
       title: 'Clean up lines', intro: 'Remove the doubled pixels at the corners of 1-pixel lines, so they read crisp (pixel-perfect).',
       body: colourPicker('fx-color', 'Only lines of', 'any', { none: 'Any colour' }),
       options: () => { const v = pick('fx-color'); return v === 'any' ? {} : { color: Number(v) }; } };
+    case 'smoothJaggies': return {
+      title: 'Smooth jaggies', intro: 'Anti-alias stair-stepped edges and 1-pixel lines by adding in-between palette colours at each step, the way pixel artists do by hand. Steps with no palette colour between the two sides stay crisp.',
+      body: slider('fx-strength', 'Strength', 0.25, 1, 0.25, 1, v => `${Math.round(v * 100)}%`) + colourPicker('fx-color', 'Edges against transparency', 'any', { none: 'Leave crisp' }),
+      options: () => { const v = pick('fx-color'); return { strength: Number(d.$('fx-strength').value), background: v === 'any' ? -1 : Number(v) }; } };
   }
 }
 function lum(hex) { return parseInt(hex.slice(1, 3), 16) * .299 + parseInt(hex.slice(3, 5), 16) * .587 + parseInt(hex.slice(5, 7), 16) * .114; }
@@ -129,7 +139,7 @@ function effectDialog(effect) {
   };
   const formatOut = input => {
     const v = Number(input.value);
-    return input.id === 'fx-ratio' ? `${Math.round(v * 100)}%` : `${v} px`;
+    return ['fx-ratio', 'fx-strength'].includes(input.id) ? `${Math.round(v * 100)}%` : `${v} px`;
   };
   $('fx-form').addEventListener('input', refresh);
   $('fx-form').addEventListener('change', refresh);

@@ -167,4 +167,8 @@ BONE leg-l fig leg-l PARENT body JOINT 1.5 11.5 NAME "upper leg L"
 BONE shin-l fig shin-l PARENT leg-l JOINT 1.5 6.5 NAME "lower leg L"
 BONE leg-r fig leg-r PARENT body JOINT 6.5 11.5 NAME "upper leg R"
 BONE shin-r fig shin-r PARENT leg-r JOINT 2.5 6.5 NAME "lower leg R"
+POSE arms-up "Arms up" body=0 head=0 arm-l=150 hand-l=15 arm-r=-150 hand-r=-15 leg-l=10 shin-l=0 leg-r=-10 shin-r=0
+POSE crouch "Crouch" body=0 head=0 arm-l=-30 hand-l=-60 arm-r=30 hand-r=60 leg-l=50 shin-l=-100 leg-r=-50 shin-r=100 MOVE body 0 4
+POSE wave "Wave" body=0 head=-6 arm-l=5 hand-l=0 arm-r=-125 hand-r=-35 leg-l=0 shin-l=0 leg-r=0 shin-r=0
+POSE kick "Kick" body=-6 head=4 arm-l=40 hand-l=-20 arm-r=-45 hand-r=20 leg-l=4 shin-l=0 leg-r=-75 shin-r=25
 END

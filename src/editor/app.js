@@ -12,7 +12,8 @@ import { openPartLibrary, renderPartsStrip, PART_DRAG_TYPE } from './part-librar
 import { placePartInFrames } from '../domain/parts.js';
 import { PXA2_GUIDE } from '../formats/pxa-v2.js';
 import { MAX_SIZE, MAX_TOTAL_PIXELS, MAX_COLORS, MAX_LAYERS, uid, getAnimationLayers, insertProjectLayer, makeLayeredFrame, getLayerPixels, compositeFrame, stripEmptyFrames, blankProject, validateProject, linePoints, rectanglePoints, ellipsePoints, floodFill, paletteFromRgba, mapRgbaToPalette, resizePixels, nearestColor } from '../domain/project.js';
-import { inspectSheet, sliceSpritesheet, createSheetMetadata, validateSheetMetadata } from '../formats/spritesheet.js';
+import { inspectSheet, sliceSpritesheet, validateSheetMetadata } from '../formats/spritesheet.js';
+import { renderImageExport } from './export-dialog.js';
 import { encodePixelProject, decodePixelProject } from '../formats/pxs.js';
 import { encodeAIProject, decodeAIProject, AI_FORMAT_GUIDE } from '../formats/pxa.js';
 import { selectionBounds, clampSelectionOffset, moveSelectedPixels, outlinePixels, moveMaskedPixels, maskBounds } from '../domain/selection.js';
@@ -21,7 +22,8 @@ import { createObjectFromPixels, splitIntoObjects, pixelIslands } from '../domai
 import { openProjectStore } from '../storage/workspace.js';
 import { openPromptBuilder } from '../features/ai/prompt-dialog.js';
 import { openAIEdit } from '../features/ai/edit-dialog.js';
-import { initToolExtras, renderToolExtras, gradientStatus, unclampedDrawing, lineToolPoints, wrappedFootprint, wrappedIndex, beginGradient, moveGradient, drawCanvasOverlay, renderTileGhost } from './tool-extras.js';
+import { initToolExtras, renderToolExtras, gradientStatus, unclampedDrawing, lineToolPoints, wrappedFootprint, wrappedIndex, beginGradient, moveGradient, drawCanvasOverlay, renderTileGhost, shadeColour, shadeDirection } from './tool-extras.js';
+import { curvePointerDown, curvePointerMove, curvePointerUp, curveKey } from './curve-tool.js';
 import { initObjectPose, renderObjectPose, renderPivotMarker } from './object-pose.js';
 import { initAnimatePanel, renderAnimatePanel } from './animate-panel.js';
 import { initMotionModes, syncMotionMode, drawMotionOverlay } from './motion-modes.js';
@@ -30,13 +32,14 @@ import { initEffectsPanel, renderEffectsPanel } from './effects-panel.js';
 import { initPaletteTools } from './palette-tools.js';
 import { initPaletteStudio } from './palette-studio.js';
 import { instancePivot } from '../domain/geometry.js';
+import { antialiasStroke, smoothJaggies } from '../domain/antialias.js';
 
 const $ = (id) => document.getElementById(id);
 const icon = (name) => `<svg aria-hidden="true"><use href="#i-${name}"/></svg>`;
 const escapeHTML = (value) => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const STORAGE_KEY = 'pixel-studio.project.v1';
-const TOOL_NAMES = {pencil:'Pencil',eraser:'Eraser',line:'Line',fill:'Flood fill',replace:'Replace color',eyedropper:'Eyedropper',rectangle:'Rectangle',ellipse:'Ellipse',object:'Select / move objects',select:'Select / move pixels',wand:'Magic wand',resize:'Transform',dither:'Dither brush',shade:'Shade',gradient:'Gradient'};
+const TOOL_NAMES = {pencil:'Pencil',eraser:'Eraser',line:'Line',fill:'Flood fill',replace:'Replace color',eyedropper:'Eyedropper',rectangle:'Rectangle',ellipse:'Ellipse',object:'Select / move objects',select:'Select / move pixels',wand:'Magic wand',resize:'Transform',dither:'Dither brush',shade:'Shade',gradient:'Gradient',curve:'Curve'};
 const TOOL_HINTS = {
   pencil:'Draw on the active pixel object. Hold Alt to pick a color.',
   eraser:'Erase on the active pixel object. Right-click also erases.',
@@ -51,14 +54,15 @@ const TOOL_HINTS = {
   select:'Drag to select. Drag inside to move; arrow keys nudge. Make object turns the selection into a movable object.',
   wand:'Click a shape to select it. Shift-click adds more. Then press Make object (Ctrl/⌘ G).',
   dither:'Paints a checkerboard pattern with the current color. Great for gradients and texture.',
-  shade:'Click or drag to darken pixels one palette step. Right-click lightens.',
+  shade:'Click or drag to step pixels along their palette ramp (darker by default). Right-click goes the other way.',
+  curve:'Drag from start to end, then bend the curve. Enter applies.',
   resize:'Drag a handle to resize; Shift keeps the ratio. Keep area squashes without changing the area. Drag the round handle to rotate (Shift snaps to 15°); drag the blue diamond for a 3D turn: sideways turns ↔ about the Y axis, up or down tips ↕ about the X axis; , and . turn 90°. The shared artwork never changes. Shift-click selects several.',
 };
-const BRUSH_TOOLS = ['pencil','eraser','line','dither','shade'];
+const BRUSH_TOOLS = ['pencil','eraser','line','dither','shade','curve'];
 const SYMMETRY_TOOLS = [...BRUSH_TOOLS,'rectangle','ellipse'];
 const FREEHAND_TOOLS = ['pencil','eraser','dither','shade'];
 /** Pixel tools whose strokes repeat in every frame of the animation when the Edit switch is on All frames. */
-const PAINT_TOOLS = ['pencil','eraser','line','rectangle','ellipse','fill','replace','dither','shade'];
+const PAINT_TOOLS = ['pencil','eraser','line','rectangle','ellipse','fill','replace','dither','shade','curve'];
 const SELECT_TOOLS = ['select','wand'];
 const state = {
   project: blankProject(), animationId: null, frameId: null, layerId: null,
@@ -66,7 +70,7 @@ const state = {
   filled: false, playing: true, previewIndex: 0, previewTime: 0, previewBackground: 0,
   inPlaceEdit:null, previewOverride:null, objectSelection:null, objectScope:'animation', collapsedGroups:new Set(), objectDrag:null,
   cursor: null, drawing: null, selection: null, lastPaint: null, shiftHeld: false, swap: false, swapFirst: null,
-  brushSize: 1, brushShape: 'square', symmetry: 'none', pixelPerfect: false, wandMode: 'shape', resizeMode: 'free', transformScope: 'frame', clipboard: null, objectClipboard: null, objectMulti: null, lastClipboard: 'pixels',
+  brushSize: 1, brushShape: 'square', symmetry: 'none', pixelPerfect: false, antialias: false, wandMode: 'shape', resizeMode: 'free', transformScope: 'frame', clipboard: null, objectClipboard: null, objectMulti: null, lastClipboard: 'pixels',
   undo: [], redo: [], samples: [], sampleData: new Map(), saveTimer: null, storageAvailable: true, importSkipEmpty: true,
   documents: new Map(), openIds: [], documentId: null, panels: {tools:false,details:false}, panelSections: {}, sessionSaveError: false,
 };
@@ -608,6 +612,8 @@ function renderTools() {
   $('tool-hint').textContent=state.inPlaceEdit?(state.tool==='shade'?TOOL_HINTS.shade:state.tool==='select'?'Select pixels inside the object. Drag the selection to move it; Ctrl/⌘ C, X, V and Delete work on the draft.':'Draw inside or beyond the outline: painting past an edge extends the object. Shift-click draws a straight line. Esc cancels.'):TOOL_HINTS[state.tool];
   $('brush-options').hidden=!sized;
   $('filled-row').hidden=!shaped;
+  $('shape-aa-row').hidden=!['line','ellipse'].includes(state.tool) || Boolean(state.inPlaceEdit);
+  $('shape-antialias').checked=state.antialias;
   $('symmetry-options').hidden=!SYMMETRY_TOOLS.includes(state.tool);
   $('pixel-perfect-row').hidden=state.tool!=='pencil' || Boolean(state.inPlaceEdit);
   $('pixel-perfect').checked=state.pixelPerfect;
@@ -935,7 +941,7 @@ function canvasPartKey(event,key) {
   if((event.ctrlKey || event.metaKey) && key==='enter'){event.preventDefault();endCanvasPartEdit(true);return;}
   if(key==='escape'){event.preventDefault();endCanvasPartEdit(false);return;}
   if(event.ctrlKey || event.metaKey){event.preventDefault();return;}
-  const tool={b:'pencil',e:'eraser',l:'line',f:'fill',u:'replace',i:'eyedropper',r:'rectangle',c:'ellipse',s:'select',t:'dither',h:'shade'}[key];
+  const tool={b:'pencil',e:'eraser',l:'line',f:'fill',u:'replace',i:'eyedropper',r:'rectangle',c:'ellipse',s:'select',t:'dither',h:'shade',p:'curve'}[key];
   if(tool){event.preventDefault();state.tool=tool;renderTools();renderSelection();renderCanvas();return;}
   if(key==='g'){$('toggle-grid').click();return;}
   const move={arrowleft:[-1,0],arrowright:[1,0],arrowup:[0,-1],arrowdown:[0,1]}[key];
@@ -1493,12 +1499,23 @@ function drawPoints(points, color) {
       const index=point.y*state.project.width+point.x;
       if(touched.has(index))continue;
       touched.add(index);state.drawing?.footprint?.add(index);
-      if(pixels[index]>=0)pixels[index]=shadeIndex(state.project.palette,pixels[index],state.drawing?.shade || -1);
+      if(pixels[index]>=0)pixels[index]=shadeColour(pixels[index],state.drawing?.shade || -1);
     }
     return;
   }
   if(tool==='dither')footprint=footprint.filter(point=>ditherCell(point.x,point.y));
   for (const point of footprint) {const index=point.y*state.project.width+point.x;pixels[index]=color;state.drawing?.footprint?.add(index);}
+}
+/** Line/Ellipse Anti-alias: adds in-between palette colours at the stair steps of the drawn 1 px shape (antialias.antialiasStroke). */
+function antialiasShape(drawing) {
+  if(!state.antialias || drawing.color<0 || (drawing.tool==='line' && state.brushSize>1))return;
+  const {width,height,palette}=state.project, cel=drawing.cel, stroke=[...drawing.footprint].map(i=>({x:i%width,y:Math.floor(i/width)}));
+  // Filled ellipses smooth the edge between the shape and what is around it (pixels of the shape or touching it).
+  const near=i=>{const x=i%width,y=Math.floor(i/width);for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)if(x+dx>=0&&x+dx<width&&drawing.footprint.has(i+dy*width+dx))return 1;return 0;};
+  const result=drawing.tool==='ellipse' && state.filled
+    ?smoothJaggies(cel.pixels,width,height,palette,{under:canvasPixels(),mask:cel.pixels.map((_,i)=>near(i))})
+    :antialiasStroke(cel.pixels,width,height,stroke,drawing.color,palette,{under:canvasPixels()});
+  result.forEach((v,i)=>{if(v!==cel.pixels[i]){cel.pixels[i]=v;drawing.footprint.add(i);}});
 }
 /** Freehand pencil step; pixel-perfect mode removes the doubled pixel at each stair-step corner. */
 function drawFreehand(drawing,from,to) {
@@ -1554,13 +1571,14 @@ function deselectObjectOutside(event) {
 function pointerDown(event) {
   if (event.button !== 0 && event.button !== 2) return;
   if (state.drawing) return;
+  if (state.tool === 'curve' && curvePointerDown(event)) return;
   const point = canvasPoint(event);
   if (!inside(point)) { if(event.button===0 && ['object','resize'].includes(state.tool) && !state.inPlaceEdit && state.objectSelection){state.objectSelection=null;renderAll();} return; }
   event.preventDefault();
   $('pixel-canvas').focus({preventScroll:true});
   $('pixel-canvas').setPointerCapture(event.pointerId);
   const tool = event.altKey ? 'eyedropper' : event.button === 2 && state.tool!=='shade' ? 'eraser' : state.tool;
-  const shade = event.button === 2 ? 1 : -1;
+  const shade = shadeDirection(event.button === 2);
   state.cursor = point;
   if (tool === 'eyedropper') {
     state.color = canvasPixels()[point.y * state.project.width + point.x];
@@ -1571,7 +1589,7 @@ function pointerDown(event) {
   if(state.inPlaceEdit) {
     try {
       const from=event.shiftKey?shiftLineStart(tool):null;
-      const stroke=tool==='select'?beginInPlaceSelection(state.inPlaceEdit.session,point):beginInPlaceStroke(state.inPlaceEdit.session,point,{tool,from,shade,color:tool==='eraser'?-1:tool==='shade'?0:state.color,brushSize:state.brushSize,brushShape:state.brushShape,symmetry:state.symmetry,filled:state.filled});
+      const stroke=tool==='select'?beginInPlaceSelection(state.inPlaceEdit.session,point):beginInPlaceStroke(state.inPlaceEdit.session,point,{tool,from,shade,shadeStep:shadeColour,color:tool==='eraser'?-1:tool==='shade'?0:state.color,brushSize:state.brushSize,brushShape:state.brushShape,symmetry:state.symmetry,filled:state.filled});
       if(stroke){state.inPlaceEdit.error=null;state.drawing={...stroke,tool,pointerId:event.pointerId,kind:tool==='select'?'part-select':'part-edit'};}
       else if($('pixel-canvas').hasPointerCapture(event.pointerId))$('pixel-canvas').releasePointerCapture(event.pointerId);
     } catch(error) {state.inPlaceEdit.error=error.message;if($('pixel-canvas').hasPointerCapture(event.pointerId))$('pixel-canvas').releasePointerCapture(event.pointerId);}
@@ -1612,6 +1630,7 @@ function pointerMove(event) {
   const point = canvasPoint(event, !!state.drawing && !unclampedDrawing(state.drawing));
   state.cursor = inside(point) ? point : null;
   $('cursor-position').textContent = state.cursor ? `X ${String(point.x).padStart(2,'0')}   Y ${String(point.y).padStart(2,'0')}` : 'X —   Y —';
+  if (state.tool === 'curve' && !state.drawing && curvePointerMove(event)) return;
   const drawing = state.drawing;
   if (drawing && event.pointerId === drawing.pointerId) {
     if(drawing.kind==='part-select') {
@@ -1642,7 +1661,7 @@ function pointerMove(event) {
     } else if(drawing.tool==='line') {
       drawing.cel.pixels=[...drawing.base];drawing.footprint.clear();
       const end=event.shiftKey?snapLineEnd(drawing.origin,point):point;
-      drawPoints(lineToolPoints(drawing.origin,end),drawing.color);
+      drawPoints(lineToolPoints(drawing.origin,end),drawing.color);antialiasShape(drawing);
     } else if(drawing.tool==='gradient') {
       moveGradient(drawing,point,event);
     } else if (drawing.tool === 'rectangle' || drawing.tool === 'ellipse') {
@@ -1657,6 +1676,7 @@ function pointerMove(event) {
       }
       const getPoints = drawing.tool === 'rectangle' ? rectanglePoints : ellipsePoints;
       drawPoints(getPoints(drawing.origin.x, drawing.origin.y, end.x, end.y, state.filled, state.project.width, state.project.height), drawing.color);
+      if (drawing.tool === 'ellipse') antialiasShape(drawing);
     }
     drawing.last = point;
     renderPreview();
@@ -1664,6 +1684,7 @@ function pointerMove(event) {
   renderCanvas();
 }
 function pointerEnd(event) {
+  if (curvePointerUp(event)) return;
   if (!state.drawing || event.pointerId !== state.drawing.pointerId) return;
   finishDrawing(event.type === 'pointercancel');
   if (event.pointerType !== 'mouse') state.cursor = null;
@@ -1680,7 +1701,7 @@ function repeatStrokeInAnimation(drawing) {
     if(hasLockedInstances(cel)){skipped++;continue;}
     // Fill and Replace depend on each frame's colors: Fill repeats the filled area, Replace swaps the color in every frame.
     cel.pixels=drawing.tool==='replace'?replaceColor(cel.pixels,width,height,drawing.replaceFrom,drawing.color)
-      :repeatPixelChanges(drawing.tool==='fill'?changedIndices(drawing.base,drawing.cel.pixels):drawing.footprint,drawing.cel.pixels,cel.pixels,drawing.tool==='shade'?v=>v<0?v:shadeIndex(palette,v,drawing.shade):null);
+      :repeatPixelChanges(drawing.tool==='fill'?changedIndices(drawing.base,drawing.cel.pixels):drawing.footprint,drawing.cel.pixels,cel.pixels,drawing.tool==='shade'?v=>v<0?v:shadeColour(v,drawing.shade):null);
   }
   return skipped;
 }
@@ -1816,7 +1837,7 @@ function animationTick(time) {
 function openDialog(title, content, eyebrow = 'PIXEL STUDIO') {
   if (finishDrawing()) renderAll();
   $('modal').dispatchEvent(new Event('pixel-studio:dialog-replace'));
-  $('modal').classList.remove('wide','start-modal','part-library-modal','prompt-builder-modal','ai-edit-modal','shared-part-modal','palette-studio-modal');
+  $('modal').classList.remove('wide','start-modal','part-library-modal','prompt-builder-modal','ai-edit-modal','shared-part-modal','palette-studio-modal','export-modal');
   $('modal-title').textContent = title;
   $('modal-eyebrow').textContent = eyebrow;
   $('modal-content').innerHTML = content;
@@ -2238,15 +2259,14 @@ async function exportBinaryData() {
   } catch (error) { toast(`Could not export: ${error.message}`); }
 }
 function exportDialog() {
-  openDialog('Take your pixels with you', `<div class="export-tabs" role="tablist" aria-label="Export format"><button id="export-ai-tab" class="export-tab active" role="tab" aria-selected="true">${icon('file')} AI pixel data</button><button id="export-data-tab" class="export-tab" role="tab" aria-selected="false">${icon('file')} Compact file</button><button id="export-png-tab" class="export-tab" role="tab" aria-selected="false">${icon('image')} PNG image</button><button id="export-sheet-tab" class="export-tab" role="tab" aria-selected="false">${icon('grid')} Spritesheet</button></div><div id="export-options"></div>`, 'EXPORT');
+  openDialog('Take your pixels with you', `<div class="export-tabs" role="tablist" aria-label="Export format"><button id="export-ai-tab" class="export-tab active" role="tab" aria-selected="true">${icon('file')} AI pixel data</button><button id="export-data-tab" class="export-tab" role="tab" aria-selected="false">${icon('file')} Compact file</button><button id="export-png-tab" class="export-tab" role="tab" aria-selected="false">${icon('image')} PNG image</button><button id="export-sheet-tab" class="export-tab" role="tab" aria-selected="false">${icon('grid')} Sprite sheet</button><button id="export-anim-tab" class="export-tab" role="tab" aria-selected="false">${icon('play')} GIF / APNG</button></div><div id="export-options"></div>`, 'EXPORT');
   const activate = (name) => {
-    for (const type of ['ai','data','png','sheet']) {
+    for (const type of ['ai','data','png','sheet','anim']) {
       $(`export-${type}-tab`).classList.toggle('active',type===name);
       $(`export-${type}-tab`).setAttribute('aria-selected',type===name);
     }
-    $('modal').classList.add('wide');
+    $('modal').classList.add('wide','export-modal');
   };
-  const scaleOptions = () => [1,2,3,4,8,16].map(scale=>`<option value="${scale}">${scale}× · ${state.project.width*scale} × ${state.project.height*scale} per frame</option>`).join('');
   const aiView = () => {
     activate('ai');
     let version=state.project.version===3?2:1;
@@ -2270,85 +2290,16 @@ function exportDialog() {
     $('export-options').innerHTML = `<div class="export-summary">${icon('file')}<strong>${escapeHTML(fileName(state.project.name))}.pxs</strong><span>${state.project.palette.length} colors · ${state.project.layers.length} layers · ${state.project.animations.length} animations · ${totalFrames} frames</span></div><p class="modal-body-text">A compact binary project file with your fixed palette, all layers (including hidden ones), named animations, frame timings, and exact pixel data. Lossless compression keeps downloads small.</p><div class="notice">PXS saves a raster copy of each container, including its stack order. Shared instances, object settings, and optional grouping are baked into pixels; use PXA 2 to keep them editable. Animation and frame order require an updated PXS reader. When importing, uncheck “Skip empty frames” to preserve deliberate blank frames.</div><div class="modal-actions"><button id="download-data" class="button primary">${icon('import')} Download pixel data</button></div>`;
     $('download-data').onclick = () => { exportBinaryData(); $('modal').close(); };
   };
-  const pngView = () => {
-    activate('png');
-    $('export-options').innerHTML = `<p class="modal-body-text">Visible objects are combined into sharp pixels on a transparent background. Export PXA 2 to keep editable objects and groups.</p><label class="field"><span class="field-label">What to export</span><select id="png-scope"><option value="frame">Current frame · ${escapeHTML(currentAnimation().name)}</option><option value="animation">Current animation · horizontal spritesheet</option><option value="project">All animations · one row per animation</option></select></label><label class="field"><span class="field-label">Pixel scale</span><select id="png-scale">${scaleOptions()}</select></label><div class="notice" id="png-export-info">Exports the selected frame as a transparent PNG.</div><div class="modal-actions"><button id="download-png" class="button primary">${icon('import')} Download PNG</button></div>`;
-    $('png-scope').onchange = () => {
-      $('png-export-info').textContent = {frame:'Exports the selected frame as a transparent PNG.',animation:'Frames run left to right in animation order. Use pixel data to keep animation names and timing.',project:'Each animation occupies one row, in the order shown. Shorter rows have transparent cells. Use pixel data to preserve all animation metadata.'}[$('png-scope').value];
-    };
-    $('download-png').onclick = () => exportPng($('png-scope').value,Number($('png-scale').value));
-  };
-  const sheetView = () => {
-    activate('sheet');
-    $('export-options').innerHTML = `<p class="modal-body-text"><strong>Rows = animations. Columns = frames.</strong> Visible objects are combined. The sheet follows the order in your animation list and timeline.</p><div class="sheet-export-preview"><canvas id="sheet-export-canvas" aria-label="Export spritesheet preview"></canvas></div><div class="form-grid"><label class="field"><span class="field-label">Animations</span><select id="sheet-export-scope"><option value="project">All animations</option><option value="animation">Current animation · ${escapeHTML(currentAnimation().name)}</option></select></label><label class="field"><span class="field-label">Pixel scale</span><select id="sheet-export-scale">${scaleOptions()}</select></label></div><div id="sheet-export-summary" class="sheet-summary"></div><div class="notice">Shorter rows are padded with transparent cells. Metadata restores names, frame counts, palette, and timing; editable objects and groups are saved in PXA 2. Empty cells are skipped by default on import.</div><div class="modal-actions sheet-download-actions"><button id="download-sheet-metadata" class="button">${icon('file')} Download metadata</button><button id="download-sheet-png" class="button primary">${icon('import')} Download spritesheet PNG</button></div>`;
-    const update = () => {
-      try {
-      const scope = $('sheet-export-scope').value, scale = Number($('sheet-export-scale').value);
-      const project = {...state.project,animations:scope === 'animation' ? [currentAnimation()] : state.project.animations};
-      const metadata = createSheetMetadata(project,scale);
-      const source = makeExportCanvas(scope,1);
-      const canvas = $('sheet-export-canvas');
-      canvas.width = source.width; canvas.height = source.height;
-      canvas.getContext('2d').drawImage(source,0,0);
-      $('sheet-export-summary').textContent = `${metadata.rows} rows × ${metadata.columns} columns · ${metadata.columns*metadata.cellWidth} × ${metadata.rows*metadata.cellHeight} PNG · ${metadata.cellWidth} × ${metadata.cellHeight} cells`;
-      $('download-sheet-png').disabled = false; $('download-sheet-metadata').disabled = false;
-      } catch (error) {
-        $('sheet-export-summary').textContent = error.message;
-        $('download-sheet-png').disabled = true; $('download-sheet-metadata').disabled = true;
-      }
-    };
-    $('sheet-export-scope').onchange = update; $('sheet-export-scale').onchange = update;
-    $('download-sheet-png').onclick = () => exportPng($('sheet-export-scope').value,Number($('sheet-export-scale').value),true);
-    $('download-sheet-metadata').onclick = () => {
-      try {
-        const scope = $('sheet-export-scope').value, scale = Number($('sheet-export-scale').value);
-        const project = {...state.project,animations:scope === 'animation' ? [currentAnimation()] : state.project.animations};
-        const metadata = createSheetMetadata(project,scale);
-        downloadBlob(new Blob([JSON.stringify(metadata,null,2)],{type:'application/json'}),`${pngBaseName(scope,scale)}.sheet.json`);
-        toast('Spritesheet metadata exported. Keep it with the PNG.');
-      } catch (error) { toast(error.message); }
-    };
-    update();
+  const imageView = (tab) => () => {
+    activate(tab);
+    renderImageExport($('export-options'),tab,{project:state.project,animationId:state.animationId,frameId:state.frameId,layerId:currentLayer().id,layerName:currentLayer().name,name:state.project.name,download:downloadBlob,toast,icon,escapeHTML});
   };
   $('export-ai-tab').onclick = aiView;
   $('export-data-tab').onclick = dataView;
-  $('export-png-tab').onclick = pngView;
-  $('export-sheet-tab').onclick = sheetView;
+  $('export-png-tab').onclick = imageView('png');
+  $('export-sheet-tab').onclick = imageView('sheet');
+  $('export-anim-tab').onclick = imageView('anim');
   aiView();
-}
-function makeExportCanvas(scope, scale) {
-  const rows = scope === 'frame' ? [[currentFrame()]] : scope === 'animation' ? [currentAnimation().frames] : state.project.animations.map(a => a.frames);
-  const columns = Math.max(...rows.map(row => row.length));
-  const frameWidth = state.project.width, frameHeight = state.project.height;
-  const width = columns * frameWidth * scale, height = rows.length * frameHeight * scale;
-  if (width > 16384 || height > 16384 || width * height > 32 * 1024 * 1024) {
-    throw new Error('This spritesheet is too large at this scale. Choose a smaller scale or export one animation.');
-  }
-  const canvas = document.createElement('canvas');
-  canvas.width = width; canvas.height = height;
-  const context = canvas.getContext('2d');
-  context.imageSmoothingEnabled = false;
-  rows.forEach((frames,y) => frames.forEach((frame,x) => compositeFrame(state.project,frame).forEach((color,index) => {
-    if (color < 0) return;
-    context.fillStyle = state.project.palette[color];
-    context.fillRect((x*frameWidth+index%frameWidth)*scale,(y*frameHeight+Math.floor(index/frameWidth))*scale,scale,scale);
-  })));
-  return canvas;
-}
-function pngBaseName(scope,scale) {
-  const animationName = scope === 'project' ? 'all-animations' : fileName(currentAnimation().name);
-  const suffix = scope === 'frame' ? `frame-${currentAnimation().frames.findIndex(f=>f.id===state.frameId)+1}` : 'spritesheet';
-  return `${fileName(state.project.name)}-${animationName}-${suffix}${scale>1?`-${scale}x`:''}`;
-}
-async function exportPng(scope, scale, keepOpen = false) {
-  try {
-    const canvas = makeExportCanvas(scope,scale);
-    const blob = await new Promise(resolve => canvas.toBlob(resolve,'image/png'));
-    if (!blob) throw new Error('The browser could not create this image. Try a smaller export.');
-    downloadBlob(blob,`${pngBaseName(scope,scale)}.png`);
-    if (!keepOpen) $('modal').close();
-    toast(`PNG exported at ${canvas.width} × ${canvas.height} pixels.`);
-  } catch (error) { toast(error.message); }
 }
 function samplesDialog() {
   openDialog('Little things, ready to go', `<p class="modal-body-text">${state.samples.length} sample projects, including a PXA 2 example with reusable parts. Download a file and use Import → Pixel data file to load it again.</p><label class="field"><span class="field-label">Data format</span><select id="sample-file-format"><option value="ai">AI pixel text · .pxa</option><option value="binary">Compressed binary · .pxs</option></select></label><div class="download-list" id="sample-downloads"></div>`, 'SAMPLE FILES');
@@ -2357,7 +2308,7 @@ function samplesDialog() {
   render();
 }
 function helpDialog() {
-  const shortcuts = [['V','Select / move objects'],['B','Pencil'],['E','Eraser'],['L','Straight line'],['F','Flood fill'],['N','Gradient · ⇧ snaps to 45°'],['U','Replace color'],['I / Alt','Pick a color'],['R','Square / rectangle'],['C','Circle / ellipse'],['S','Select / move pixels'],['W','Magic wand · ⇧ adds'],['T','Dither brush'],['H','Shade · right-click lightens'],['K','Transform · resize, squash, rotate, flip'],['J','Skeleton: rig parts into bones and pose them'],[', / .','Turn selected objects 90° (Transform)'],['Shift-click','Select several objects (Object / Transform)'],['⌘ / Ctrl + G','Make object from selection'],['[ / ]','Smaller / larger brush'],['⌘ / Ctrl + A','Select all pixels'],['⌘ / Ctrl + C / X / V','Copy / cut / paste pixels, or the selected object'],['⌘ / Ctrl + ⇧ + V','Paste object as an independent copy'],['⌘ / Ctrl + D','Duplicate selected object'],['⇧ + click','Straight pencil / eraser line from the last stroke'],['Arrows / ⇧ + arrows','Nudge selection by 1 / 8 pixels'],['Delete','Clear selected pixels'],['Enter / Esc','Deselect pixels'],['Shift + drag','Square, circle, or 45° line'],['Drag object rows','Reorder, or drop into a group'],['Right-click object row','Object menu'],['G','Toggle grid'],['O','Onion skin'],['Space','Play / pause preview'],['D','Duplicate frame'],['← / →','Previous / next frame'],['+ / −','Zoom in / out'],['0','Fit canvas'],['⌘ / Ctrl + Z','Undo'],['⌘ / Ctrl + ⇧ + Z','Redo'],['⌘ / Ctrl + S','Export pixel data']];
+  const shortcuts = [['V','Select / move objects'],['B','Pencil'],['E','Eraser'],['L','Straight line'],['F','Flood fill'],['N','Gradient · ⇧ snaps to 45°'],['U','Replace color'],['I / Alt','Pick a color'],['R','Square / rectangle'],['C','Circle / ellipse'],['S','Select / move pixels'],['W','Magic wand · ⇧ adds'],['T','Dither brush'],['H','Shade along palette ramps · right-click reverses'],['P','Curve / path · Enter applies, Esc cancels'],['K','Transform · resize, squash, rotate, flip'],['J','Skeleton: rig parts into bones and pose them'],[', / .','Turn selected objects 90° (Transform)'],['Shift-click','Select several objects (Object / Transform)'],['⌘ / Ctrl + G','Make object from selection'],['[ / ]','Smaller / larger brush'],['⌘ / Ctrl + A','Select all pixels'],['⌘ / Ctrl + C / X / V','Copy / cut / paste pixels, or the selected object'],['⌘ / Ctrl + ⇧ + V','Paste object as an independent copy'],['⌘ / Ctrl + D','Duplicate selected object'],['⇧ + click','Straight pencil / eraser line from the last stroke'],['Arrows / ⇧ + arrows','Nudge selection by 1 / 8 pixels'],['Delete','Clear selected pixels'],['Enter / Esc','Deselect pixels'],['Shift + drag','Square, circle, or 45° line'],['Drag object rows','Reorder, or drop into a group'],['Right-click object row','Object menu'],['G','Toggle grid'],['O','Onion skin'],['Space','Play / pause preview'],['D','Duplicate frame'],['← / →','Previous / next frame'],['+ / −','Zoom in / out'],['0','Fit canvas'],['⌘ / Ctrl + Z','Undo'],['⌘ / Ctrl + ⇧ + Z','Redo'],['⌘ / Ctrl + S','Export pixel data']];
   openDialog('Small canvas. Handy shortcuts.', `<p class="modal-body-text">Draw with a mouse, pen, or finger. Right-click to erase. Brush size and symmetry live below the tools; flip and rotate actions live in Transform. Use the palette picker to recolor a slot in every frame, or Swap to exchange two colors. AI prompt creates a complete generation brief with the pixel format and an ordered animation plan, even from an empty project.</p><div class="shortcut-grid">${shortcuts.map(([key,action])=>`<span>${action}</span><kbd>${key}</kbd>`).join('')}</div><div class="notice">Each project tab has its own artwork and Undo history. New projects and imports open in new tabs. Close a tab and reopen it from Saved projects; projects autosave on this device. Collapse individual panel headings, or hide either sidebar with the buttons above the canvas.</div><p class="helper-text">Tools edit the active pixel object. Transform can affect one frame or the active pixel object across an animation or project. Mirror animation copies each frame’s placements while retaining shared part definitions. Set individual frame holds in milliseconds below the timeline. Choose Object (V) to select and move part instances; double-click one to edit its shared artwork in every appearance. Object edits default to the current animation. Groups are optional; use Ungroup to expose their objects. Export PXA 2 for editable objects and timings; PNGs combine visible artwork.</p>`, 'QUICK GUIDE');
 }
 function accountDialog() {
@@ -2369,7 +2320,7 @@ function accountDialog() {
 
 function bindEvents() {
   bindFileDrop();
-  const mathsDeps={state,$,icon,escapeHTML,mutate,snapshot,remember,renderAll,renderCanvas,renderPreview,renderTools,toast,openDialog,paintSprite,finishDrawing,
+  const mathsDeps={state,$,icon,escapeHTML,mutate,snapshot,remember,renderAll,renderCanvas,renderPreview,renderTools,toast,openDialog,paintSprite,finishDrawing,drawPoints,
     currentAnimation,currentFrame,currentLayer,selectedObject,selectedItems,transformItems,resizableObject,objectTarget,canEditPixels,canvasPixels,canvasPosition,normalizeSelection,selectObject,selectFrameAt,addFrame,undo:()=>restore(state.undo,state.redo)};
   initToolExtras(mathsDeps);initObjectPose(mathsDeps);initMotionModes(mathsDeps);initRigMode(mathsDeps);initAnimatePanel(mathsDeps);initEffectsPanel(mathsDeps);initPaletteTools(mathsDeps);initPaletteStudio(mathsDeps);
   // Holding Shift previews the straight line a pencil or eraser click will draw.
@@ -2398,7 +2349,7 @@ function bindEvents() {
   document.querySelectorAll('[data-tool]').forEach(button => button.addEventListener('click', () => {
     finishDrawing();
     state.tool = button.dataset.tool;
-    if (!SELECT_TOOLS.includes(state.tool) && state.tool!=='gradient') state.selection=null;
+    if (!SELECT_TOOLS.includes(state.tool) && !['gradient','curve'].includes(state.tool)) state.selection=null;
     state.swap = false;
     renderTools(); renderPalette(); renderSelection(); renderCanvas();
   }));
@@ -2413,6 +2364,7 @@ function bindEvents() {
   $('select-all').onclick=selectAllPixels;
   $('make-object').onclick=makeObjectDialog;
   $('pixel-perfect').onchange=event=>{state.pixelPerfect=event.target.checked;renderTools();};
+  $('shape-antialias').onchange=event=>{state.antialias=event.target.checked;renderTools();};
   $('wand-mode').onchange=event=>{state.wandMode=event.target.value;renderTools();};
   $('object-resize-mode').onchange=event=>{state.resizeMode=event.target.value;renderTools();};
   $('object-resize-squash').onclick=()=>stepResize('squash');
@@ -2549,6 +2501,7 @@ function bindEvents() {
       return;
     }
     if ($('modal').open || event.target.closest('input,textarea,select,[contenteditable="true"]')) return;
+    if (curveKey(event)) return;
     const key = event.key.toLowerCase();
     if(state.inPlaceEdit){canvasPartKey(event,key);return;}
     if ((event.ctrlKey || event.metaKey) && key === 'z') { event.preventDefault(); event.shiftKey ? restore(state.redo,state.undo) : restore(state.undo,state.redo); return; }
@@ -2584,8 +2537,8 @@ function bindEvents() {
       if (key==='escape' || key==='enter') { event.preventDefault(); deselectPixels(); return; }
     }
     if (key==='escape' && state.objectSelection && !state.inPlaceEdit) { event.preventDefault(); state.objectSelection=null; renderAll(); return; }
-    const tool = {v:'object',b:'pencil',e:'eraser',l:'line',f:'fill',n:'gradient',u:'replace',i:'eyedropper',r:'rectangle',c:'ellipse',s:'select',w:'wand',t:'dither',h:'shade',k:'resize'}[key];
-    if (tool) { state.tool = tool; if(!SELECT_TOOLS.includes(tool) && tool!=='gradient')state.selection=null; renderTools(); renderSelection(); renderCanvas(); return; }
+    const tool = {v:'object',b:'pencil',e:'eraser',l:'line',f:'fill',n:'gradient',u:'replace',i:'eyedropper',r:'rectangle',c:'ellipse',s:'select',w:'wand',t:'dither',h:'shade',k:'resize',p:'curve'}[key];
+    if (tool) { state.tool = tool; if(!SELECT_TOOLS.includes(tool) && !['gradient','curve'].includes(tool))state.selection=null; renderTools(); renderSelection(); renderCanvas(); return; }
     if (key === 'j') { event.preventDefault(); toggleRigMode(); return; }
     if (key === 'g') $('toggle-grid').click();
     else if((key==='[' || key===']') && BRUSH_TOOLS.includes(state.tool)){event.preventDefault();state.brushSize=Math.max(1,Math.min(8,state.brushSize+(key===']'?1:-1)));renderTools();renderCanvas();}

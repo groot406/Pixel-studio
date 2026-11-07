@@ -8,8 +8,8 @@
  */
 import { validateProject, makeLayeredFrame } from './project.js';
 import { renderParts } from './artwork.js';
-import { instancePivot, instanceSize, transformedSize, instanceBox, instancePixel, pivotUnder, withPivot, TRANSFORM_MATRICES } from './geometry.js';
-import { normalizeAngle, angleDelta, roundInt, rotatePoint, solveChain, ease } from './motion.js';
+import { instancePivot, instanceSize, transformedSize, instanceBox, instancePixel, pivotUnder, withPivot, poseVector, TRANSFORM_MATRICES } from './geometry.js';
+import { normalizeAngle, angleDelta, roundInt, solveChain, ease } from './motion.js';
 
 const cels = frame => frame.cels;
 const opIn = (frame, layerId, id) => cels(frame).find(c => c.layerId === layerId)?.source?.ops.find(op => op.type === 'use' && op.id === id);
@@ -52,15 +52,15 @@ export function boxToPart(op, part, pt) {
   return { x: (a*X + c*Y) * part.width / size.width, y: (b*X + d*Y) * part.height / size.height };
 }
 const pivotOffset = (op, part) => { const c = instancePivot(op, part); return { x: c.x - op.x, y: c.y - op.y }; };
-/** Box point → canvas point, turned by the instance's angle about its pivot (skew and deform are ignored). */
+/** Box point → canvas point as rendered: skewed, 3D-turned and rotated about the pivot (deform is ignored). */
 export function boxToWorld(op, part, pt) {
-  const off = pivotOffset(op, part);
-  return rotatePoint({ x: op.x + pt.x, y: op.y + pt.y }, { x: op.x + off.x, y: op.y + off.y }, absOf(op));
+  const off = pivotOffset(op, part), v = poseVector(op, part, { x: pt.x - off.x, y: pt.y - off.y });
+  return { x: op.x + off.x + v.x, y: op.y + off.y + v.y };
 }
 /** Canvas point → box point (inverse of boxToWorld). */
 export function worldToBox(op, part, pt) {
-  const off = pivotOffset(op, part), c = { x: op.x + off.x, y: op.y + off.y }, q = rotatePoint(pt, c, -absOf(op));
-  return { x: q.x - op.x, y: q.y - op.y };
+  const off = pivotOffset(op, part), v = poseVector(op, part, { x: pt.x - op.x - off.x, y: pt.y - op.y - off.y }, true);
+  return { x: off.x + v.x, y: off.y + v.y };
 }
 /** Canvas point of a parent-part anchor as the parent is posed. */
 export const anchorWorld = (op, part, anchor) => boxToWorld(op, part, partToBox(op, part, anchor));
@@ -83,8 +83,8 @@ function ordered(p) {
 export function boneOf(project, layerId, instanceId) {
   return (project.bones || []).find(b => b.layerId === layerId && b.instanceId === instanceId) || null;
 }
-/** Ids of a bone and everything below it. */
-function subtree(p, boneId) {
+/** Ids of a bone and everything below it (tree order). */
+export function subtree(p, boneId) {
   const ids = new Set([boneId]);
   for (const b of ordered(p)) if (b.parent && ids.has(b.parent)) ids.add(b.id);
   return ids;
@@ -105,8 +105,8 @@ export function rootOf(project, boneId) {
 
 // ---- Frame poses --------------------------------------------------------------------------------------------------
 
-/** Bones placed in `frame` with their op and part; a bone whose parent is missing here acts as a root. */
-function placed(p, frame) {
+/** Bones placed in `frame` (tree order) → {bone, op, part, parent}; a bone whose parent is missing here acts as a root. */
+export function placed(p, frame) {
   const map = new Map();
   for (const bone of ordered(p)) {
     const op = opIn(frame, bone.layerId, bone.instanceId);
@@ -326,19 +326,24 @@ function sideOf(name) {
   const m = String(name || '').match(SIDE);
   return m ? { key: name.toLowerCase().replace(SIDE, '$1#'), side: m[2][0].toLowerCase() } : null;
 }
-/**
- * Mirror a pose left-right: left/right bone pairs (paired by name: "arm L"/"arm R", "left leg"/"right leg") swap angles
- * and every angle is negated, so a front-facing figure's pose flips. `swap: true` only exchanges the pairs (side views:
- * the other step of a walk). Returns { project, pairs }.
- */
-export function mirrorPose(project, { swap = false, ...opts }) {
-  const p = validateProject(project), pairs = [], bones = p.bones || [];
+/** Left/right bone pairs [leftId, rightId], paired by name ("arm L"/"arm R", "left leg"/"right leg"). */
+export function sidePairs(project) {
+  const pairs = [], bones = project.bones || [];
   for (const a of bones) {
     const sa = sideOf(a.name ?? a.id);
     if (!sa || sa.side !== 'l') continue;
     const b = bones.find(x => { const sb = sideOf(x.name ?? x.id); return sb && sb.side === 'r' && sb.key === sa.key; });
     if (b) pairs.push([a.id, b.id]);
   }
+  return pairs;
+}
+/**
+ * Mirror a pose left-right: left/right bone pairs (paired by name: "arm L"/"arm R", "left leg"/"right leg") swap angles
+ * and every angle is negated, so a front-facing figure's pose flips. `swap: true` only exchanges the pairs (side views:
+ * the other step of a walk). Returns { project, pairs }.
+ */
+export function mirrorPose(project, { swap = false, ...opts }) {
+  const p = validateProject(project), pairs = sidePairs(p);
   if (swap && !pairs.length) throw new Error('Name bones with L/R or left/right to swap them.');
   return { project: posing(p, opts, rels => {
     for (const [a, b] of pairs) if (rels.has(a) && rels.has(b)) { const t = rels.get(a); rels.set(a, rels.get(b)); rels.set(b, t); }

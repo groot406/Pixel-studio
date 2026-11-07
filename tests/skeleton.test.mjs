@@ -194,3 +194,13 @@ test('the Stick puppet sample loads rigged, with its key poses laid out on the j
     for (const v of rigView(p, animation.id, frame.id)) if (v.anchor) assert.ok(Math.hypot(v.joint.x - v.anchor.x, v.joint.y - v.anchor.y) <= .75);
   }
 });
+
+test('joints follow a part’s skew and 3D turn', () => {
+  const base = rigged(), p = structuredClone(base);
+  Object.assign(op(p, 'up'), { skew: { x: 20, y: 0 }, tilt: { x: 40, y: 0 } });
+  const posed = validateProject(p), anchor = q => rigView(q, 'A', 'f0').find(v => v.bone.id === 'low').anchor;
+  const plain = anchor(base), bent = anchor(posed);
+  assert.ok(Math.abs(bent.x - plain.x) > 1 && plain.y - bent.y > .5, `the elbow moves with the shear and the turn: ${JSON.stringify([plain, bent])}`);
+  for (const delta of [35, -50]) assert.ok(jointGaps(rotateBone(posed, { ...at, boneId: 'up', delta }).project).every(g => g <= .75));
+  assert.ok(jointGaps(moveSkeleton(posed, { ...at, boneId: 'body', dx: 3, dy: 2 }).project).every(g => g <= .75));
+});

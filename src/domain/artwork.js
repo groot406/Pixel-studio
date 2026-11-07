@@ -1,6 +1,7 @@
 /** Retained pixel artwork. Source is authoritative; pixels are derived editing buffers. */
 import { MAX_SIZE, MAX_TOTAL_PIXELS } from './limits.js';
-import { linePoints, rectanglePoints, ellipsePoints, instancePixel, instanceBox, smoothSampling, TRANSFORM_NAMES, SAMPLING_MODES, DEFAULT_PERSPECTIVE } from './geometry.js';
+import { linePoints, rectanglePoints, ellipsePoints, instancePixel, instanceBox, instanceImage, resamples, smoothSampling, TRANSFORM_NAMES, SAMPLING_MODES, DEFAULT_PERSPECTIVE } from './geometry.js';
+import { paletteBlend } from './antialias.js';
 import { ROTSPRITE_SCALE } from './rotsprite.js';
 
 export const MAX_PARTS = 256;
@@ -60,7 +61,7 @@ export function instanceEffects(op) {
     } else throw new Error('Deform must be wave, bulge or twist.');
   }
   if (!absent(op.sampling)) {
-    if (!SAMPLING_MODES.includes(op.sampling)) throw new Error('Sampling must be nearest or rotsprite.');
+    if (!SAMPLING_MODES.includes(op.sampling)) throw new Error('Sampling must be nearest, rotsprite or aa.');
     if (op.sampling !== 'nearest') out.sampling = op.sampling;
   }
   return out;
@@ -91,7 +92,8 @@ export function validateOperations(ops, width, height, paletteLength, parts, bud
       Object.assign(metadata, instanceEffects(op));
       const pose = { x: 0, y: 0, transform: op.transform, ...metadata, width, height };
       const box = instanceBox(pose, part);
-      spend(budget, box.width * box.height);
+      // Smooth AA takes 4×4 samples per pixel.
+      spend(budget, box.width * box.height * (pose.sampling === 'aa' && resamples(pose, part) ? 16 : 1));
       // The 8× RotSprite image costs 64 work units per part pixel, once per part.
       if (smoothSampling(pose) && !(budget.smoothed ||= new Set()).has(partId)) { budget.smoothed.add(partId); budget.work += part.width * part.height * ROTSPRITE_SCALE ** 2; spend(budget); }
       for (const flag of ['visible','locked']) if (op[flag] !== undefined) {
@@ -160,6 +162,17 @@ export function renderOperations(ops, width, height, partImages = new Map()) {
       if (op.visible === false) continue;
       const part = partImages.get(op.partId);
       if (!part) throw new Error(`Unknown part ${op.partId}.`);
+      if (resamples(op, part)) {
+        // Resampled instances come from their cached image; Smooth AA edge pixels blend with what is beneath in this cel.
+        const image = instanceImage(op, part), left = op.x + image.x, top = op.y + image.y;
+        for (let y = Math.max(0, top); y < Math.min(height, top + image.height); y++) for (let x = Math.max(0, left); x < Math.min(width, left + image.width); x++) {
+          const t = (y - top) * image.width + x - left, edge = image.edge?.get(t), under = pixels[y * width + x];
+          let color = image.pixels[t];
+          if (edge && under >= 0 && part.palette) { const mix = paletteBlend(part.palette, under, edge.color, edge.coverage); if (mix >= 0) color = mix; }
+          if (color >= 0) pixels[y * width + x] = color;
+        }
+        continue;
+      }
       const box = instanceBox(op, part);
       for (let y = Math.max(0, box.y); y < Math.min(height, box.y + box.height); y++) for (let x = Math.max(0, box.x); x < Math.min(width, box.x + box.width); x++) {
         const color = instancePixel(op, part, { x, y });
@@ -173,8 +186,9 @@ export function renderOperations(ops, width, height, partImages = new Map()) {
   }
   return pixels;
 }
-export function renderParts(parts) {
-  return new Map(parts.map(part => [part.id, { ...part, pixels: renderOperations(part.ops, part.width, part.height) }]));
+/** Rendered part images by id; with the project `palette`, Smooth AA instances can blend between palette colours. */
+export function renderParts(parts, palette) {
+  return new Map(parts.map(part => [part.id, { ...part, pixels: renderOperations(part.ops, part.width, part.height), ...(palette ? { palette } : {}) }]));
 }
 export function renderSource(source, width, height, partImages) {
   const pixels = renderOperations(source.ops, width, height, partImages);

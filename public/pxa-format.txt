@@ -1,0 +1,33 @@
+Write or edit Pixel Studio AI pixel data using PXA version 1. Return the complete file, without Markdown fences. Commands are uppercase, one per line. Blank lines and full-line # comments are allowed. There is no END marker.
+
+Begin with these four lines, in order:
+PXA 1
+SIZE width height
+NAME "project name"
+PAL #rrggbb #rrggbb ...
+
+Declare every layer before any animation:
+LAYER index "layer name" visible locked
+Indices are consecutive from 0. Visibility and lock flags are 0 or 1. Layer order is bottom to top. Double-quote names using JSON string escapes; never use JSON objects or arrays.
+
+Then use:
+ANIM "animation name" fps
+ORDER layer-index layer-index ...
+FRAME duration-ms CLEAR|PREV
+CEL layer-index
+SPAN y x pixel-string
+
+Every animation needs a frame. CLEAR starts every layer transparent. PREV copies all layers of the immediately preceding frame in this animation; its first frame must therefore use CLEAR. Select CEL again after each FRAME before writing SPAN. SPAN overwrites a contiguous row segment; coordinates are zero-based, y first. It must stay within that row. Repeated or overlapping spans are applied in order.
+
+ORDER is optional, once immediately after ANIM and before its first FRAME. List every declared layer index exactly once, bottom to top. Omit it to use declaration order. The order applies only to that animation. Older readers without ORDER support cannot read files containing it.
+FRAMEORDER is optional, once after FRAME and before SHIFT or CEL. It lists every layer index exactly once and overrides only that frame's order; omission uses animation order. PREV copies pixels, not frame order.
+
+SHIFT dx dy may appear once immediately after a PREV FRAME, before CEL. It shifts every layer, clips pixels outside the canvas, and clears exposed cells. Offsets are signed whole numbers bounded by width and height.
+
+Palette indices 0–63 use this exact, case-sensitive alphabet:
+0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz@$
+A period (.) is transparent and erases an old pixel. Optionally repeat one symbol with braces, such as A{6} or .{8}; counts are positive whole numbers. Pixel strings contain no spaces. An unchanged PREV frame needs no CEL or SPAN lines.
+
+Preserve hidden layers, deliberate blank frames, names, palette order, visibility, locks, FPS, and durations unless asked to change them. Internal IDs are regenerated.
+
+Limits: dimensions 1–128; 1–64 colors; 1–32 layers; 1–100 animations; 1–256 frames per animation, 1,024 total; 1,048,576 stored pixels across all layers and frames. FPS is 1–60, including decimals. Durations are whole milliseconds from 1–60,000. Use decimal numbers without leading zeros. Project names allow 120 characters; layer and animation names allow 80. Text is limited to 4 MiB of UTF-8.

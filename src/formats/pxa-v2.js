@@ -1,0 +1,340 @@
+/** PXA 2 codec. Domain operations are independent of this text grammar. */
+import { validateProject, MAX_TOTAL_PIXELS } from '../domain/project.js';
+import { artworkId, cloneArtwork, pixelSpans, translatePixels, MAX_OPERATIONS, MAX_PARTS, MAX_RENDER_WORK } from '../domain/artwork.js';
+
+export const PXA2_ALPHABET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz@$';
+export const PXA2_MAX_BYTES = 4 * 1024 * 1024;
+export const PXA2_COMMAND_GUIDE = `Drawing (all coordinates are x then y):
+SPAN x y pixels
+RECT x y width height color
+ELLIPSE x y width height color
+LINE x y end-x end-y color
+Rectangles/ellipses are filled, grid-aligned, without antialiasing. Draw commands overwrite in order and must fit their canvas. Shapes use decimal palette indices; -1 erases.
+SPAN symbols: ${PXA2_ALPHABET}; dot erases. A{6} repeats six times. No spaces; positive counts. x/y are zero-based.
+Within a cel use drawing commands or USE instance-id part-id x y [transform]. Transform defaults to N; supported: N FX FY R90 R180 R270. Flips and clockwise quarter turns operate inside the part bounds, then place the transformed top-left at x/y. Placement may be off canvas within -128..128 and is clipped; transparent part pixels leave underlying artwork visible.
+AT instance-id x y sets its absolute position. TURN instance-id transform changes its transform. SWAP instance-id part-id changes its part. DROP instance-id removes it. These change the existing instance without changing draw order; they do not paint trails.
+OVERRIDE x y pixels writes final local pixels after all cel operations. Dot explicitly erases the cel pixel; omitted coordinates remain unchanged. Overrides stay in canvas coordinates when instances move.`;
+
+export const PXA2_GUIDE = `PXA 2: uppercase commands, one per line; blank lines and full-line # comments allowed. No Markdown. Finish with END.
+Header: PXA 2, SIZE width height, NAME "name", PAL #rrggbb ... (in that order).
+LAYER id "name" visible locked declares layers bottom to top, before parts/animations. Flags: 0 or 1.
+STACK layer-id ROOT|GROUP optionally follows layer declarations. ROOT exposes that container's objects without a group; GROUP displays an optional isolated group. Omitted STACK keeps legacy layers as groups.
+INSTANCE instance-id "name" visible locked optionally sets an existing USE object's name, visibility and lock. Flags are 0 or 1. Hidden instances retain their source artwork. A shared part used by any locked object or group cannot be edited until unlocked.
+IDs: 1–100 letters/digits/_/-. Layer, animation and frame IDs must be globally unique. Part IDs are unique in the part library; instance IDs are unique within each cel. Names use JSON quoted strings.
+PART id width height starts a reusable part. End it with ENDPART. PART new-id FROM existing-part copies a definition for a local variant; it is not a live link. Parts contain drawing commands only.
+${PXA2_COMMAND_GUIDE}
+ANIM id "name" fps starts an animation. FRAME id duration-ms CLEAR starts blank; FRAME id duration-ms FROM earlier-frame-id copies that frame across all layers (even across animations). Copies are independent snapshots, but keep shared part references.
+ORDER layer-id layer-id ... optionally appears once immediately after ANIM, before its first FRAME. Include every declared layer ID exactly once, bottom to top. This overrides declaration order only for that animation; omitted ORDER uses declaration order. FRAME FROM copies cels, not the source animation's order. Older readers without ORDER support cannot read files containing it.
+FRAMEORDER layer-id layer-id ... optionally appears once after FRAME, before CEL. It overrides that frame's bottom-to-top stack with every layer exactly once. Omission uses animation order. FRAME FROM does not inherit frame order.
+CEL layer-id selects a frame's layer. CEL layer-id CLEAR resets that cel. CEL layer-id RASTER selects raw pixels (an empty or already raster cel); SPAN and SHIFT dx dy are allowed until another CEL. SHIFT translates only the selected raster cel, clips edges and clears exposed pixels. RASTER retains compact pixel deltas without creating shared parts.
+Limits: canvas/parts 1–128 per dimension; 1–64 colors; 1–32 layers; at most 256 parts; 1–100 animations, 1–256 frames each, 1024 total; 1,048,576 canvas pixel slots across all cels; same budget for part pixels; 32,768 expanded operations and 8,388,608 rendering work units. FPS 1–60; duration 1–60000 ms. Names: project 120, layer/animation 80 characters. Text 4 MiB; line 4096 characters. END is required. Preserve hidden artwork and deliberate blank frames.`;
+
+export function pxa2Lines(text, header = 'PXA 2') {
+  if (typeof text !== 'string' || text.length > PXA2_MAX_BYTES || new TextEncoder().encode(text).length > PXA2_MAX_BYTES) throw new Error('PXA text exceeds 4 MiB.');
+  const lines = [];
+  for (const [i, value] of text.replace(/\r\n?/g, '\n').split('\n').entries()) {
+    if (value.length > 4096) throw new Error(`Line ${i + 1}: line exceeds 4096 characters.`);
+    const trimmed = value.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const tokens = trimmed.match(/"(?:[^"\\]|\\.)*"|[^\s]+/g) || [];
+    lines.push({ tokens, number: i + 1 });
+    if (lines.length > MAX_OPERATIONS * 2 + 10000) throw new Error('Too many PXA commands.');
+  }
+  if (lines[0]?.tokens.join(' ') !== header) throw new Error(`Expected ${header}.`);
+  if (lines.at(-1)?.tokens.join(' ') !== 'END') throw new Error('Incomplete PXA document: expected END.');
+  return lines.slice(1, -1);
+}
+export function argumentsCount(tokens, count) {
+  if (tokens.length !== count + 1) throw new Error(`${tokens[0]} expects ${count} arguments.`);
+}
+export function numberToken(value) {
+  if (!/^-?(?:0|[1-9][0-9]*)$/.test(value ?? '') || !Number.isSafeInteger(Number(value))) throw new Error(`Invalid integer ${value}.`);
+  return Number(value);
+}
+function quoted(value) {
+  if (!value?.startsWith('"')) throw new Error('Names must be quoted.');
+  const name = JSON.parse(value);
+  if (typeof name !== 'string') throw new Error('Invalid name.');
+  return name;
+}
+export function decodeRun(value, max = 128) {
+  const out = [];
+  if (typeof value !== 'string' || !value) throw new Error('SPAN needs pixels.');
+  const regex = /([0-9A-Za-z@$.])(?:\{([1-9][0-9]*)\})?/gy;
+  let offset = 0, match;
+  while ((match = regex.exec(value))) {
+    const count = Number(match[2] || 1);
+    if (out.length + count > max) throw new Error('Expanded SPAN exceeds its row.');
+    out.push(...Array(count).fill(match[1] === '.' ? -1 : PXA2_ALPHABET.indexOf(match[1])));
+    offset = regex.lastIndex;
+  }
+  if (offset !== value.length) throw new Error('Invalid pixel run.');
+  return out;
+}
+export function encodeRun(values) {
+  let text = '';
+  for (let i = 0; i < values.length;) {
+    let end = i + 1;
+    while (end < values.length && values[end] === values[i]) end++;
+    const symbol = values[i] < 0 ? '.' : PXA2_ALPHABET[values[i]], n = end - i;
+    const run = `${symbol}{${n}}`;
+    text += run.length < n ? run : symbol.repeat(n);
+    i = end;
+  }
+  return text;
+}
+
+export function drawingCommand(tokens) {
+  const [command, ...args] = tokens;
+  if (['SPAN', 'OVERRIDE'].includes(command)) {
+    argumentsCount(tokens, 3);
+    return { type: 'span', x: numberToken(args[0]), y: numberToken(args[1]), values: decodeRun(args[2]) };
+  }
+  if (!['RECT', 'ELLIPSE', 'LINE'].includes(command)) return null;
+  argumentsCount(tokens, 5);
+  const [x, y, a, b, color] = args.map(numberToken);
+  return command === 'LINE' ? { type: 'line', x, y, x2: a, y2: b, color }
+    : { type: command.toLowerCase(), x, y, width: a, height: b, color };
+}
+export function partDeclaration(tokens, parts, replace = false) {
+  argumentsCount(tokens, 3);
+  const id = artworkId(tokens[1]);
+  if (!replace && parts.some(p => p.id === id)) throw new Error(`Duplicate part ${id}.`);
+  if (!parts.some(p => p.id === id) && parts.length >= MAX_PARTS) throw new Error('Too many parts.');
+  if (tokens[2] === 'FROM') {
+    const original = parts.find(p => p.id === tokens[3]);
+    if (!original) throw new Error(`Unknown part ${tokens[3]}.`);
+    return { ...cloneArtwork(original), id };
+  }
+  return { id, width: numberToken(tokens[2]), height: numberToken(tokens[3]), ops: [] };
+}
+
+/** Apply one cel command to a detached source. Domain validation follows the complete transaction. */
+export function applyCelCommand(source, tokens) {
+  const draw = drawingCommand(tokens);
+  if (draw) { (tokens[0] === 'OVERRIDE' ? source.overrides : source.ops).push(draw); return; }
+  const [command, id] = tokens;
+  if (command === 'USE') {
+    if (![5, 6].includes(tokens.length)) throw new Error('USE expects instance, part, x, y and optional transform.');
+    if (source.ops.some(op => op.type === 'use' && op.id === id)) throw new Error(`Duplicate instance ${id}.`);
+    source.ops.push({ type: 'use', id: artworkId(id), partId: artworkId(tokens[2]), x: numberToken(tokens[3]), y: numberToken(tokens[4]), transform: tokens[5] || 'N' });
+    return;
+  }
+  if (command === 'INSTANCE') {
+    argumentsCount(tokens,4);
+    const op=source.ops.find(op=>op.type==='use' && op.id===id);
+    if (!op) throw new Error(`Unknown instance ${id}.`);
+    if (!['0','1'].includes(tokens[3]) || !['0','1'].includes(tokens[4])) throw new Error('Instance flags must be 0 or 1.');
+    op.name=quoted(tokens[2]); op.visible=tokens[3]==='1'; op.locked=tokens[4]==='1';
+    return;
+  }
+  if (!['AT', 'TURN', 'SWAP', 'DROP'].includes(command)) throw new Error(`Unknown command ${command}.`);
+  argumentsCount(tokens, command === 'AT' ? 3 : command === 'DROP' ? 1 : 2);
+  const op = source.ops.find(op => op.type === 'use' && op.id === id);
+  if (!op) throw new Error(`Unknown instance ${id}.`);
+  if (command === 'AT') { op.x = numberToken(tokens[2]); op.y = numberToken(tokens[3]); }
+  if (command === 'TURN') op.transform = tokens[2];
+  if (command === 'SWAP') op.partId = artworkId(tokens[2]);
+  if (command === 'DROP') source.ops.splice(source.ops.indexOf(op), 1);
+}
+
+export function decodePXA2(text) {
+  const project = { format: 'pixel-studio', version: 3, layers: [], parts: [], animations: [] };
+  const frames = new Map();
+  let animation, frame, source, raster, part, stage = 0, totalFrames = 0, expandedOps = 0, rasterWork = 0;
+  const spendRasterWork = count => {
+    rasterWork += count;
+    if (rasterWork > MAX_RENDER_WORK) throw new Error('Raster decoding work budget exceeded.');
+  };
+  for (const { tokens: t, number } of pxa2Lines(text)) {
+    try {
+      const cmd = t[0];
+      if (stage < 3) {
+        if (cmd !== ['SIZE', 'NAME', 'PAL'][stage]) throw new Error('Expected SIZE, NAME, PAL in order.');
+        if (cmd === 'SIZE') { argumentsCount(t, 2); project.width = numberToken(t[1]); project.height = numberToken(t[2]); if (![project.width, project.height].every(n => n >= 1 && n <= 128)) throw new Error('Invalid canvas size.'); }
+        if (cmd === 'NAME') { argumentsCount(t, 1); project.name = quoted(t[1]); }
+        if (cmd === 'PAL') { project.palette = t.slice(1); if (!project.palette.length || project.palette.length > 64) throw new Error('Invalid palette length.'); }
+        stage++; continue;
+      }
+      if (part) {
+        if (cmd === 'ENDPART') { argumentsCount(t, 0); project.parts.push(part); part = null; continue; }
+        const op = drawingCommand(t);
+        if (!op || cmd === 'OVERRIDE') throw new Error('Expected part drawing command or ENDPART.');
+        part.ops.push(op); expandedOps++; continue;
+      }
+      if (cmd === 'LAYER') {
+        if (project.parts.length || animation || project.layers.length >= 32) throw new Error('Declare 1–32 layers before parts/animations.');
+        argumentsCount(t, 4);
+        if (!['0', '1'].includes(t[3]) || !['0', '1'].includes(t[4])) throw new Error('Layer flags must be 0 or 1.');
+        project.layers.push({ id: artworkId(t[1]), name: quoted(t[2]), visible: t[3] === '1', locked: t[4] === '1' });
+      } else if (cmd === 'STACK') {
+        if (animation || project.parts.length) throw new Error('Declare STACK before parts and animations.');
+        argumentsCount(t,2);
+        const layer=project.layers.find(l=>l.id===t[1]);
+        if (!layer || !['ROOT','GROUP'].includes(t[2]) || layer.group !== undefined) throw new Error('STACK needs a declared layer ID once, and ROOT or GROUP.');
+        layer.group=t[2]==='GROUP';
+      } else if (cmd === 'PART') {
+        if (!project.layers.length || animation) throw new Error('Declare parts after layers and before animations.');
+        part = partDeclaration(t, project.parts); expandedOps += part.ops.length;
+      } else if (cmd === 'ANIM') {
+        if (!project.layers.length || project.animations.length >= 100) throw new Error('Invalid animation count or missing layers.');
+        argumentsCount(t, 3);
+        if (!/^(?:[1-9][0-9]*)(?:\.[0-9]+)?$/.test(t[3])) throw new Error('Invalid FPS.');
+        animation = { id: artworkId(t[1]), name: quoted(t[2]), fps: Number(t[3]), frames: [] };
+        project.animations.push(animation); frame = source = raster = null;
+      } else if (cmd === 'ORDER') {
+        if (!animation || animation.frames.length || animation.layerOrder) throw new Error('ORDER is allowed once after ANIM, before its first FRAME.');
+        argumentsCount(t, project.layers.length);
+        const order = t.slice(1);
+        if (new Set(order).size !== project.layers.length || order.some(id => !project.layers.some(l => l.id === id))) throw new Error('ORDER must contain every layer ID exactly once.');
+        animation.layerOrder = order;
+      } else if (cmd === 'FRAME') {
+        if (!animation) throw new Error('FRAME requires ANIM.');
+        if (t[3] === 'CLEAR') argumentsCount(t, 3);
+        else if (t[3] === 'FROM') argumentsCount(t, 4);
+        else throw new Error('FRAME needs CLEAR or FROM frame-id.');
+        if (++totalFrames > 1024 || animation.frames.length >= 256 || totalFrames * project.width * project.height * project.layers.length > MAX_TOTAL_PIXELS) throw new Error('Frame/pixel budget exceeded.');
+        const previous = t[3] === 'FROM' ? frames.get(t[4]) : null;
+        if (t[3] === 'FROM' && !previous) throw new Error(`Unknown earlier frame ${t[4]}.`);
+        if (frames.has(t[1])) throw new Error(`Duplicate frame ${t[1]}.`);
+        if (previous) expandedOps += previous.cels.reduce((n, c) => n + (c.source ? c.source.ops.length + c.source.overrides.length : 0), 0);
+        if (expandedOps > MAX_OPERATIONS) throw new Error('Expanded operation budget exceeded.');
+        frame = { id: artworkId(t[1]), duration: numberToken(t[2]), cels: previous ? cloneArtwork(previous.cels) : project.layers.map(l => ({ layerId: l.id, source: { ops: [], overrides: [] } })) };
+        animation.frames.push(frame); frames.set(frame.id, frame); source = raster = null;
+      } else if (cmd === 'FRAMEORDER') {
+        if(!frame || frame.layerOrder || source || raster)throw new Error('FRAMEORDER is allowed once after FRAME, before CEL.');
+        argumentsCount(t,project.layers.length);
+        const order=t.slice(1);
+        if(new Set(order).size!==project.layers.length || order.some(id=>!project.layers.some(l=>l.id===id)))throw new Error('FRAMEORDER must contain every layer ID exactly once.');
+        frame.layerOrder=order;
+      } else if (cmd === 'CEL') {
+        if (!frame || ![2, 3].includes(t.length) || (t.length === 3 && !['CLEAR', 'RASTER'].includes(t[2]))) throw new Error('CEL requires a frame and layer-id, optionally CLEAR.');
+        const cel = frame.cels.find(c => c.layerId === t[1]);
+        if (!cel) throw new Error(`Unknown layer ${t[1]}.`);
+        if (t[2] === 'CLEAR') { expandedOps -= cel.source ? cel.source.ops.length + cel.source.overrides.length : 0; cel.source = { ops: [], overrides: [] }; delete cel.pixels; }
+        if (t[2] === 'RASTER') {
+          if (cel.source?.ops.length || cel.source?.overrides.length) throw new Error('Clear a retained cel before switching to RASTER.');
+          delete cel.source;
+          cel.pixels ||= Array(project.width * project.height).fill(-1);
+        }
+        source = cel.source; raster = source ? null : cel.pixels;
+      } else {
+        if (raster) {
+          if (cmd === 'SHIFT') {
+            argumentsCount(t, 2);
+            const dx = numberToken(t[1]), dy = numberToken(t[2]);
+            if (Math.abs(dx) > project.width || Math.abs(dy) > project.height) throw new Error('SHIFT exceeds canvas bounds.');
+            spendRasterWork(raster.length);
+            const shifted = translatePixels(raster, project.width, project.height, dx, dy);
+            shifted.forEach((v, i) => { raster[i] = v; });
+            continue;
+          }
+          if (cmd !== 'SPAN') throw new Error('A RASTER cel accepts SPAN or SHIFT only.');
+          const op = drawingCommand(t);
+          if (op.x < 0 || op.y < 0 || op.y >= project.height || op.x + op.values.length > project.width || op.values.some(c => c >= project.palette.length)) throw new Error('Raster SPAN outside its canvas or palette.');
+          spendRasterWork(op.values.length);
+          op.values.forEach((v, i) => { raster[op.y * project.width + op.x + i] = v; });
+        } else {
+          if (!source) throw new Error('Select CEL before drawing.');
+          const oldCount=source.ops.length+source.overrides.length;
+          applyCelCommand(source, t);
+          expandedOps+=source.ops.length+source.overrides.length-oldCount;
+        }
+      }
+      if (expandedOps > MAX_OPERATIONS) throw new Error('Expanded operation budget exceeded.');
+    } catch (error) { throw new Error(`Line ${number}: ${error.message}`); }
+  }
+  if (part) throw new Error('Missing ENDPART.');
+  return validateProject(project);
+}
+
+export function encodeOperation(op) {
+  if (op.type === 'span') return `SPAN ${op.x} ${op.y} ${encodeRun(op.values)}`;
+  if (op.type === 'use') {
+    const use=`USE ${op.id} ${op.partId} ${op.x} ${op.y}${op.transform === 'N' ? '' : ` ${op.transform}`}`;
+    return op.name !== undefined || op.visible !== undefined || op.locked !== undefined
+      ? `${use}\nINSTANCE ${op.id} ${JSON.stringify(op.name || op.partId)} ${+(op.visible !== false)} ${+Boolean(op.locked)}` : use;
+  }
+  if (op.type === 'line') return `LINE ${op.x} ${op.y} ${op.x2} ${op.y2} ${op.color}`;
+  return `${op.type.toUpperCase()} ${op.x} ${op.y} ${op.width} ${op.height} ${op.color}`;
+}
+export function encodeSource(source) {
+  return [...source.ops.map(encodeOperation), ...source.overrides.map(op => encodeOperation(op).replace(/^SPAN /, 'OVERRIDE '))];
+}
+function sourceDelta(source, old) {
+  if (JSON.stringify(source) === JSON.stringify(old)) return [];
+  if (source.ops.length !== old.ops.length || JSON.stringify(source.overrides) !== JSON.stringify(old.overrides)) return null;
+  const lines = [];
+  for (let i = 0; i < source.ops.length; i++) {
+    const a = source.ops[i], b = old.ops[i];
+    if (JSON.stringify(a) === JSON.stringify(b)) continue;
+    if (a.type !== 'use' || b.type !== 'use' || a.id !== b.id) return null;
+    if (a.name !== b.name || a.visible !== b.visible || a.locked !== b.locked) return null;
+    if (a.x !== b.x || a.y !== b.y) lines.push(`AT ${a.id} ${a.x} ${a.y}`);
+    if (a.partId !== b.partId) lines.push(`SWAP ${a.id} ${a.partId}`);
+    if (a.transform !== b.transform) lines.push(`TURN ${a.id} ${a.transform}`);
+  }
+  return lines;
+}
+function rasterChanges(pixels, previous, width, height) {
+  const candidates = previous ? [[0,0],[-1,-1],[0,-1],[1,-1],[-1,0],[1,0],[-1,1],[0,1],[1,1]] : [[0,0]];
+  let best;
+  for (const [dx,dy] of candidates) {
+    const baseline = previous && (dx || dy ? translatePixels(previous, width, height, dx, dy) : previous);
+    const spans = pixelSpans(pixels, width, (i,v) => v !== (baseline?.[i] ?? -1));
+    const lines = dx || dy ? [`SHIFT ${dx} ${dy}`] : [];
+    for (let i=0;i<spans.length;) {
+      const row=[];
+      const y=spans[i].y;
+      while(i<spans.length && spans[i].y===y) row.push(spans[i++]);
+      const x=row[0].x, last=row.at(-1), end=last.x+last.values.length;
+      const joined=encodeOperation({type:'span',x,y,values:pixels.slice(y*width+x,y*width+end)});
+      const split=row.map(encodeOperation);
+      lines.push(...(joined.length < split.join('\n').length ? [joined] : split));
+    }
+    if (!best || lines.join('\n').length < best.join('\n').length) best=lines;
+  }
+  return best;
+}
+export function encodePXA2(input) {
+  const p = validateProject(input), q = JSON.stringify;
+  const lines = ['PXA 2', `SIZE ${p.width} ${p.height}`, `NAME ${q(p.name)}`, `PAL ${p.palette.join(' ')}`];
+  for (const l of p.layers) lines.push(`LAYER ${l.id} ${q(l.name)} ${+l.visible} ${+l.locked}`);
+  for (const l of p.layers) if(l.group !== undefined) lines.push(`STACK ${l.id} ${l.group?'GROUP':'ROOT'}`);
+  for (const part of p.parts || []) lines.push(`PART ${part.id} ${part.width} ${part.height}`, ...part.ops.map(encodeOperation), 'ENDPART');
+  let previous;
+  for (const a of p.animations) {
+    lines.push(`ANIM ${a.id} ${q(a.name)} ${a.fps}`);
+    if (a.layerOrder) lines.push(`ORDER ${a.layerOrder.join(' ')}`);
+    for (const f of a.frames) {
+      const cels = p.layers.map(l => f.cels.find(c => c.layerId === l.id));
+      const bodyFor = (oldCels) => cels.flatMap((cel, i) => {
+        const id = p.layers[i].id, old = oldCels?.[i];
+        if (!cel.source) {
+          const baseline = old && !old.source ? old.pixels : null;
+          const commands = rasterChanges(cel.pixels, baseline, p.width, p.height);
+          const reset = old?.source ? [`CEL ${id} CLEAR`] : [];
+          if (!commands.length && baseline) return [];
+          return [...reset, `CEL ${id} RASTER`, ...commands];
+        }
+        const full = [`CEL ${id}${old ? ' CLEAR' : ''}`, ...encodeSource(cel.source)];
+        const changes = old?.source ? sourceDelta(cel.source, old.source) : null;
+        if (changes?.length === 0) return [];
+        const partial = changes ? [`CEL ${id}`, ...changes] : null;
+        return partial && partial.join('\n').length < full.join('\n').length ? partial : full;
+      });
+      const clear = [`FRAME ${f.id} ${f.duration} CLEAR`, ...bodyFor(null)];
+      let selected = clear;
+      if (previous) {
+        const delta = [`FRAME ${f.id} ${f.duration} FROM ${previous.id}`, ...bodyFor(previous.cels)];
+        if (delta.join('\n').length < clear.join('\n').length) selected = delta;
+      }
+      if(f.layerOrder)selected.splice(1,0,`FRAMEORDER ${f.layerOrder.join(' ')}`);
+      lines.push(...selected); previous = { id: f.id, cels };
+
+    }
+  }
+  const text = [...lines, 'END', ''].join('\n');
+  if (new TextEncoder().encode(text).length > PXA2_MAX_BYTES) throw new Error('PXA export exceeds 4 MiB.');
+  return text;
+}

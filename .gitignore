@@ -1,0 +1,11 @@
+/dist/
+/node_modules/
+/coverage/
+/output/
+.DS_Store
+.env
+.env.*
+*.log
+/pixel-studio-ai-inpaint-patch.zip
+
+/.playwright-cli/

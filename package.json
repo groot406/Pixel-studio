@@ -1,0 +1,19 @@
+{
+  "name": "pixel-studio-32",
+  "version": "1.2.0",
+  "private": true,
+  "type": "module",
+  "description": "A pixel-art animation editor with personal local Codex editing",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node local/start.mjs --open",
+    "dev": "node --watch local/start.mjs --dev",
+    "build": "node scripts/build.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "check": "node scripts/check.mjs && npm test && npm run build",
+    "benchmark": "node scripts/benchmark-pxa.mjs",
+    "formats": "node scripts/sync-format-guides.mjs"
+  }
+}

@@ -1,0 +1,22 @@
+PXA 2: uppercase commands, one per line; blank lines and full-line # comments allowed. No Markdown. Finish with END.
+Header: PXA 2, SIZE width height, NAME "name", PAL #rrggbb ... (in that order).
+LAYER id "name" visible locked declares layers bottom to top, before parts/animations. Flags: 0 or 1.
+STACK layer-id ROOT|GROUP optionally follows layer declarations. ROOT exposes that container's objects without a group; GROUP displays an optional isolated group. Omitted STACK keeps legacy layers as groups.
+INSTANCE instance-id "name" visible locked optionally sets an existing USE object's name, visibility and lock. Flags are 0 or 1. Hidden instances retain their source artwork. A shared part used by any locked object or group cannot be edited until unlocked.
+IDs: 1–100 letters/digits/_/-. Layer, animation and frame IDs must be globally unique. Part IDs are unique in the part library; instance IDs are unique within each cel. Names use JSON quoted strings.
+PART id width height starts a reusable part. End it with ENDPART. PART new-id FROM existing-part copies a definition for a local variant; it is not a live link. Parts contain drawing commands only.
+Drawing (all coordinates are x then y):
+SPAN x y pixels
+RECT x y width height color
+ELLIPSE x y width height color
+LINE x y end-x end-y color
+Rectangles/ellipses are filled, grid-aligned, without antialiasing. Draw commands overwrite in order and must fit their canvas. Shapes use decimal palette indices; -1 erases.
+SPAN symbols: 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz@$; dot erases. A{6} repeats six times. No spaces; positive counts. x/y are zero-based.
+Within a cel use drawing commands or USE instance-id part-id x y [transform]. Transform defaults to N; supported: N FX FY R90 R180 R270. Flips and clockwise quarter turns operate inside the part bounds, then place the transformed top-left at x/y. Placement may be off canvas within -128..128 and is clipped; transparent part pixels leave underlying artwork visible.
+AT instance-id x y sets its absolute position. TURN instance-id transform changes its transform. SWAP instance-id part-id changes its part. DROP instance-id removes it. These change the existing instance without changing draw order; they do not paint trails.
+OVERRIDE x y pixels writes final local pixels after all cel operations. Dot explicitly erases the cel pixel; omitted coordinates remain unchanged. Overrides stay in canvas coordinates when instances move.
+ANIM id "name" fps starts an animation. FRAME id duration-ms CLEAR starts blank; FRAME id duration-ms FROM earlier-frame-id copies that frame across all layers (even across animations). Copies are independent snapshots, but keep shared part references.
+ORDER layer-id layer-id ... optionally appears once immediately after ANIM, before its first FRAME. Include every declared layer ID exactly once, bottom to top. This overrides declaration order only for that animation; omitted ORDER uses declaration order. FRAME FROM copies cels, not the source animation's order. Older readers without ORDER support cannot read files containing it.
+FRAMEORDER layer-id layer-id ... optionally appears once after FRAME, before CEL. It overrides that frame's bottom-to-top stack with every layer exactly once. Omission uses animation order. FRAME FROM does not inherit frame order.
+CEL layer-id selects a frame's layer. CEL layer-id CLEAR resets that cel. CEL layer-id RASTER selects raw pixels (an empty or already raster cel); SPAN and SHIFT dx dy are allowed until another CEL. SHIFT translates only the selected raster cel, clips edges and clears exposed pixels. RASTER retains compact pixel deltas without creating shared parts.
+Limits: canvas/parts 1–128 per dimension; 1–64 colors; 1–32 layers; at most 256 parts; 1–100 animations, 1–256 frames each, 1024 total; 1,048,576 canvas pixel slots across all cels; same budget for part pixels; 32,768 expanded operations and 8,388,608 rendering work units. FPS 1–60; duration 1–60000 ms. Names: project 120, layer/animation 80 characters. Text 4 MiB; line 4096 characters. END is required. Preserve hidden artwork and deliberate blank frames.

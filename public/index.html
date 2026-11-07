@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#f8f9f5">
+  <meta name="description" content="Your small canvas for big ideas. Draw pixel art on any canvas up to 128×128, build animations, tune your palette, and import or export PNG spritesheets and reusable pixel data.">
+  <title>Pixel Studio — a little world, one pixel at a time</title>
+  <link rel="icon" type="image/svg+xml" href="./favicon.svg">
+  <link rel="stylesheet" href="./style.css">
+  <link rel="stylesheet" href="./ai-edit.css">
+  <link rel="stylesheet" href="./src/editor/parts-dialog.css">
+  <link rel="stylesheet" href="./src/editor/objects.css">
+</head>
+<body>
+  <svg class="icon-defs" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
+    <symbol id="i-pencil" viewBox="0 0 24 24"><path d="m15 5 4 4M4 20l4-1L20 7a2.8 2.8 0 0 0-4-4L4 15Z"/></symbol>
+    <symbol id="i-eraser" viewBox="0 0 24 24"><path d="m14 3 7 7-11 11H6L1 16Z"/><path d="m6 11 7 7M10 21h12"/></symbol>
+    <symbol id="i-fill" viewBox="0 0 24 24"><path d="m5 2 9 9M3 11l8-8 8 8-8 8a2 2 0 0 1-3 0l-5-5a2 2 0 0 1 0-3ZM3 12h15"/><path d="M21 15s-3 4-3 5a3 3 0 0 0 6 0c0-1-3-5-3-5Z" transform="translate(-1 0) scale(.95)"/></symbol>
+    <symbol id="i-picker" viewBox="0 0 24 24"><path d="m15 3 6 6M4 20l4-1L20 7a2.8 2.8 0 0 0-4-4L4 15v5ZM12 6l6 6"/></symbol>
+    <symbol id="i-square" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="1"/></symbol>
+    <symbol id="i-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></symbol>
+    <symbol id="i-select" viewBox="0 0 24 24"><path d="M3 9V3h6M13 3h4v4M3 13v4h4" stroke-dasharray="2.5 2.5"/><path d="m10 10 10 5-4 1-1 4-5-10Z"/></symbol>
+    <symbol id="i-line" viewBox="0 0 24 24"><path d="m5 19 14-14"/><rect x="3" y="17" width="4" height="4" rx=".5"/><rect x="17" y="3" width="4" height="4" rx=".5"/></symbol>
+    <symbol id="i-replace" viewBox="0 0 24 24"><rect x="3" y="3" width="6" height="6" rx="1"/><rect x="15" y="15" width="6" height="6" rx="1"/><path d="M13 5h6v6m-3-3 3 3 3-3M11 19H5v-6m-3 3 3-3 3 3"/></symbol>
+    <symbol id="i-flip-h" viewBox="0 0 24 24"><path d="M12 3v18" stroke-dasharray="2 3"/><path d="m8 6-5 6 5 6ZM16 6l5 6-5 6Z"/></symbol>
+    <symbol id="i-flip-v" viewBox="0 0 24 24"><path d="M3 12h18" stroke-dasharray="2 3"/><path d="m6 8 6-5 6 5ZM6 16l6 5 6-5Z"/></symbol>
+    <symbol id="i-rotate-left" viewBox="0 0 24 24"><path d="M4 10a8 8 0 1 1 1 8M4 4v6h6"/></symbol>
+    <symbol id="i-rotate-right" viewBox="0 0 24 24"><path d="M20 10a8 8 0 1 0-1 8M20 4v6h-6"/></symbol>
+    <symbol id="i-cut" viewBox="0 0 24 24"><circle cx="5" cy="5" r="3"/><circle cx="5" cy="19" r="3"/><path d="m7 7 14 14M7 17 21 3"/></symbol>
+    <symbol id="i-paste" viewBox="0 0 24 24"><path d="M9 5H5v16h14V5h-4M9 12h6M9 16h6"/><rect x="9" y="2" width="6" height="5" rx="1"/></symbol>
+    <symbol id="i-select-all" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="1" stroke-dasharray="3 3"/><rect x="8" y="8" width="8" height="8" rx=".5"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7V4h7l2 3h9v13H3ZM3 10h18"/></symbol>
+    <symbol id="i-panel-left" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></symbol>
+    <symbol id="i-panel-right" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+    <symbol id="i-swap" viewBox="0 0 24 24"><path d="M4 7h16l-4-4M20 17H4l4 4M20 7l-4 4M4 17l4-4"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></symbol>
+    <symbol id="i-pointer" viewBox="0 0 24 24"><path d="m5 3 3 17 4-6 7-2Z"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 10 5-10 5L2 8ZM2 12l10 5 10-5M2 16l10 5 10-5"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="m3 3 18 18M10.6 5.1c.5-.1.9-.1 1.4-.1 6.5 0 10 7 10 7a21 21 0 0 1-3.1 4.1M6.2 6.2A21 21 0 0 0 2 12s3.5 7 10 7a12 12 0 0 0 5.8-1.8M9.9 9.9a3 3 0 0 0 4.2 4.2"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/></symbol>
+    <symbol id="i-unlock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 7.6-1.8M12 14v3"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 20V4m-7 7 7-7 7 7"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 4v16m-7-7 7 7 7-7"/></symbol>
+    <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 5 4 10l5 5M4 10h10a6 6 0 0 1 0 12" transform="translate(0 -2)"/></symbol>
+    <symbol id="i-redo" viewBox="0 0 24 24"><path d="m15 5 5 5-5 5M20 10H10a6 6 0 0 0 0 12" transform="translate(0 -2)"/></symbol>
+    <symbol id="i-import" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></symbol>
+    <symbol id="i-export" viewBox="0 0 24 24"><path d="M12 16V3m-5 5 5-5 5 5M4 16v5h16v-5"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H5v20h14V7ZM14 2v6h5M8 13h8M8 17h5"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="m8 4 12 8-12 8Z"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 4v16M16 4v16"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V3H3v13h5"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M9 10v7M15 10v7"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+    <symbol id="i-left" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9 9a3 3 0 0 1 6 0c0 2-3 2-3 4M12 17h.01"/></symbol>
+    <symbol id="i-fit" viewBox="0 0 24 24"><path d="M9 3H3v6M15 3h6v6M3 15v6h6M21 15v6h-6"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8" cy="8" r="1"/><path d="m3 17 6-6 4 4 3-3 5 5"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5Z"/></symbol>
+  </defs></svg>
+
+  <header class="app-header">
+    <a class="brand" href="./" aria-label="Pixel Studio home"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span>pixel<span class="brand-light">studio</span><small>MAKE SOMETHING LITTLE.</small></span></a>
+    <div class="project-info"><label class="sr-only" for="project-name">Project name</label><input id="project-name" value="Panda adventurer" maxlength="80" spellcheck="false"><span id="save-status" class="save-status"><i></i> Saved on this device</span></div>
+    <div class="header-actions"><button id="help-button" class="icon-button" title="Keyboard shortcuts and help" aria-label="Keyboard shortcuts and help"><svg><use href="#i-help"/></svg></button><button id="new-project" class="button subtle" aria-label="New project"><svg><use href="#i-plus"/></svg><span>New</span></button><button id="import-button" class="button" aria-label="Import"><svg><use href="#i-import"/></svg><span>Import</span></button><button id="export-button" class="button primary" aria-label="Export"><svg><use href="#i-export"/></svg><span>Export</span></button><button id="prompt-builder-button" class="button prompt-builder-entry" title="Build an AI prompt" aria-label="Build an AI prompt"><svg aria-hidden="true"><use href="#i-spark"/></svg><span>AI prompt</span></button><button id="ai-edit-button" class="button ai-edit-entry" title="Edit artwork with AI" aria-label="Edit artwork with AI"><svg aria-hidden="true"><use href="#i-pencil"/></svg><span>AI edit</span></button></div>
+  </header>
+
+  <nav class="project-tabs-bar" aria-label="Workspace">
+    <button id="toggle-tools-panel" class="button subtle panel-toggle" title="Show or hide the toolbox" aria-label="Toggle toolbox panel" aria-controls="tools-panel" aria-expanded="true"><svg aria-hidden="true"><use href="#i-panel-left"/></svg><span>Tools</span></button>
+    <div id="project-tabs" class="project-tabs" role="tablist" aria-label="Open projects"></div>
+    <button id="new-project-tab" class="icon-button" title="New project tab" aria-label="New project tab"><svg aria-hidden="true"><use href="#i-plus"/></svg></button>
+    <button id="open-saved-projects" class="button subtle saved-projects-button" title="Saved projects" aria-label="Saved projects"><svg aria-hidden="true"><use href="#i-folder"/></svg><span>Saved projects</span></button>
+    <button id="toggle-details-panel" class="button subtle panel-toggle" title="Show or hide animation and object panels" aria-label="Toggle details panel" aria-controls="details-panel" aria-expanded="true"><svg aria-hidden="true"><use href="#i-panel-right"/></svg><span>Details</span></button>
+  </nav>
+
+  <main class="workbench" id="workbench">
+    <aside class="left-panel" id="tools-panel" aria-label="Toolbox and palette">
+      <details class="tools-section panel-section" data-panel="tools" open>
+        <summary class="section-heading"><h2>TOOLBOX</h2><svg class="panel-chevron" aria-hidden="true"><use href="#i-chevron"/></svg></summary>
+        <div class="tool-grid" role="group" aria-label="Drawing tools">
+          <button data-tool="object" class="tool" title="Select / move objects (V)" aria-keyshortcuts="V" aria-pressed="false"><svg aria-hidden="true"><use href="#i-pointer"/></svg><span>Object</span><kbd>V</kbd></button>
+          <button data-tool="pencil" class="tool active" title="Pencil (B)" aria-keyshortcuts="B" aria-pressed="true"><svg aria-hidden="true"><use href="#i-pencil"/></svg><span>Pencil</span><kbd>B</kbd></button>
+          <button data-tool="eraser" class="tool" title="Eraser (E)" aria-keyshortcuts="E" aria-pressed="false"><svg aria-hidden="true"><use href="#i-eraser"/></svg><span>Eraser</span><kbd>E</kbd></button>
+          <button data-tool="line" class="tool" title="Straight line (L)" aria-keyshortcuts="L" aria-pressed="false"><svg aria-hidden="true"><use href="#i-line"/></svg><span>Line</span><kbd>L</kbd></button>
+          <button data-tool="fill" class="tool" title="Flood fill (F)" aria-keyshortcuts="F" aria-pressed="false"><svg aria-hidden="true"><use href="#i-fill"/></svg><span>Fill</span><kbd>F</kbd></button>
+          <button data-tool="replace" class="tool" title="Replace color (U)" aria-keyshortcuts="U" aria-pressed="false"><svg aria-hidden="true"><use href="#i-replace"/></svg><span>Replace</span><kbd>U</kbd></button>
+          <button data-tool="eyedropper" class="tool" title="Eyedropper (I)" aria-keyshortcuts="I" aria-pressed="false"><svg aria-hidden="true"><use href="#i-picker"/></svg><span>Picker</span><kbd>I</kbd></button>
+          <button data-tool="rectangle" class="tool" title="Square / rectangle (R)" aria-keyshortcuts="R" aria-pressed="false"><svg aria-hidden="true"><use href="#i-square"/></svg><span>Rectangle</span><kbd>R</kbd></button>
+          <button data-tool="ellipse" class="tool" title="Circle / ellipse (C)" aria-keyshortcuts="C" aria-pressed="false"><svg aria-hidden="true"><use href="#i-circle"/></svg><span>Ellipse</span><kbd>C</kbd></button>
+          <button data-tool="select" class="tool" title="Select / move pixels (S)" aria-keyshortcuts="S" aria-pressed="false"><svg aria-hidden="true"><use href="#i-select"/></svg><span>Select</span><kbd>S</kbd></button>
+        </div>
+        <div class="tool-options" aria-label="Selected tool settings">
+          <h3 id="active-tool-name">Pencil</h3>
+          <p id="tool-hint" class="tool-hint">Draw connected strokes on the selected layer.</p>
+          <div id="brush-options" class="tool-option-grid">
+            <label class="tool-option"><span>Size</span><select id="brush-size" aria-label="Brush size"><option value="1">1 px</option><option value="2">2 px</option><option value="3">3 px</option><option value="4">4 px</option><option value="5">5 px</option><option value="6">6 px</option><option value="7">7 px</option><option value="8">8 px</option></select></label>
+            <label class="tool-option"><span>Brush</span><select id="brush-shape" aria-label="Brush shape"><option value="square">Square</option><option value="round">Round</option></select></label>
+          </div>
+          <label class="check-row" id="filled-row" hidden><input type="checkbox" id="filled-shape"><span>Filled shape</span><span class="shape-hint">Shift for 1:1</span></label>
+          <div id="symmetry-options"><label class="tool-option inline-option"><span>Mirror</span><select id="symmetry-mode" aria-label="Drawing symmetry"><option value="none">Off</option><option value="x">Left / right</option><option value="y">Top / bottom</option><option value="both">Both axes</option></select></label></div>
+        </div>
+        <button id="magic-outline" class="button small outline-action" title="Add one outline around the combined artwork in each frame" aria-label="Magic Outline"><svg aria-hidden="true"><use href="#i-spark"/></svg><span>Outline all frames</span></button>
+      </details>
+      <details class="palette-section panel-section" data-panel="palette" open>
+        <summary class="section-heading"><h2>COLOR PALETTE <span id="palette-count" class="count-badge">16</span></h2><svg class="panel-chevron" aria-hidden="true"><use href="#i-chevron"/></svg></summary>
+        <div id="palette-grid" class="palette-grid" role="group" aria-label="Fixed color palette"></div>
+        <div class="color-editor"><input id="color-picker" type="color" value="#25352c" aria-label="Edit selected palette color"><label class="sr-only" for="hex-color">Selected palette color hex code</label><input id="hex-color" type="text" value="#25352C" maxlength="7" spellcheck="false"><span id="color-slot">01</span></div>
+        <div class="palette-actions"><button id="add-color" class="button small"><svg><use href="#i-plus"/></svg>Add color</button><button id="swap-colors" class="button small" aria-pressed="false"><svg><use href="#i-swap"/></svg>Swap</button></div><p id="palette-help" class="helper-text">Edit a color to update it in every frame.</p>
+      </details>
+      <details class="transform-section panel-section" data-panel="transforms" open>
+        <summary class="section-heading"><h2>TRANSFORM</h2><svg class="panel-chevron" aria-hidden="true"><use href="#i-chevron"/></svg></summary>
+        <label class="tool-option transform-scope"><span>Apply to</span><select id="transform-scope" aria-label="Transform scope"><option value="selection" disabled>Selection</option><option value="frame" selected>Pixels · this frame</option><option value="animation">Pixels · animation</option><option value="project">Pixels · all frames</option></select></label>
+        <div class="transform-buttons" role="group" aria-label="Pixel transforms">
+          <button id="flip-horizontal" class="button small" title="Flip horizontally" aria-label="Flip horizontally"><svg aria-hidden="true"><use href="#i-flip-h"/></svg><span>Flip H</span></button>
+          <button id="flip-vertical" class="button small" title="Flip vertically" aria-label="Flip vertically"><svg aria-hidden="true"><use href="#i-flip-v"/></svg><span>Flip V</span></button>
+          <button id="rotate-left" class="button small" title="Rotate 90 degrees left" aria-label="Rotate 90 degrees left"><svg aria-hidden="true"><use href="#i-rotate-left"/></svg><span>Left 90°</span></button>
+          <button id="rotate-right" class="button small" title="Rotate 90 degrees right" aria-label="Rotate 90 degrees right"><svg aria-hidden="true"><use href="#i-rotate-right"/></svg><span>Right 90°</span></button>
+        </div>
+        <p id="transform-help" class="helper-text">Transforms affect the selected layer.</p>
+      </details>
+      <section class="account-section"><button id="account-button" class="button account-button" aria-label="AI connection"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 21v-3a7 7 0 0 1 14 0v3"/></svg>AI connection<span>↗</span></button></section>
+      <div class="left-bottom"><div class="tiny-pixels" aria-hidden="true"><i></i><i></i><i></i><i></i></div><p>A little world,<br>one pixel at a time.</p><button id="shortcuts-button" class="text-button">Keyboard shortcuts <span>?</span></button></div>
+    </aside>
+
+    <section class="editor-column" aria-label="Pixel editor">
+      <div class="canvas-panel"><div class="canvas-toolbar"><div class="canvas-title">Canvas <button id="resize-canvas" class="dimension-badge" title="Change canvas size" aria-label="Change canvas size">32 × 32 ↗</button></div><div class="canvas-options"><button id="toggle-grid" class="icon-button active" title="Toggle pixel grid (G)" aria-label="Toggle pixel grid" aria-pressed="true"><svg><use href="#i-grid"/></svg></button><button id="toggle-onion" class="icon-button" title="Onion skin: show previous frame (O)" aria-label="Toggle onion skin" aria-pressed="false"><svg><use href="#i-layers"/></svg></button><span class="toolbar-divider"></span><button id="undo" class="icon-button" title="Undo (Ctrl/⌘ Z)" aria-label="Undo" disabled><svg><use href="#i-undo"/></svg></button><button id="redo" class="icon-button" title="Redo (Ctrl/⌘ Shift Z)" aria-label="Redo" disabled><svg><use href="#i-redo"/></svg></button></div></div>
+        <div id="in-place-actions" class="in-place-actions" role="region" aria-label="Edit object on canvas" hidden>
+          <div class="in-place-copy"><strong id="in-place-name"></strong><span id="in-place-impact" aria-live="polite"></span></div>
+          <label class="in-place-scope"><span>Edit artwork in</span><select id="in-place-scope" aria-label="Canvas object edit scope"><option value="shared">All instances</option><option value="frame">This frame only</option></select></label>
+          <div class="in-place-buttons"><button id="in-place-cancel" class="button small">Cancel</button><button id="in-place-apply" class="button small primary">Apply edits</button></div>
+          <p id="in-place-error" class="in-place-error" role="alert" hidden></p>
+        </div>
+        <div id="selection-actions" class="selection-actions" role="group" aria-label="Selection actions" hidden>
+          <span id="selection-info" class="selection-info">Selection</span>
+          <div class="selection-buttons">
+            <button id="select-all" class="icon-button" title="Select all pixels (Ctrl/⌘ A)" aria-label="Select all pixels"><svg aria-hidden="true"><use href="#i-select-all"/></svg></button>
+            <button id="copy-selection" class="icon-button" title="Copy selected pixels (Ctrl/⌘ C)" aria-label="Copy selected pixels"><svg aria-hidden="true"><use href="#i-copy"/></svg></button>
+            <button id="cut-selection" class="icon-button" title="Cut selected pixels (Ctrl/⌘ X)" aria-label="Cut selected pixels"><svg aria-hidden="true"><use href="#i-cut"/></svg></button>
+            <button id="paste-selection" class="icon-button" title="Paste pixels (Ctrl/⌘ V)" aria-label="Paste pixels"><svg aria-hidden="true"><use href="#i-paste"/></svg></button>
+            <button id="clear-selection" class="icon-button" title="Delete selected pixels" aria-label="Delete selected pixels"><svg aria-hidden="true"><use href="#i-trash"/></svg></button>
+            <button id="deselect-selection" class="button small" title="Deselect" aria-label="Deselect"><svg aria-hidden="true"><use href="#i-check"/></svg><span>Done</span></button>
+          </div>
+          <span id="selection-move-help" class="selection-move-help">Drag inside to move · arrows to nudge · Esc to deselect</span>
+        </div>
+        <div id="canvas-stage" class="canvas-stage"><div class="canvas-wrap"><canvas id="pixel-canvas" width="384" height="384" tabindex="0" role="img" aria-label="32 by 32 pixel drawing canvas. Choose a drawing tool and drag to draw.">Your browser needs Canvas support to draw pixel art.</canvas></div></div>
+        <div class="canvas-bottom"><div class="canvas-coordinates"><span id="cursor-position">X — &nbsp; Y —</span><span class="status-separator">/</span><span id="tool-status">Pencil</span><span class="canvas-layer-label" title="Selected object"><svg aria-hidden="true"><use href="#i-layers"/></svg><span id="active-layer-name">Layer 1</span></span></div><div class="zoom-controls"><button id="zoom-out" class="icon-button" aria-label="Zoom out" title="Zoom out (-)"><svg><use href="#i-minus"/></svg></button><span id="zoom-value">1200%</span><button id="zoom-in" class="icon-button" aria-label="Zoom in" title="Zoom in (+)"><svg><use href="#i-plus"/></svg></button><button id="zoom-fit" class="icon-button" aria-label="Fit canvas to view" title="Fit canvas to view (0)"><svg><use href="#i-fit"/></svg></button></div></div>
+      </div>
+      <section class="timeline"><div class="timeline-heading"><div><h2>Frames <span id="frame-count" class="count-badge">4</span></h2><span id="animation-name-label" class="timeline-subtitle">Idle animation</span></div><div class="timeline-actions"><button id="duplicate-frame" class="icon-button" title="Duplicate selected frame (D)" aria-label="Duplicate selected frame"><svg><use href="#i-copy"/></svg></button><button id="delete-frame" class="icon-button" title="Delete selected frame" aria-label="Delete selected frame"><svg><use href="#i-trash"/></svg></button><span class="toolbar-divider"></span><button id="add-frame" class="button small"><svg><use href="#i-plus"/></svg>Add frame</button></div></div><div id="frame-list" class="frame-list" role="group" aria-label="Animation frames"></div><div class="timeline-footer"><span id="frame-position">Frame 1 of 4</span><label class="frame-timing"><span>Duration</span><input id="frame-duration" type="number" min="1" max="60000" step="1" value="125" aria-label="Selected frame duration in milliseconds"><span>ms</span></label><div class="frame-reorder"><button id="move-frame-left" class="text-button" title="Move frame left" aria-label="Move frame left">←</button><span>Reorder</span><button id="move-frame-right" class="text-button" title="Move frame right" aria-label="Move frame right">→</button></div><span class="timeline-hint">Duplicate a frame to keep drawing.</span></div></section>
+    </section>
+
+    <aside class="right-panel" id="details-panel" aria-label="Preview, animations, and objects">
+      <details class="preview-section panel-section" data-panel="preview" open><summary class="section-heading"><h2>LIVE PREVIEW</h2><span class="live-badge"><i></i> LIVE</span><svg class="panel-chevron" aria-hidden="true"><use href="#i-chevron"/></svg></summary><div class="preview-stage" id="preview-stage"><canvas id="preview-canvas" width="128" height="128" role="img" aria-label="Animation preview"></canvas><span id="preview-frame" class="preview-counter">1 / 4</span></div><div class="preview-controls"><button id="play-toggle" class="button small play-button" aria-label="Pause animation"><svg><use href="#i-pause"/></svg><span>Pause</span></button><label class="fps-control"><input id="fps-input" type="number" min="1" max="60" value="8" aria-label="Animation frames per second"><span>FPS</span></label><button id="preview-background" class="icon-button" title="Change preview background" aria-label="Change preview background"><svg><use href="#i-square"/></svg></button></div></details>
+      <details class="animations-section panel-section" data-panel="animations" open>
+        <summary class="section-heading"><h2>ANIMATIONS <span id="animation-count" class="inline-count">3</span></h2><svg class="panel-chevron" aria-hidden="true"><use href="#i-chevron"/></svg></summary>
+        <div id="animation-list" class="animation-list"></div>
+        <div class="animation-tools" role="group" aria-label="Animation tools">
+          <button id="duplicate-animation" class="button small" title="Duplicate this animation" aria-label="Duplicate animation"><svg aria-hidden="true"><use href="#i-copy"/></svg><span>Duplicate</span></button>
+          <button id="mirror-animation" class="button small" title="Create a mirrored copy of this animation" aria-label="Mirror animation"><svg aria-hidden="true"><use href="#i-flip-h"/></svg><span>Mirror</span></button>
+          <button id="reverse-animation" class="button small" title="Reverse the frame order of this animation" aria-label="Reverse animation"><svg aria-hidden="true"><use href="#i-swap"/></svg><span>Reverse</span></button>
+          <button id="add-animation" class="button small panel-add-button" title="Add named animation" aria-label="Add named animation"><svg aria-hidden="true"><use href="#i-plus"/></svg><span>Add</span></button>
+        </div>
+        <button id="edit-animation-ai" class="button small panel-add-button animation-ai-edit" title="Edit the selected animation with AI"><svg aria-hidden="true"><use href="#i-spark"/></svg><span>Edit with AI</span></button>
+      </details>
+      <details class="objects-section panel-section" data-panel="layers" aria-labelledby="objects-heading" open>
+        <summary class="section-heading"><h2 id="objects-heading">OBJECTS <span id="object-count" class="inline-count">1</span></h2><svg class="panel-chevron" aria-hidden="true"><use href="#i-chevron"/></svg></summary>
+        <label class="tool-option object-scope-label"><span>Edit in</span><select id="object-scope" aria-label="Object editing scope"><option value="animation">Current animation</option><option value="frame">Current frame</option></select></label>
+        <div id="object-list" class="object-list" role="group" aria-label="Artwork objects"></div>
+        <div class="object-toolbar" role="group" aria-label="Object actions">
+          <button id="object-up" class="icon-button" aria-label="Move object up" title="Move object up"><svg aria-hidden="true"><use href="#i-up"/></svg></button>
+          <button id="object-down" class="icon-button" aria-label="Move object down" title="Move object down"><svg aria-hidden="true"><use href="#i-down"/></svg></button>
+          <button id="object-rename" class="icon-button" aria-label="Rename object" title="Rename object"><svg aria-hidden="true"><use href="#i-pencil"/></svg></button>
+          <button id="object-delete" class="icon-button" aria-label="Delete object" title="Delete object"><svg aria-hidden="true"><use href="#i-trash"/></svg></button>
+        </div>
+        <button id="edit-shared-object" class="button small object-edit-action">Edit on canvas</button>
+        <p id="object-detail" class="object-detail">Select an object to edit it.</p>
+        <div class="object-secondary-actions"><button id="add-pixel-object" class="button small">Add pixels</button><button id="add-object-group" class="button small">Add group</button></div>
+        <details class="object-more"><summary>More object actions</summary><div class="object-secondary-actions">
+          <button id="object-isolated-edit" class="button small">Open isolated editor</button><button id="object-move-group" class="button small">Move to group…</button><button id="object-ungroup" class="button small">Ungroup</button><button id="object-independent" class="button small">Make independent</button><button id="outline-objects" class="button small">Outline artwork…</button>
+        </div></details>
+        <button id="manage-parts" class="button small panel-add-button">Part library / place part</button>
+      </details>
+      <details class="samples-section panel-section" data-panel="samples" open><summary class="section-heading"><h2>START SOMETHING</h2><svg class="panel-chevron" aria-hidden="true"><use href="#i-chevron"/></svg></summary><p class="section-intro">A few little things to make your own.</p><div id="sample-list" class="sample-list"></div><p class="sample-note">Load a sample, or <button id="download-samples" class="text-button">get the data files ↗</button></p></details>
+    </aside>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <dialog id="modal" class="modal"><div class="modal-heading"><div><span id="modal-eyebrow" class="modal-eyebrow">PIXEL STUDIO</span><h2 id="modal-title"></h2></div><button id="close-modal" class="icon-button" aria-label="Close dialog"><svg><use href="#i-close"/></svg></button></div><div id="modal-content" class="modal-content"></div></dialog>
+  <input id="data-file-input" type="file" accept=".pxa,.pxs,.pixel,.json,text/plain,application/octet-stream,application/json" hidden>
+  <input id="png-file-input" type="file" accept="image/png,.png" hidden>
+  <input id="sheet-file-input" type="file" accept="image/png,.png" hidden>
+  <script type="module" src="./src/editor/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,61 @@
+{
+  "format": "pixel-studio-spritesheet",
+  "version": 1,
+  "name": "Pip the Panda",
+  "width": 32,
+  "height": 32,
+  "cellWidth": 32,
+  "cellHeight": 32,
+  "scale": 1,
+  "rows": 3,
+  "columns": 6,
+  "palette": [
+    "#202a35",
+    "#374353",
+    "#faf7e8",
+    "#d6ddd8",
+    "#f8b8a8",
+    "#318a76",
+    "#53bfa0",
+    "#226955",
+    "#ffffff",
+    "#c5d5cf"
+  ],
+  "animations": [
+    {
+      "name": "Idle",
+      "fps": 4,
+      "frameCount": 4,
+      "durations": [
+        400,
+        400,
+        400,
+        150
+      ]
+    },
+    {
+      "name": "Walk",
+      "fps": 8,
+      "frameCount": 6,
+      "durations": [
+        125,
+        125,
+        125,
+        125,
+        125,
+        125
+      ]
+    },
+    {
+      "name": "Wave",
+      "fps": 6,
+      "frameCount": 4,
+      "durations": [
+        167,
+        167,
+        167,
+        167
+      ]
+    }
+  ]
+}

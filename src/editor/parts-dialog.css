@@ -1,0 +1,12 @@
+.parts-grid { margin-top: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.parts-grid .field { min-width: 0; }
+.parts-actions { flex-wrap: wrap; justify-content: flex-start; }
+.parts-error { min-height: 0; margin: 0 0 16px; color: #a33434; }
+.parts-canvas {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  image-rendering: pixelated;
+  background: repeating-conic-gradient(#e4e4e4 0% 25%, #fff 0% 50%) 50% / 16px 16px;
+  touch-action: none;
+}

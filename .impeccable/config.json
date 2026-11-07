@@ -1,0 +1,26 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "wide-tracking",
+        "value": "*",
+        "files": [
+          "public/index.html"
+        ],
+        "createdAt": "2026-11-06T19:36:31.753Z",
+        "reason": "Agent: browser inspection confirms tracking above 0.05em is confined to the short uppercase brand tagline and section labels; no body paragraphs use it."
+      },
+      {
+        "rule": "cramped-padding",
+        "value": "*",
+        "files": [
+          "public/index.html"
+        ],
+        "createdAt": "2026-11-06T19:36:31.832Z",
+        "reason": "Agent: browser bounds confirm project-info has 25px inset, toolbar and footer children are vertically centered with visible gaps, preview artwork is centered with inset counter, and canvas-wrap intentionally contains an edge-to-edge drawing canvas; its fallback text is not displayed."
+      }
+    ]
+  }
+}

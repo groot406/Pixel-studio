@@ -1,0 +1,96 @@
+{
+  "note": "UTF-8 bytes and local decode latency. Optional o200k_base token counts are a comparison proxy, not measured Codex billing. No live model calls, generation-speed or visual-quality claims.",
+  "cases": [
+    {
+      "case": "key (raster import)",
+      "v1Bytes": 1424,
+      "v2Bytes": 1262,
+      "byteReductionPercent": 11.4,
+      "v2DecodeMedianMs": 0.18,
+      "v1Tokens": 789,
+      "v2Tokens": 658,
+      "tokenReductionPercent": 16.6
+    },
+    {
+      "case": "campfire (raster import)",
+      "v1Bytes": 3145,
+      "v2Bytes": 3520,
+      "byteReductionPercent": -11.9,
+      "v2DecodeMedianMs": 0.305,
+      "v1Tokens": 1703,
+      "v2Tokens": 1851,
+      "tokenReductionPercent": -8.7
+    },
+    {
+      "case": "panda (raster import)",
+      "v1Bytes": 3608,
+      "v2Bytes": 3324,
+      "byteReductionPercent": 7.9,
+      "v2DecodeMedianMs": 0.395,
+      "v1Tokens": 1985,
+      "v2Tokens": 1713,
+      "tokenReductionPercent": 13.7
+    },
+    {
+      "case": "red-panda (raster import)",
+      "v1Bytes": 7318,
+      "v2Bytes": 7270,
+      "byteReductionPercent": 0.7,
+      "v2DecodeMedianMs": 0.619,
+      "v1Tokens": 3902,
+      "v2Tokens": 3741,
+      "tokenReductionPercent": 4.1
+    },
+    {
+      "case": "key (authored parts)",
+      "v1Bytes": 1424,
+      "v2Bytes": 1201,
+      "byteReductionPercent": 15.7,
+      "v2DecodeMedianMs": 0.114,
+      "v1Tokens": 789,
+      "v2Tokens": 608,
+      "tokenReductionPercent": 22.9
+    },
+    {
+      "case": "sparkle (authored parts)",
+      "v1Bytes": 1015,
+      "v2Bytes": 487,
+      "byteReductionPercent": 52,
+      "v2DecodeMedianMs": 0.058,
+      "v1Tokens": 600,
+      "v2Tokens": 218,
+      "tokenReductionPercent": 63.7
+    }
+  ],
+  "editCase": "Move the Golden Key one pixel right in its idle frame, preserving all other artwork.",
+  "edits": [
+    {
+      "workflow": "v1 full-frame edit",
+      "inputBytes": 6055,
+      "outputBytes": 641,
+      "totalBytes": 6696,
+      "inputTokens": 1529,
+      "outputTokens": 335,
+      "totalTokens": 1864
+    },
+    {
+      "workflow": "v1 existing inpaint",
+      "inputBytes": 2537,
+      "outputBytes": 796,
+      "totalBytes": 3333,
+      "inputTokens": 1076,
+      "outputTokens": 419,
+      "totalTokens": 1495
+    },
+    {
+      "workflow": "v2 instance patch",
+      "inputBytes": 3225,
+      "outputBytes": 113,
+      "totalBytes": 3338,
+      "inputTokens": 936,
+      "outputTokens": 44,
+      "totalTokens": 980
+    }
+  ],
+  "tokenizer": "tiktoken o200k_base (proxy)"
+}

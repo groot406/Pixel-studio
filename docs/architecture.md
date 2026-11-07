@@ -1,0 +1,64 @@
+# Architecture and compatibility
+
+## Choice of stack
+
+Keep the supplied native ES modules and CSS. The canvas editor's drawing and animation behavior already exists independently of a component framework. A Vue/Tailwind conversion would replace working DOM/rendering code and visual rules without providing a necessary capability for this setup. There is no transpilation, runtime dependency, package download, or CSS reset. `jsconfig.json` provides editor module resolution; it is not a TypeScript type-check gate. New request options use JSDoc contracts.
+
+Vue and TypeScript remain possible future migrations, but should be introduced around measured needs and protected by these behavior tests. Do not convert pixel data or file formats solely to match a UI framework.
+
+## Ownership
+
+- `domain/project.js` owns the canonical project schema, palette/layer validation, and compositing. `domain/limits.js` defines allocation limits; `geometry.js` supplies the same integer drawing algorithms to tools and retained artwork.
+- `domain/artwork.js` owns retained operations, part validation, rendering, and local pixel overrides. `domain/parts.js` owns extraction, placement, forking, shared painting, and flattening. Neither depends on the DOM or file grammar.
+- `domain/objects.js` exposes pixel runs and part instances as editable objects, optional group containers, scoped ordering/movement, and hit testing. It adapts the established cel/source contract rather than keeping a second scene schema. Object and group lock checks live in these use cases, including shared-definition references.
+- `formats/` translates the project to/from external files and validates those inputs. `pxa.js` owns the 64-character pixel alphabet used by inpainting too.
+- `storage/workspace.js` owns IndexedDB transactions and the non-durable fallback. The editor owns save ordering, document revisions, tab selection, and history.
+- `features/ai/edit.js` protects structure and locked artwork during existing PXA edits. `patch-engine.js` owns rectangular masks, target confinement, fingerprints, sparse pixel patches, and palette-only proposals.
+- `features/ai/composition-edit.js` owns scoped PXA 2 patch policy and validates every shared-part reference before allowing definition changes. It reuses the file codec's command parsing and the domain validator; scope policy stays out of the generic codec.
+- `features/ai/requests.js` coordinates editing modes and returns one proposal contract. `response-contract.js` owns instruction limits and completion markers; `comparison.js` owns change summaries. `refinement.js` builds a single optional follow-up request and bounded visual previews. No validators import the dialog.
+- `features/ai/edit-dialog.js` owns review UI and its lifecycle. `local-client.js` consumes completed NDJSON responses; partial output never becomes a proposal.
+- `editor/app.js` remains the composition point for editor state and its existing DOM rendering. It alone commits proposals through the existing `mutate`/history path after checking tab ID, document revision, and source snapshot.
+- `editor/objects-panel.js` renders object selection and actions. `shared-part-editor.js` owns a detached, part-sized paint buffer, local history and full-sprite context previews. Applying shared artwork goes through the editor's one Undo boundary; Cancel discards its draft.
+- `local/` owns loopback HTTP, CSRF/origin checks, cancellation, and Codex process lifecycle. `codex-runtime.mjs` prefers the installed ChatGPT desktop runtime on macOS, falling back to the CLI on PATH. The model catalog and model validation use that same runtime; no model IDs are synthesized. `pixel-request.mjs` declares supported request formats and text/image limits. For visual refinement, the bridge writes validated inline PNGs to its own temporary paths and cleans them up with the session. Browser input cannot supply filesystem paths, commands, credentials, or arbitrary provider URLs.
+
+## Project contract
+
+Raster projects retain version 2 with `format: 'pixel-studio'`, `name`, `width`, `height`, `palette`, `layers`, and `animations`. Version 3 adds a flat `parts` library and optional cel `source: {ops, overrides}`. Each layer has `id`, `name`, `visible`, and `locked`. Each animation has `id`, `name`, `fps`, and `frames`, plus optional `layerOrder`: every shared layer ID exactly once, bottom to top. Without it, declaration order applies, preserving existing projects. Each frame has `id`, `duration` in milliseconds, and one cel for every layer.
+
+The editor presents Objects instead of Layers. The existing `layers` and `cels` fields remain the compatibility storage contract. Containers with optional `group: false` expose their objects directly; `true` displays a group. Omitted `group` displays legacy layers as groups, preserving their names, flags, isolated erasures, overrides, IDs and artwork. New projects begin with ungrouped pixels. Groups are one level deep and can be added or ungrouped without baking their artwork. Instances can move between containers. Pixel drawing runs retain their original order, and final local overrides stay above their container's operations.
+
+Part instances optionally carry a `name` and boolean `visible`/`locked` settings. Metadata is normalized together when present. A hidden instance remains in its source; a locked instance prevents moving, reordering, deleting or editing its definition. Shared definition edits check all references, including hidden instances and other animations. Pixel AI edits conservatively protect a whole cel containing a locked instance. Canvas Object mode hit-tests the visible result, including transformations, transparent part pixels, local erasures and hidden groups. Animation movement preserves each frame's existing position by adding the same offset, rather than replacing every pose with one position.
+
+Object edits default to the current animation and can target one frame. Containers use animation `layerOrder` or an optional frame `layerOrder` override, with the same complete-permutation invariant. Copying a frame copies its explicit order; codec `PREV`/`FROM` commands copy cels only. Adding and deleting containers updates both order levels. Optional grouping and per-instance metadata persist in native JSON and PXA 2 (`STACK` and `INSTANCE`); PXA 1 and PXS remain raster exports and bake individual object settings/grouping into each container's pixels. They preserve the rendered result, timing and stack order, while PXA 2 preserves shared editability.
+
+Layer definitions, visibility and locks remain shared. The editor's container order controls default to the active animation and can override one frame. The domain compositor resolves the owning animation for each frame, so canvas, onion skin, thumbnails, playback, AI comparisons and PNG/spritesheet exports use the same stack. Adding/duplicating a layer inserts it above the selected layer in each animation's own stack; deleting it removes its references everywhere. Duplicate/mirrored animations retain their source order, as do new animations started from a copied frame. A project-wide merge requires the same adjacent pair, in the same direction, across all animations; otherwise it would change other animations' appearance.
+
+PXA 1/2 support an optional `ORDER` command once after `ANIM`, before its first `FRAME`. PXA 1 lists layer declaration indices; PXA 2 lists stable layer IDs. `FRAME FROM` copies only cels, retaining the receiving animation's order. Legacy text without `ORDER` remains supported; readers without this extension reject new ORDER files. PXS keeps container version 1 and the original raster payload schema 2 for projects without explicit animation orders. Payload schema 3 adds one u8 declaration index per layer after each animation's frame count; cel bytes remain in declaration order. This binary payload version is separate from native JSON schema 3's reusable artwork support. New payloads require an updated reader. PXA 2 is still the format that retains reusable parts.
+
+PXA 1/2 `FRAMEORDER` follows `FRAME`, before any cel data, and overrides only that frame's stack. PXS payload schema 4 retains schema 3's animation order and adds one u8 layer declaration index per layer after each frame duration. It is emitted only when a frame has an explicit order; schema 2/3 files remain readable and are still written when sufficient. Width/height and container header fields do not change.
+
+Pixels are ordinary arrays of palette indices; `-1` is transparent. A cel is bound by `layerId`, never by an assumed array position. In retained cels, source is authoritative: validation rebuilds the pixels rather than trusting a stored cache. The editor's transaction boundary turns legacy drawing-buffer changes into sparse local overrides before validation and history. Shared-definition changes bypass that adapter so they do not become local overrides. Resize explicitly bakes affected cels.
+
+Frame/animation IDs and timing survive AI edits. PXA 2 preserves stable IDs; older imports can regenerate them. Compatibility tests compare artwork independently of IDs, while PXA 2 tests also require source and identity round trips. PXA 1/PXS exports bake references without changing rendered layers or frame timing. See [PXA 2](pxa-v2.md) for the grammar, limits, migration decisions, and measured tradeoffs.
+
+## Supplied patch adaptation
+
+The original ZIP is retained in `patches/`; its original instructions are in `docs/upstream/inpaint-patch.md`. The integrated engine uses the existing project schema directly. A second normalized schema, duplicate project validator, and second compositor would add unnecessary conversion and competing invariants.
+
+Changes from the standalone patch:
+
+- Use the existing 64-slot PXA alphabet, including lowercase letters, `@`, and `$`.
+- Accept the editor's fractional FPS, full instruction length, cel identities, canvas limits, and pixel budget.
+- Include project/entity identities, frame counts, and fractional FPS in fingerprints. Fingerprints are stale-response checks, not cryptographic authentication.
+- Require the existing unique completion comment for both patch modes, so a valid prefix of an interrupted patch cannot be applied.
+- Add selected layer/rectangle context and revision checking to the existing Apply callback.
+- Teach both HTTP validation and the Codex base instructions about `PXAINPAINT 1` and `PXAPALETTE 1`; retaining PXA-only instructions would make local recoloring fail.
+- Keep the original canvas maximum of 128 and PXS u8 dimension fields. Increasing the canvas to 256 is a separate format/version migration, not just a constant change.
+
+Recoloring intentionally affects the appearance of locked layers because colors are shared. It does not change their indexed pixels. The UI explains that distinction before generation and lists every changed swatch during review.
+
+## Build and runtime
+
+`public/` is copied to `dist/`, then `src/` to `dist/src/`. The local service serves only that build directory and rejects paths escaping it. `npm start` builds automatically. `npm run dev` watches browser inputs and rebuilds them in order; Node's watcher restarts the service for server changes. The browser is refreshed manually.
+
+Do not edit generated files. Source files contain no credentials. No remote repository, hosted Site, publication, or deployment is configured by this local setup.

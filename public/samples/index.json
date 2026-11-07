@@ -1,0 +1,49 @@
+[
+  {
+    "id": "panda",
+    "name": "Pip the Panda",
+    "description": "Meet Pip: a tiny panda with idle, walk, and wave animations.",
+    "file": "panda.pxs",
+    "animations": 3,
+    "frames": 14,
+    "aiFile": "panda.pxa"
+  },
+  {
+    "id": "red-panda",
+    "name": "Ravi the Red Panda",
+    "description": "A curious red panda with a striped tail, gentle idle, playful walk, and friendly wave.",
+    "file": "red-panda.pxs",
+    "animations": 3,
+    "frames": 14,
+    "aiFile": "red-panda.pxa"
+  },
+  {
+    "id": "key",
+    "name": "Golden Key",
+    "description": "A golden dungeon key with a little extra sparkle.",
+    "file": "key.pxs",
+    "animations": 2,
+    "frames": 5,
+    "aiFile": "key.pxa"
+  },
+  {
+    "id": "campfire",
+    "name": "Cozy Campfire",
+    "description": "A cozy looping campfire with dancing flames.",
+    "file": "campfire.pxs",
+    "animations": 1,
+    "frames": 8,
+    "aiFile": "campfire.pxa"
+  },
+  {
+    "id": "key-v2",
+    "name": "Golden Key \u00b7 reusable parts",
+    "description": "PXA 2: a shared key body and reusable sparkles. Double-click a part on the canvas to edit its shared artwork.",
+    "file": "key-v2.pxa",
+    "binaryFile": "key.pxs",
+    "aiFile": "key-v2.pxa",
+    "animations": 2,
+    "frames": 5,
+    "thumbnail": "key"
+  }
+]

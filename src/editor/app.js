@@ -5,6 +5,7 @@ import { celObjects, reorderObject, reorderObjectContainer, updateObject, transl
 import { transformedSize } from '../domain/geometry.js';
 import { resizeBox } from '../domain/resize.js';
 import { renderObjectsPanel } from './objects-panel.js';
+import { initPanelLayout } from './panel-layout.js';
 import { openSharedPartEditor } from './shared-part-editor.js';
 import { hasLockedInstances } from '../domain/artwork.js';
 import { openPartsDialog } from './parts-dialog.js';
@@ -668,20 +669,36 @@ function renderTimeline() {
   $('duplicate-frame').disabled = !canAddFrame();
   if(document.activeElement!==$('frame-duration')) $('frame-duration').value=currentFrame().duration;
 }
+function selectAnimation(id) {
+  if (state.inPlaceEdit || id === state.animationId || !state.project.animations.some(a => a.id === id)) return;
+  finishDrawing();
+  state.animationId = id;
+  state.frameId = currentAnimation().frames[0].id;
+  state.previewIndex = 0;
+  state.previewTime = 0;
+  renderAll();
+  scheduleSave();
+}
+function stepAnimation(delta) {
+  const list = state.project.animations, index = list.findIndex(a => a.id === state.animationId);
+  selectAnimation(list[(index + delta + list.length) % list.length].id);
+}
+function renderPreviewAnimations() {
+  const list = state.project.animations, select = $('preview-animation');
+  const options = list.map(a => `<option value="${escapeHTML(a.id)}">${escapeHTML(a.name)} · ${a.frames.length}f</option>`).join('');
+  if (select.innerHTML !== options) select.innerHTML = options;
+  select.value = state.animationId;
+  const locked = Boolean(state.inPlaceEdit);
+  select.disabled = locked || list.length < 2;
+  $('preview-prev-animation').disabled = $('preview-next-animation').disabled = locked || list.length < 2;
+}
 function renderAnimations() {
+  renderPreviewAnimations();
   $('animation-count').textContent = state.project.animations.length;
   $('animation-list').innerHTML = state.project.animations.map(animation => `<div class="animation-item${animation.id === state.animationId ? ' selected' : ''}" data-animation="${escapeHTML(animation.id)}"><button class="animation-select" aria-label="Select ${escapeHTML(animation.name)} animation" aria-pressed="${animation.id === state.animationId}"><span class="animation-dot"></span><span class="animation-label">${escapeHTML(animation.name)}</span><span class="animation-meta">${animation.frames.length}f</span></button><button class="icon-button mini animation-rename" title="Rename animation" aria-label="Rename ${escapeHTML(animation.name)} animation">${icon('pencil')}</button><button class="icon-button mini animation-delete" title="Delete animation" aria-label="Delete ${escapeHTML(animation.name)} animation"${state.project.animations.length <= 1 ? ' disabled' : ''}>${icon('trash')}</button></div>`).join('');
   $('animation-list').querySelectorAll('[data-animation]').forEach(item => {
     const id = item.dataset.animation;
-    item.querySelector('.animation-select').addEventListener('click', () => {
-      finishDrawing();
-      state.animationId = id;
-      state.frameId = currentAnimation().frames[0].id;
-      state.previewIndex = 0;
-      state.previewTime = 0;
-      renderAll();
-      scheduleSave();
-    });
+    item.querySelector('.animation-select').addEventListener('click', () => selectAnimation(id));
     item.querySelector('.animation-rename').addEventListener('click', () => animationDialog(id));
     item.querySelector('.animation-delete').addEventListener('click', () => {
       if (state.project.animations.length <= 1) return;
@@ -764,7 +781,7 @@ function beginCanvasPartEdit(item,partId) {
     const edit={session,documentId:state.documentId,revision:state.documents.get(state.documentId)?.revision,previousTool:state.tool,previousPlaying:state.playing,inert:new Map(),disabled:new Map(),error:null};
     state.inPlaceEdit=edit;state.tool='pencil';state.playing=false;state.selection=null;state.swap=false;state.swapFirst=null;
     state.cursor={x:Math.max(0,Math.min(state.project.width-1,bounds.x)),y:Math.max(0,Math.min(state.project.height-1,bounds.y))};
-    for(const element of document.querySelectorAll('.app-header,#project-tabs,#new-project-tab,#open-saved-projects,#details-panel,.timeline,.transform-section,.account-section,.left-bottom')) {
+    for(const element of document.querySelectorAll('.app-header,#project-tabs,#new-project-tab,#open-saved-projects,#details-panel,.timeline,.transform-section,.account-section,.left-bottom,.floating-panel[data-home="details-panel"],.panel-splitter')) {
       edit.inert.set(element,element.inert);element.inert=true;
     }
     for(const element of document.querySelectorAll('[data-tool="object"],[data-tool="resize"],[data-tool="wand"],#make-object,#magic-outline,#resize-canvas,#toggle-onion,#color-picker,#hex-color,#add-color,#swap-colors')) {
@@ -1082,12 +1099,17 @@ function renderPlaybackControls() {
   document.querySelector('.live-badge').innerHTML = `<i></i> ${state.playing ? 'LIVE' : 'STILL'}`;
   document.querySelector('.live-badge').classList.toggle('paused', !state.playing);
 }
-function renderSamples() {
-  $('sample-list').innerHTML = state.samples.map(sample => `<button class="sample-card" data-sample="${sample.id}" aria-label="Load ${escapeHTML(sample.name)} sample"><canvas class="sample-thumb" width="32" height="32"></canvas><span class="sample-copy"><strong>${escapeHTML(sample.name)}</strong><small>${sample.animations} animation${sample.animations === 1 ? '' : 's'} · ${sample.frames} frames</small></span>${icon('chevron')}</button>`).join('');
-  $('sample-list').querySelectorAll('[data-sample]').forEach(button => {
+/** Example projects as cards in the start screen; each opens a copy in a new tab. */
+function renderSampleCards(container) {
+  container.innerHTML = state.samples.map(sample => `<button type="button" class="start-sample" data-sample="${sample.id}" aria-label="Open ${escapeHTML(sample.name)} example" title="${escapeHTML(sample.name)} · ${sample.animations} animation${sample.animations === 1 ? '' : 's'}, ${sample.frames} frames"><canvas class="sample-thumb" width="32" height="32"></canvas><span>${escapeHTML(sample.name)}</span></button>`).join('')
+    || '<p class="helper-text">Examples could not load.</p>';
+  container.querySelectorAll('[data-sample]').forEach(button => {
     const project = state.sampleData.get(button.dataset.sample);
     paintSprite(button.querySelector('canvas'), compositeFrame(project,project.animations[0].frames[0]), project.palette, false, project.width, project.height);
-    button.addEventListener('click', () => replaceProject(project, `${project.name} loaded. Make it your own.`));
+    button.addEventListener('click', () => {
+      try { replaceProject(clone(project), `${project.name} opened. Make it your own.`); $('modal').close(); }
+      catch (error) { toast(error.message); }
+    });
   });
 }
 function renderAll() {
@@ -1646,7 +1668,7 @@ function animationTick(time) {
 function openDialog(title, content, eyebrow = 'PIXEL STUDIO') {
   if (finishDrawing()) renderAll();
   $('modal').dispatchEvent(new Event('pixel-studio:dialog-replace'));
-  $('modal').classList.remove('wide','prompt-builder-modal','ai-edit-modal','shared-part-modal');
+  $('modal').classList.remove('wide','start-modal','prompt-builder-modal','ai-edit-modal','shared-part-modal');
   $('modal-title').textContent = title;
   $('modal-eyebrow').textContent = eyebrow;
   $('modal-content').innerHTML = content;
@@ -1742,8 +1764,11 @@ function resizeDialog() {
     } catch (error) { toast(error.message); }
   };
 }
-function newProjectDialog() {
-  openDialog('A fresh canvas', `<form id="new-project-form"><p class="modal-body-text">Choose your canvas. What will you make?</p><label class="field"><span class="field-label">Project name</span><input id="new-project-name" value="Untitled sprite" maxlength="80" required autocomplete="off"></label>${dimensionFields('new',32,32)}<label class="check-row"><input id="keep-palette" type="checkbox" checked><span>Keep my current color palette</span></label><p class="helper-text">Opens in a new tab. Your other projects stay open.</p><div class="notice"><strong>Start from an idea</strong><p>Build a prompt with the pixel format and your animation plan. No example artwork needed.</p><button type="button" id="new-project-prompt" class="text-button">Build an AI prompt ↗</button></div><div class="modal-actions"><button type="button" class="button" id="cancel-new">Cancel</button><button type="submit" class="button primary">Create project</button></div></form>`, 'NEW PROJECT');
+function newProjectDialog({welcome=false}={}) {
+  openDialog(welcome?'Welcome to Pixel Studio':'Start something new', `<div class="start-screen"><section class="start-blank"><form id="new-project-form"><p class="modal-body-text">Choose your canvas. What will you make?</p><label class="field"><span class="field-label">Project name</span><input id="new-project-name" value="Untitled sprite" maxlength="80" required autocomplete="off"></label>${dimensionFields('new',32,32)}<label class="check-row"><input id="keep-palette" type="checkbox" checked><span>Keep my current color palette</span></label><p class="helper-text">Opens in a new tab. Your other projects stay open.</p><div class="notice"><strong>Start from an idea</strong><p>Build a prompt with the pixel format and your animation plan. No example artwork needed.</p><button type="button" id="new-project-prompt" class="text-button">Build an AI prompt ↗</button></div><div class="modal-actions"><button type="button" class="button" id="cancel-new">${welcome?'Keep exploring':'Cancel'}</button><button type="submit" class="button primary">Create project</button></div></form></section><section class="start-examples" aria-labelledby="start-examples-title"><div class="start-examples-head"><h3 id="start-examples-title" class="start-heading">Or open an example</h3><button type="button" id="download-samples" class="text-button">Data files ↗</button></div><div id="start-sample-list" class="start-sample-list"></div></section></div>`, welcome?'WELCOME':'NEW PROJECT');
+  $('modal').classList.add('start-modal');
+  renderSampleCards($('start-sample-list'));
+  $('download-samples').onclick = samplesDialog;
   bindDimensionFields('new');
   $('cancel-new').onclick = () => $('modal').close();
   $('new-project-prompt').onclick=()=>{
@@ -2194,7 +2219,7 @@ function bindEvents() {
   $('prompt-builder-button').onclick=()=>promptBuilderDialog();
   $('ai-edit-button').onclick=aiEditDialog;
   $('edit-animation-ai').onclick=aiEditDialog;
-  $('new-project-tab').onclick=newProjectDialog;
+  $('new-project-tab').onclick=()=>newProjectDialog();
   $('open-saved-projects').onclick=savedProjectsDialog;
   $('project-tabs').addEventListener('keydown',event=>{
     if(!event.target.closest('[role="tab"]') || !['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;
@@ -2208,7 +2233,7 @@ function bindEvents() {
   };
   document.querySelectorAll('details[data-panel]').forEach(panel=>{
     if(typeof state.panelSections[panel.dataset.panel]==='boolean')panel.open=state.panelSections[panel.dataset.panel];
-    panel.addEventListener('toggle',()=>{state.panelSections[panel.dataset.panel]=panel.open;persistSession();});
+    panel.addEventListener('toggle',()=>{if(panel.classList.contains('is-floating'))return;state.panelSections[panel.dataset.panel]=panel.open;persistSession();});
   });
   document.querySelectorAll('[data-tool]').forEach(button => button.addEventListener('click', () => {
     finishDrawing();
@@ -2313,6 +2338,9 @@ function bindEvents() {
   $('clear-selection').onclick = clearSelectionPixels;
   $('deselect-selection').onclick = deselectPixels;
   $('play-toggle').onclick = togglePlay;
+  $('preview-animation').onchange = event => selectAnimation(event.target.value);
+  $('preview-prev-animation').onclick = () => stepAnimation(-1);
+  $('preview-next-animation').onclick = () => stepAnimation(1);
   $('fps-input').onchange = event => {
     const fps = Math.max(1,Math.min(60,Math.round(Number(event.target.value) || 8)));
     const animation=currentAnimation(),ratio=animation.fps/fps;
@@ -2330,14 +2358,13 @@ function bindEvents() {
     state.previewBackground = (state.previewBackground + 1) % 3;
     $('preview-stage').dataset.background = ['sage','light','dark'][state.previewBackground];
   };
-  $('new-project').onclick = newProjectDialog;
+  $('new-project').onclick = () => newProjectDialog();
   $('resize-canvas').onclick = resizeDialog;
   $('import-button').onclick = importDialog;
   $('export-button').onclick = exportDialog;
   $('help-button').onclick = helpDialog;
   $('shortcuts-button').onclick = helpDialog;
   $('account-button').onclick = accountDialog;
-  $('download-samples').onclick = samplesDialog;
   $('close-modal').onclick = () => $('modal').close();
   $('modal').addEventListener('click',event => {
     if (event.target !== $('modal')) return;
@@ -2465,8 +2492,11 @@ async function init() {
   state.documentId=active.id;
   for(const key of ['project','animationId','frameId','layerId','objectSelection','undo','redo','selection','scale','fit','color','previewIndex'])state[key]=active[key];
   normalizeSelection();
-  bindEvents(); renderAll(); renderSamples();
+  bindEvents(); renderAll();
+  initPanelLayout({onLayout:()=>requestAnimationFrame(()=>fitCanvas())});
   requestAnimationFrame(() => { fitCanvas(); requestAnimationFrame(animationTick); });
+  // First visit: offer examples and a blank canvas; the panda sample stays open behind it.
+  if(!session && !localStorage.getItem(STORAGE_KEY) && state.samples.length)newProjectDialog({welcome:true});
   saveNow();
 }
 

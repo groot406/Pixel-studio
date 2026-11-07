@@ -41,12 +41,20 @@
 .object-toolbar-divider { align-self: stretch; margin: 6px 0; background: #dce4d5; }
 .object-edit-action { width: 100%; margin-top: 8px; }
 .object-detail { margin: 8px 0 12px; color: #52664d; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
-.object-secondary-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-.object-secondary-actions .button { flex: 1 1 85px; min-width: 0; font-size: 12px; padding: 7px; }
-.object-more { margin: 10px 0; }
-.object-more > summary { padding: 5px 0; color: #52664d; font-size: 12px; cursor: pointer; }
-.object-more .object-secondary-actions { margin-top: 8px; }
-.objects-section #manage-parts { width: 100%; margin-top: 8px; }
+.object-action-group { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line,#dce4d5); }
+.object-action-heading { margin: 0 0 6px; color: #8a9680; font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.object-new-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.object-new-actions .button { justify-content: center; gap: 6px; min-width: 0; font-size: 12px; }
+.object-new-actions svg { width: 14px; height: 14px; }
+.object-action-list { display: flex; flex-direction: column; gap: 1px; }
+.object-action { display: grid; grid-template-columns: 18px minmax(0,1fr); align-items: center; gap: 10px; width: 100%; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.object-action:hover:not([disabled]) { background: #edf3e5; }
+.object-action:focus-visible { outline: 2px solid var(--green); outline-offset: -2px; }
+.object-action[disabled] { opacity: .4; cursor: default; }
+.object-action svg { width: 16px; height: 16px; fill: none; stroke: #52664d; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.object-action-copy { display: flex; flex-direction: column; min-width: 0; }
+.object-action-copy strong { font-size: 12px; font-weight: 600; line-height: 16px; }
+.object-action-copy small { color: #8a9680; font-size: 10.5px; line-height: 14px; }
 .shared-part-modal { width: min(900px,calc(100vw - 40px)); border: 0; }
 .shared-part-modal[open] { display: grid; grid-template-rows: auto minmax(0,1fr); overflow: hidden; }
 .shared-part-modal .modal-content { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }

@@ -118,20 +118,28 @@ export function growPart(project,partId,{left=0,top=0,right=0,bottom=0}) {
   part.ops=part.ops.map(op=>op.type==='line'?{...op,x:op.x+left,y:op.y+top,x2:op.x2+left,y2:op.y2+top}:{...op,x:op.x+left,y:op.y+top});
   Object.assign(part,after);
   for(const a of p.animations) for(const f of a.frames) for(const c of f.cels) for(const op of c.source?.ops || []) {
-    if(op.type!=='use' || op.partId!==partId) continue;
-    const box=transformedSize(op,before);
-    if(op.width===undefined && op.height===undefined) {
-      const shift=grownInstanceShift(op.transform,before,after,left,top);
-      keepRotatedCentre(op,shift,box,transformedSize(op,after));
-      op.x+=shift.x; op.y+=shift.y; continue;
-    }
-    // Resized instances keep their scale: padding grows by the same factor so the artwork stays put (to the pixel).
-    const sx=(op.width??before.width)/before.width, sy=(op.height??before.height)/before.height;
-    const shown={width:Math.round(after.width*sx),height:Math.round(after.height*sy)};
-    const shift=grownInstanceShift(op.transform,{width:op.width??before.width,height:op.height??before.height},shown,Math.round(left*sx),Math.round(top*sy));
-    op.width=shown.width; op.height=shown.height;
-    keepRotatedCentre(op,shift,box,transformedSize(op,before));
-    op.x+=shift.x; op.y+=shift.y;
+    if(op.type==='use' && op.partId===partId) Object.assign(op,grownInstance(op,before,after,left,top));
   }
   return validateProject(p);
+}
+
+/**
+ * A `use` op after its part grew from `before` to `after` by `left`/`top` padding, placed so existing artwork
+ * stays where it was on the canvas, including resized and rotated instances.
+ */
+export function grownInstance(instance,before,after,left,top) {
+  const op={...instance}, box=transformedSize(op,before);
+  if(op.width===undefined && op.height===undefined) {
+    const shift=grownInstanceShift(op.transform,before,after,left,top);
+    keepRotatedCentre(op,shift,box,transformedSize(op,after));
+    op.x+=shift.x; op.y+=shift.y; return op;
+  }
+  // Resized instances keep their scale: padding grows by the same factor so the artwork stays put (to the pixel).
+  const sx=(op.width??before.width)/before.width, sy=(op.height??before.height)/before.height;
+  const shown={width:Math.round(after.width*sx),height:Math.round(after.height*sy)};
+  const shift=grownInstanceShift(op.transform,{width:op.width??before.width,height:op.height??before.height},shown,Math.round(left*sx),Math.round(top*sy));
+  op.width=shown.width; op.height=shown.height;
+  keepRotatedCentre(op,shift,box,transformedSize(op,before));
+  op.x+=shift.x; op.y+=shift.y;
+  return op;
 }

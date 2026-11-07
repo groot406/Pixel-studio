@@ -77,3 +77,41 @@ test('in-place drawing beyond the outline extends the part and selections edit p
     assert.ok(session.pixels.every(v=>v===-1));
   }
 });
+
+test('rotated and resized objects are edited as their original artwork and keep their pose',async()=>{
+  const m=await import('../src/features/objects/in-place-edit.js');
+  const opOf=project=>project.animations.find(a=>a.id===target.animationId).frames.find(f=>f.id===target.frameId).cels.find(c=>c.layerId===target.layerId).source.ops.find(op=>op.id==='glint');
+  for(const pose of [{angle:30},{width:8,height:3},{transform:'R90',angle:-45,width:6,height:4}]) {
+    const p=decodeAIProject(sparklePxa);Object.assign(opOf(p),pose);
+    const placed=opOf(p);
+    const session=m.createInPlaceEdit(p,{...target,instanceId:'glint'}), label=JSON.stringify(pose);
+    assert.equal(session.instance.angle,undefined,label);
+    assert.equal(session.instance.width,undefined,label);
+    assert.equal(session.instance.transform,placed.transform,label);
+    assert.ok(m.inPlacePlacement(session),label);
+    // The outline is the part at its own size, so canvas pixels map 1:1 to part pixels.
+    const rect=m.inPlaceCanvasRect(session);
+    assert.deepEqual([rect.width*rect.height],[session.width*session.height],label);
+    const corner=m.inPlacePoint(session,{x:rect.x,y:rect.y});
+    const dot=m.beginInPlaceStroke(session,{x:rect.x,y:rect.y},{tool:'pencil',color:2});
+    m.finishInPlaceStroke(session,dot);
+    assert.equal(session.pixels[corner.y*session.width+corner.x],2,label);
+    // The live preview shows the original pose; applying keeps the placed pose untouched.
+    const preview=m.previewInPlaceEdit(session);
+    assert.equal(preview[rect.y*p.width+rect.x],2,label);
+    const next=m.prepareInPlaceEdit(session);
+    assert.deepEqual(opOf(next),placed,label);
+    assert.deepEqual(m.previewInPlaceEdit(session,true),compositeFrame(next,next.animations[0].frames[0]),label);
+    const part=next.parts.find(x=>x.id===placed.partId);
+    assert.ok(part.width===session.width && part.height===session.height,label);
+    // Drawing past the edge grows the part; the placed object keeps its angle and scale.
+    const grow=m.createInPlaceEdit(p,{...target,instanceId:'glint'});
+    const line=m.beginInPlaceStroke(grow,{x:rect.x-2,y:rect.y},{tool:'pencil',color:1});
+    m.finishInPlaceStroke(grow,line);
+    assert.ok(grow.width*grow.height>grow.originalWidth*grow.originalHeight,label);
+    const applied=m.prepareInPlaceEdit(grow), grown=opOf(applied);
+    assert.deepEqual(m.previewInPlaceEdit(grow,true),compositeFrame(applied,applied.animations[0].frames[0]),label);
+    assert.equal(grown.angle,placed.angle,label);
+    assert.equal(m.inPlacePlacement(grow).angle,placed.angle || 0,label);
+  }
+});

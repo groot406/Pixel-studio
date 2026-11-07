@@ -1,10 +1,11 @@
-.tool[data-tool="object"] { grid-column: 1 / -1; flex-direction: row; justify-content: center; gap: 8px; height: 44px; }
+.tool[data-tool="object"] { grid-column: span 2; }
+.tool:is([data-tool="object"],[data-tool="resize"]) { height: 44px; }
+.tool[data-tool="object"] { flex-direction: row; justify-content: center; gap: 8px; }
 .tool[data-tool="object"] span { font-size: 12px; }
 .tool[data-tool="object"] kbd { top: 8px; right: 8px; font-size: 11px; }
+.tool[data-tool="resize"] { gap: 2px; }
 .objects-section { min-width: 0; }
-.object-scope-label { display: flex; align-items: center; gap: 8px; margin: 4px 0 10px; }
-.object-scope-label > span { flex: 0 0 auto; }
-.object-scope-label select { min-width: 0; flex: 1; }
+.edit-scope-option { margin-bottom: 10px; }
 .object-list { display: flex; flex-direction: column; gap: 1px; max-height: 420px; overflow: auto; scrollbar-width: thin; scrollbar-color: #ccd6c5 transparent; }
 .object-row { display: grid; grid-template-columns: 16px minmax(0,1fr) 24px 24px; align-items: center; gap: 2px; padding: 3px 1px; border: 1px solid transparent; border-radius: 5px; }
 .object-row:hover { background: #f5f7ef; }

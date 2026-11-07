@@ -12,7 +12,7 @@ LINE x y end-x end-y color
 Rectangles/ellipses are filled, grid-aligned, without antialiasing. Draw commands overwrite in order and must fit their canvas. Shapes use decimal palette indices; -1 erases.
 SPAN symbols: ${PXA2_ALPHABET}; dot erases. A{6} repeats six times. No spaces; positive counts. x/y are zero-based.
 Within a cel use drawing commands or USE instance-id part-id x y [transform]. Transform defaults to N; supported: N FX FY R90 R180 R270. Flips and clockwise quarter turns operate inside the part bounds, then place the transformed top-left at x/y. Placement may be off canvas within -128..128 and is clipped; transparent part pixels leave underlying artwork visible.
-AT instance-id x y sets its absolute position. TURN instance-id transform changes its transform. SWAP instance-id part-id changes its part. DROP instance-id removes it. These change the existing instance without changing draw order; they do not paint trails.
+AT instance-id x y sets its absolute position. TURN instance-id transform changes its transform. SWAP instance-id part-id changes its part. DROP instance-id removes it. RESIZE instance-id width height shows the part at that size (before its transform) by nearest-neighbour sampling; the part itself is unchanged and its own size resets it. These change the existing instance without changing draw order; they do not paint trails.
 OVERRIDE x y pixels writes final local pixels after all cel operations. Dot explicitly erases the cel pixel; omitted coordinates remain unchanged. Overrides stay in canvas coordinates when instances move.`;
 
 export const PXA2_GUIDE = `PXA 2: uppercase commands, one per line; blank lines and full-line # comments allowed. No Markdown. Finish with END.
@@ -128,12 +128,13 @@ export function applyCelCommand(source, tokens) {
     op.name=quoted(tokens[2]); op.visible=tokens[3]==='1'; op.locked=tokens[4]==='1';
     return;
   }
-  if (!['AT', 'TURN', 'SWAP', 'DROP'].includes(command)) throw new Error(`Unknown command ${command}.`);
-  argumentsCount(tokens, command === 'AT' ? 3 : command === 'DROP' ? 1 : 2);
+  if (!['AT', 'TURN', 'SWAP', 'DROP', 'RESIZE'].includes(command)) throw new Error(`Unknown command ${command}.`);
+  argumentsCount(tokens, ['AT', 'RESIZE'].includes(command) ? 3 : command === 'DROP' ? 1 : 2);
   const op = source.ops.find(op => op.type === 'use' && op.id === id);
   if (!op) throw new Error(`Unknown instance ${id}.`);
   if (command === 'AT') { op.x = numberToken(tokens[2]); op.y = numberToken(tokens[3]); }
   if (command === 'TURN') op.transform = tokens[2];
+  if (command === 'RESIZE') { op.width = numberToken(tokens[2]); op.height = numberToken(tokens[3]); }
   if (command === 'SWAP') op.partId = artworkId(tokens[2]);
   if (command === 'DROP') source.ops.splice(source.ops.indexOf(op), 1);
 }
@@ -252,8 +253,9 @@ export function encodeOperation(op) {
   if (op.type === 'span') return `SPAN ${op.x} ${op.y} ${encodeRun(op.values)}`;
   if (op.type === 'use') {
     const use=`USE ${op.id} ${op.partId} ${op.x} ${op.y}${op.transform === 'N' ? '' : ` ${op.transform}`}`;
-    return op.name !== undefined || op.visible !== undefined || op.locked !== undefined
-      ? `${use}\nINSTANCE ${op.id} ${JSON.stringify(op.name || op.partId)} ${+(op.visible !== false)} ${+Boolean(op.locked)}` : use;
+    const size=op.width !== undefined ? `\nRESIZE ${op.id} ${op.width} ${op.height}` : '';
+    return (op.name !== undefined || op.visible !== undefined || op.locked !== undefined
+      ? `${use}\nINSTANCE ${op.id} ${JSON.stringify(op.name || op.partId)} ${+(op.visible !== false)} ${+Boolean(op.locked)}` : use) + size;
   }
   if (op.type === 'line') return `LINE ${op.x} ${op.y} ${op.x2} ${op.y2} ${op.color}`;
   return `${op.type.toUpperCase()} ${op.x} ${op.y} ${op.width} ${op.height} ${op.color}`;
@@ -270,6 +272,7 @@ function sourceDelta(source, old) {
     if (JSON.stringify(a) === JSON.stringify(b)) continue;
     if (a.type !== 'use' || b.type !== 'use' || a.id !== b.id) return null;
     if (a.name !== b.name || a.visible !== b.visible || a.locked !== b.locked) return null;
+    if (a.width !== b.width || a.height !== b.height) { if (a.width === undefined) return null; lines.push(`RESIZE ${a.id} ${a.width} ${a.height}`); }
     if (a.x !== b.x || a.y !== b.y) lines.push(`AT ${a.id} ${a.x} ${a.y}`);
     if (a.partId !== b.partId) lines.push(`SWAP ${a.id} ${a.partId}`);
     if (a.transform !== b.transform) lines.push(`TURN ${a.id} ${a.transform}`);

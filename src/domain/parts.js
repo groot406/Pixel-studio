@@ -108,8 +108,15 @@ export function growPart(project,partId,{left=0,top=0,right=0,bottom=0}) {
   Object.assign(part,after);
   for(const a of p.animations) for(const f of a.frames) for(const c of f.cels) for(const op of c.source?.ops || []) {
     if(op.type!=='use' || op.partId!==partId) continue;
-    const shift=grownInstanceShift(op.transform,before,after,left,top);
-    op.x+=shift.x; op.y+=shift.y;
+    if(op.width===undefined && op.height===undefined) {
+      const shift=grownInstanceShift(op.transform,before,after,left,top);
+      op.x+=shift.x; op.y+=shift.y; continue;
+    }
+    // Resized instances keep their scale: padding grows by the same factor so the artwork stays put (to the pixel).
+    const sx=(op.width??before.width)/before.width, sy=(op.height??before.height)/before.height;
+    const shown={width:Math.round(after.width*sx),height:Math.round(after.height*sy)};
+    const shift=grownInstanceShift(op.transform,{width:op.width??before.width,height:op.height??before.height},shown,Math.round(left*sx),Math.round(top*sy));
+    op.width=shown.width; op.height=shown.height; op.x+=shift.x; op.y+=shift.y;
   }
   return validateProject(p);
 }

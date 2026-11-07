@@ -63,6 +63,7 @@
     <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
     <symbol id="i-wand" viewBox="0 0 24 24"><path d="m3 21 12-12M13 7l4 4"/><path d="M17 2v3M17 13v3M21 9h-3M13 3l1.5 1.5M20.5 4.5 19 6M20.5 13.5 19 12"/></symbol>
     <symbol id="i-dither" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h6V3M9 15h6V9h6M3 21v-6h6v6M15 21v-6h6" fill="currentColor" fill-opacity=".35"/></symbol>
+    <symbol id="i-resize" viewBox="0 0 24 24"><rect x="4" y="9" width="11" height="11" rx="1"/><path d="M13 4h7v7M20 4l-7 7"/></symbol>
     <symbol id="i-shade" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18Z" fill="currentColor"/></symbol>
     <symbol id="i-object-new" viewBox="0 0 24 24"><rect x="3" y="3" width="12" height="12" rx="1" stroke-dasharray="2.5 2"/><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M15 12v6M12 15h6"/></symbol>
     <symbol id="i-split" viewBox="0 0 24 24"><rect x="2" y="4" width="8" height="8" rx="1"/><rect x="14" y="12" width="8" height="8" rx="1"/><path d="M12 2v20" stroke-dasharray="2 2.5"/></symbol>
@@ -89,6 +90,7 @@
         <summary class="section-heading"><h2>TOOLBOX</h2><svg class="panel-chevron" aria-hidden="true"><use href="#i-chevron"/></svg></summary>
         <div class="tool-grid" role="group" aria-label="Drawing tools">
           <button data-tool="object" class="tool" title="Select / move objects (V)" aria-keyshortcuts="V" aria-pressed="false"><svg aria-hidden="true"><use href="#i-pointer"/></svg><span>Object</span><kbd>V</kbd></button>
+          <button data-tool="resize" class="tool" title="Resize, squash and stretch objects (K)" aria-keyshortcuts="K" aria-pressed="false"><svg aria-hidden="true"><use href="#i-resize"/></svg><span>Resize</span><kbd>K</kbd></button>
           <button data-tool="pencil" class="tool active" title="Pencil (B)" aria-keyshortcuts="B" aria-pressed="true"><svg aria-hidden="true"><use href="#i-pencil"/></svg><span>Pencil</span><kbd>B</kbd></button>
           <button data-tool="eraser" class="tool" title="Eraser (E)" aria-keyshortcuts="E" aria-pressed="false"><svg aria-hidden="true"><use href="#i-eraser"/></svg><span>Eraser</span><kbd>E</kbd></button>
           <button data-tool="line" class="tool" title="Straight line (L)" aria-keyshortcuts="L" aria-pressed="false"><svg aria-hidden="true"><use href="#i-line"/></svg><span>Line</span><kbd>L</kbd></button>
@@ -110,10 +112,16 @@
             <label class="tool-option"><span>Brush</span><select id="brush-shape" aria-label="Brush shape"><option value="square">Square</option><option value="round">Round</option></select></label>
           </div>
           <label class="check-row" id="pixel-perfect-row" hidden title="Removes the doubled corner pixels from freehand 1 px strokes"><input type="checkbox" id="pixel-perfect"><span>Pixel-perfect strokes</span></label>
+          <div id="object-resize-options" class="resize-options" hidden>
+            <label class="tool-option inline-option"><span>Mode</span><select id="object-resize-mode" aria-label="Resize mode"><option value="free">Free resize</option><option value="area">Keep area (squash)</option></select></label>
+            <p id="object-resize-size" class="resize-size" aria-live="polite">Select an object</p>
+            <div class="resize-buttons"><button id="object-resize-squash" class="button small" type="button" title="1 px flatter and wider, feet stay on the ground">Squash</button><button id="object-resize-stretch" class="button small" type="button" title="1 px taller and narrower, feet stay on the ground">Stretch</button><button id="object-resize-reset" class="button small" type="button" title="Back to the part's own size">Reset</button></div>
+          </div>
           <div id="wand-options" class="tool-option-grid" hidden>
             <label class="tool-option"><span>Select</span><select id="wand-mode" aria-label="Magic wand mode"><option value="shape">Whole shape</option><option value="color">Same color</option></select></label>
           </div>
           <label class="check-row" id="filled-row" hidden><input type="checkbox" id="filled-shape"><span>Filled shape</span><span class="shape-hint">Shift for 1:1</span></label>
+          <label class="tool-option inline-option edit-scope-option" title="Paint strokes and object changes apply to every frame of the current animation, or only to this frame."><span>Edit in</span><select id="object-scope" aria-label="Frames that drawing and object changes apply to"><option value="animation">All frames</option><option value="frame">This frame only</option></select></label>
           <div id="symmetry-options"><label class="tool-option inline-option"><span>Mirror</span><select id="symmetry-mode" aria-label="Drawing symmetry"><option value="none">Off</option><option value="x">Left / right</option><option value="y">Top / bottom</option><option value="both">Both axes</option></select></label></div>
         </div>
         <button id="magic-outline" class="button small outline-action" title="Add one outline around the combined artwork in each frame" aria-label="Magic Outline"><svg aria-hidden="true"><use href="#i-spark"/></svg><span>Outline all frames</span></button>
@@ -161,7 +169,7 @@
           </div>
           <span id="selection-move-help" class="sr-only">Drag inside to move · arrows to nudge · Esc to deselect</span>
         </div>
-          <div id="canvas-stage" class="canvas-stage"><div class="canvas-wrap"><canvas id="pixel-canvas" width="384" height="384" tabindex="0" role="img" aria-label="32 by 32 pixel drawing canvas. Choose a drawing tool and drag to draw.">Your browser needs Canvas support to draw pixel art.</canvas><div id="object-highlight" class="object-highlight" aria-hidden="true" hidden><span id="object-highlight-label" class="object-highlight-label"></span></div></div></div>
+          <div id="canvas-stage" class="canvas-stage"><div class="canvas-wrap"><canvas id="pixel-canvas" width="384" height="384" tabindex="0" role="img" aria-label="32 by 32 pixel drawing canvas. Choose a drawing tool and drag to draw.">Your browser needs Canvas support to draw pixel art.</canvas><div id="object-highlight" class="object-highlight" aria-hidden="true" hidden><span id="object-highlight-label" class="object-highlight-label"></span></div><div id="resize-handles" class="resize-handles" aria-hidden="true" hidden><span class="resize-handle" data-handle="nw"></span><span class="resize-handle" data-handle="n"></span><span class="resize-handle" data-handle="ne"></span><span class="resize-handle" data-handle="e"></span><span class="resize-handle" data-handle="se"></span><span class="resize-handle" data-handle="s"></span><span class="resize-handle" data-handle="sw"></span><span class="resize-handle" data-handle="w"></span></div></div></div>
           <div id="file-drop-hint" class="file-drop-hint" aria-hidden="true" hidden><div class="file-drop-card"><svg><use href="#i-import"/></svg><strong>Drop to open</strong><span>.pxa, .pxs and .pixel.json projects open in a new tab · PNG images import</span></div></div>
         </div>
         <div class="canvas-bottom"><div class="canvas-coordinates"><span id="cursor-position">X — &nbsp; Y —</span><span class="status-separator">/</span><span id="tool-status">Pencil</span><span class="canvas-layer-label" title="Selected object"><svg aria-hidden="true"><use href="#i-layers"/></svg><span id="active-layer-name">Layer 1</span></span></div><div class="zoom-controls"><button id="zoom-out" class="icon-button" aria-label="Zoom out" title="Zoom out (-)"><svg><use href="#i-minus"/></svg></button><span id="zoom-value">1200%</span><button id="zoom-in" class="icon-button" aria-label="Zoom in" title="Zoom in (+)"><svg><use href="#i-plus"/></svg></button><button id="zoom-fit" class="icon-button" aria-label="Fit canvas to view" title="Fit canvas to view (0)"><svg><use href="#i-fit"/></svg></button></div></div>
@@ -173,7 +181,6 @@
       <details class="preview-section panel-section" data-panel="preview" open><summary class="section-heading"><h2>LIVE PREVIEW</h2><span class="live-badge"><i></i> LIVE</span><svg class="panel-chevron" aria-hidden="true"><use href="#i-chevron"/></svg></summary><div class="preview-stage" id="preview-stage"><canvas id="preview-canvas" width="128" height="128" role="img" aria-label="Animation preview"></canvas><span id="preview-frame" class="preview-counter">1 / 4</span></div><div class="preview-controls"><button id="play-toggle" class="button small play-button" aria-label="Pause animation"><svg><use href="#i-pause"/></svg><span>Pause</span></button><label class="fps-control"><input id="fps-input" type="number" min="1" max="60" value="8" aria-label="Animation frames per second"><span>FPS</span></label><button id="preview-background" class="icon-button" title="Change preview background" aria-label="Change preview background"><svg><use href="#i-square"/></svg></button></div></details>
       <details class="objects-section panel-section" data-panel="layers" aria-labelledby="objects-heading" open>
         <summary class="section-heading"><h2 id="objects-heading">OBJECTS <span id="object-count" class="inline-count">1</span></h2><svg class="panel-chevron" aria-hidden="true"><use href="#i-chevron"/></svg></summary>
-        <label class="tool-option object-scope-label"><span>Edit in</span><select id="object-scope" aria-label="Object editing scope"><option value="animation">Current animation</option><option value="frame">Current frame</option></select></label>
         <div id="object-list" class="object-list" role="group" aria-label="Artwork objects"></div>
         <div class="object-toolbar" role="group" aria-label="Object actions">
           <button id="object-copy" class="icon-button" aria-label="Copy object" title="Copy object (Ctrl/⌘ C)"><svg aria-hidden="true"><use href="#i-copy"/></svg></button>

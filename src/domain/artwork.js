@@ -1,6 +1,6 @@
 /** Retained pixel artwork. Source is authoritative; pixels are derived editing buffers. */
 import { MAX_SIZE, MAX_TOTAL_PIXELS } from './limits.js';
-import { linePoints, rectanglePoints, ellipsePoints } from './geometry.js';
+import { linePoints, rectanglePoints, ellipsePoints, sampleIndex } from './geometry.js';
 
 export const MAX_PARTS = 256;
 export const MAX_OPERATIONS = 32768;
@@ -38,8 +38,12 @@ export function validateOperations(ops, width, height, paletteLength, parts, bud
       if (ids.has(id)) throw new Error(`Duplicate instance ${id}.`);
       ids.add(id);
       if (!TRANSFORMS.includes(op.transform)) throw new Error('Unknown instance transform.');
-      spend(budget, part.width * part.height);
       const metadata = {};
+      // A resized instance stores both axes; the part's own size is the default and is not stored.
+      const width = op.width === undefined ? part.width : integer(op.width, 1, MAX_SIZE, 'Instance width');
+      const height = op.height === undefined ? part.height : integer(op.height, 1, MAX_SIZE, 'Instance height');
+      if (width !== part.width || height !== part.height) Object.assign(metadata, { width, height });
+      spend(budget, (metadata.width ?? part.width) * (metadata.height ?? part.height));
       for (const flag of ['visible','locked']) if (op[flag] !== undefined) {
         if (typeof op[flag] !== 'boolean') throw new Error(`Instance ${flag} must be boolean.`);
         metadata[flag] = op[flag];
@@ -48,7 +52,7 @@ export function validateOperations(ops, width, height, paletteLength, parts, bud
         if (typeof op.name !== 'string' || !op.name.trim() || op.name.length > 80) throw new Error('Object names need 1–80 characters.');
         metadata.name = op.name.trim();
       }
-      if (Object.keys(metadata).length) {
+      if (['name','visible','locked'].some(key => key in metadata)) {
         metadata.name ||= partId.slice(0,80);
         metadata.visible = op.visible !== false;
         metadata.locked = Boolean(op.locked);
@@ -106,15 +110,16 @@ export function renderOperations(ops, width, height, partImages = new Map()) {
       if (op.visible === false) continue;
       const part = partImages.get(op.partId);
       if (!part) throw new Error(`Unknown part ${op.partId}.`);
-      for (let y = 0; y < part.height; y++) for (let x = 0; x < part.width; x++) {
-        const color = part.pixels[y * part.width + x];
+      const w = op.width ?? part.width, h = op.height ?? part.height;
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        const color = part.pixels[sampleIndex(y, h, part.height) * part.width + sampleIndex(x, w, part.width)];
         if (color < 0) continue;
         let tx = x, ty = y;
-        if (op.transform === 'FX') tx = part.width - 1 - x;
-        if (op.transform === 'FY') ty = part.height - 1 - y;
-        if (op.transform === 'R90') { tx = part.height - 1 - y; ty = x; }
-        if (op.transform === 'R180') { tx = part.width - 1 - x; ty = part.height - 1 - y; }
-        if (op.transform === 'R270') { tx = y; ty = part.width - 1 - x; }
+        if (op.transform === 'FX') tx = w - 1 - x;
+        if (op.transform === 'FY') ty = h - 1 - y;
+        if (op.transform === 'R90') { tx = h - 1 - y; ty = x; }
+        if (op.transform === 'R180') { tx = w - 1 - x; ty = h - 1 - y; }
+        if (op.transform === 'R270') { tx = y; ty = w - 1 - x; }
         tx += op.x; ty += op.y;
         if (tx >= 0 && ty >= 0 && tx < width && ty < height) pixels[ty * width + tx] = color;
       }

@@ -1156,3 +1156,16 @@ textarea.ai-text-input::placeholder { color: #7b8872; }
 .selection-actions .selection-info { max-width: 220px; }
 .selection-actions .selection-buttons { justify-content: flex-end; gap: 3px; }
 .file-drop-hint { top: 0; bottom: 0; }
+.resize-options { display: grid; gap: 8px; margin-bottom: 10px; }
+.resize-size { margin: 0; font-size: 11px; line-height: 15px; color: #6c7865; font-variant-numeric: tabular-nums; }
+.resize-buttons { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.resize-handles { position: absolute; pointer-events: none; z-index: 3; }
+.resize-handle { position: absolute; width: 10px; height: 10px; margin: -5px 0 0 -5px; box-sizing: border-box; border: 2px solid #ff2d87; border-radius: 2px; background: #fff; pointer-events: auto; touch-action: none; box-shadow: 0 1px 3px #0003; }
+.resize-handle[data-handle="nw"] { left: 0; top: 0; cursor: nwse-resize; }
+.resize-handle[data-handle="n"] { left: 50%; top: 0; cursor: ns-resize; }
+.resize-handle[data-handle="ne"] { left: 100%; top: 0; cursor: nesw-resize; }
+.resize-handle[data-handle="e"] { left: 100%; top: 50%; cursor: ew-resize; }
+.resize-handle[data-handle="se"] { left: 100%; top: 100%; cursor: nwse-resize; }
+.resize-handle[data-handle="s"] { left: 50%; top: 100%; cursor: ns-resize; }
+.resize-handle[data-handle="sw"] { left: 0; top: 100%; cursor: nesw-resize; }
+.resize-handle[data-handle="w"] { left: 0; top: 50%; cursor: ew-resize; }

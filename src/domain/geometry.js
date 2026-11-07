@@ -79,18 +79,34 @@ export function ellipsePoints(x0, y0, x1, y1, filled = false, width = SIZE, heig
   return points;
 }
 
+/** Displayed size of an instance in part orientation (before its transform). Instances may be resized without changing the part. */
+export function instanceSize(instance, part) {
+  return {width:instance.width ?? part.width, height:instance.height ?? part.height};
+}
+
+/**
+ * Nearest-neighbour sample: which of `source` part pixels shows at displayed pixel `i` of `target`.
+ * Sampling at pixel centres, floor((2i+1)·source / (2·target)), is exact integer math and symmetric, so squashing
+ * 8 rows to 4 keeps rows 1,3,5,7 and stretching 4 columns to 8 doubles every column. Out-of-range input stays out of range.
+ */
+export function sampleIndex(i, target, source) {
+  return target===source ? i : Math.floor(((2*i+1)*source)/(2*target));
+}
+
 /** Map a canvas pixel into a placed part's untransformed pixel coordinates. */
 export function canvasToPartPoint(instance, part, point) {
-  const x=point.x-instance.x, y=point.y-instance.y;
+  const size=instanceSize(instance,part), x=point.x-instance.x, y=point.y-instance.y;
+  let local;
   switch(instance.transform) {
-    case 'N': return {x,y};
-    case 'FX': return {x:part.width-1-x,y};
-    case 'FY': return {x,y:part.height-1-y};
-    case 'R90': return {x:y,y:part.height-1-x};
-    case 'R180': return {x:part.width-1-x,y:part.height-1-y};
-    case 'R270': return {x:part.width-1-y,y:x};
+    case 'N': local={x,y}; break;
+    case 'FX': local={x:size.width-1-x,y}; break;
+    case 'FY': local={x,y:size.height-1-y}; break;
+    case 'R90': local={x:y,y:size.height-1-x}; break;
+    case 'R180': local={x:size.width-1-x,y:size.height-1-y}; break;
+    case 'R270': local={x:size.width-1-y,y:x}; break;
     default: throw new Error('Unknown instance transform.');
   }
+  return {x:sampleIndex(local.x,size.width,part.width),y:sampleIndex(local.y,size.height,part.height)};
 }
 
 

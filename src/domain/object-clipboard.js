@@ -54,9 +54,9 @@ export function copyObject(project, target, key) {
     const op = node.instance, frames = {};
     for (const f of animation.frames) {
       const pose = celIn(f).source?.ops.find(o => o.type === 'use' && o.id === op.id && o.partId === op.partId);
-      if (pose) frames[f.id] = { x: pose.x, y: pose.y, transform: pose.transform };
+      if (pose) frames[f.id] = { x: pose.x, y: pose.y, transform: pose.transform, width: pose.width, height: pose.height };
     }
-    return { ...base, kind: 'instance', name: node.name, instance: { id: op.id, partId: op.partId, x: op.x, y: op.y, transform: op.transform }, frames, parts: usedParts([op]) };
+    return { ...base, kind: 'instance', name: node.name, instance: { id: op.id, partId: op.partId, x: op.x, y: op.y, transform: op.transform, width: op.width, height: op.height }, frames, parts: usedParts([op]) };
   }
   const ops = node.type === 'overrides' ? cel.source.overrides : cel.source.ops.slice(node.start, node.end);
   return { ...base, kind: 'container', name: nodes.length === 1 ? layer.name : node.name, group: false,
@@ -134,9 +134,10 @@ export function pasteObject(project, target, clipboard, { scope = 'animation', i
       const pose = perFrame ? clip.frames[f.id] || (fill ? clip.instance : null) : clip.instance;
       if (!pose) continue;
       let x = pose.x + offset, y = pose.y + offset;
-      const bounds = objectBounds(p, { type: 'instance', instance: { partId: part.id, transform: pose.transform, x, y } });
+      const size = { width: pose.width, height: pose.height };
+      const bounds = objectBounds(p, { type: 'instance', instance: { partId: part.id, transform: pose.transform, x, y, ...size } });
       if (!perFrame && (x >= p.width || y >= p.height || x + bounds.width <= 0 || y + bounds.height <= 0)) { x = 0; y = 0; }
-      poses.set(f, { x, y, transform: pose.transform });
+      poses.set(f, { x, y, transform: pose.transform, ...size });
     }
     let id = clip.instance.id, n = 2;
     while (frames.some(f => celOf(f).source?.ops.some(op => op.type === 'use' && op.id === id))) id = `${clip.instance.id.slice(0, 85)}_${n++}`;

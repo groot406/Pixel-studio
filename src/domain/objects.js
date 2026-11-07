@@ -1,7 +1,7 @@
 /** Object editing over the established cel format. Groups retain isolated erase/override semantics. */
 import { validateProject, getAnimationLayers, insertProjectLayer, removeProjectLayer, uid, MAX_LAYERS, MAX_TOTAL_PIXELS } from './project.js';
 import { cloneArtwork, sourceForCel, renderParts, hasLockedInstances } from './artwork.js';
-import { linePoints, ellipsePoints, canvasToPartPoint } from './geometry.js';
+import { linePoints, ellipsePoints, canvasToPartPoint, instanceSize } from './geometry.js';
 import { nextPartId } from './parts.js';
 
 export function celObjects(cel) {
@@ -129,6 +129,29 @@ export function updateObject(project,target,key,changes,scope='animation') {
     if (!op) continue;
     if (Object.keys(changes).some(name=>name!=='locked')) unlocked(layer,{instance:op});
     Object.assign(op,changes);
+  }
+  return validateProject(p);
+}
+
+/**
+ * Show an instance at a new on-canvas box without touching its shared part. `box` is the box in the target frame;
+ * other frames in scope get the same size and move by the same offset, so per-frame poses are kept.
+ * The original part size clears the resize. Rendering samples the part, so resizing is always reversible.
+ */
+export function resizeObject(project,target,key,box,scope='animation') {
+  if(![box?.x,box?.y,box?.width,box?.height].every(Number.isInteger) || box.width<1 || box.height<1) throw new Error('Object sizes use whole pixels.');
+  const {p,layer,frame,frames}=context(project,target,scope);
+  const here=frame.cels.find(c=>c.layerId===layer.id).source?.ops.find(op=>op.type==='use' && op.id===key);
+  if(!here) throw new Error('Choose an object in this frame.');
+  const part=p.parts.find(part=>part.id===here.partId), rotated=['R90','R270'].includes(here.transform);
+  const size={width:rotated?box.height:box.width,height:rotated?box.width:box.height};
+  const dx=box.x-here.x, dy=box.y-here.y;
+  for(const frame of frames) {
+    const op=frame.cels.find(c=>c.layerId===layer.id).source?.ops.find(op=>op.type==='use' && op.id===key);
+    if(!op || op.partId!==here.partId)continue;
+    unlocked(layer,{instance:op});
+    op.x+=dx; op.y+=dy;
+    for(const axis of ['width','height']) { if(size[axis]===part[axis]) delete op[axis]; else op[axis]=size[axis]; }
   }
   return validateProject(p);
 }
@@ -262,9 +285,9 @@ export function dropObject(project,target,source,anchor,position,scope='animatio
 
 export function objectBounds(project,node) {
   if(node.type!=='instance') return null;
-  const part=project.parts.find(p=>p.id===node.instance.partId), op=node.instance;
+  const part=project.parts.find(p=>p.id===node.instance.partId), op=node.instance, size=instanceSize(op,part);
   const rotated=['R90','R270'].includes(op.transform);
-  return {x:op.x,y:op.y,width:rotated?part.height:part.width,height:rotated?part.width:part.height};
+  return {x:op.x,y:op.y,width:rotated?size.height:size.width,height:rotated?size.width:size.height};
 }
 
 function operationPixel(op,x,y,images,width,height) {

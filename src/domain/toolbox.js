@@ -263,3 +263,20 @@ export function findIslands(pixels, width, height) {
   }
   return islands.sort((a, b) => b.indices.length - a.indices.length);
 }
+
+/** Indices whose value differs between two pixel arrays. */
+export function changedIndices(base, edited) {
+  const indices = [];
+  for (let i = 0; i < base.length; i++) if (edited[i] !== base[i]) indices.push(i);
+  return indices;
+}
+
+/**
+ * Repeat a finished stroke on another frame: each pixel the stroke covered (`indices`) gets the stroke's value there.
+ * `recolor` derives the value from that frame's own pixel instead (shading darkens each frame's own color).
+ */
+export function repeatPixelChanges(indices, edited, target, recolor = null) {
+  const next = [...target];
+  for (const i of indices) next[i] = recolor ? recolor(target[i]) : edited[i];
+  return next;
+}

@@ -1,0 +1,181 @@
+/** Copy objects between frames, animations and projects. Clipboards are plain JSON and carry their own palette and part definitions. */
+import { validateProject, insertProjectLayer, uid, nearestColor, MAX_COLORS, MAX_LAYERS, MAX_TOTAL_PIXELS } from './project.js';
+import { cloneArtwork, sourceForCel, renderOperations, renderParts } from './artwork.js';
+import { celObjects, objectBounds } from './objects.js';
+import { nextPartId } from './parts.js';
+
+export const OBJECT_CLIPBOARD_FORMAT = 'pixel-studio-object';
+
+/** Map source palette indices onto a target palette, adding exact colors while there is room, otherwise using the nearest color. */
+export function mapPaletteColors(palette, sourcePalette, indices) {
+  const next = [...palette], mapping = new Map();
+  const same = next.length === sourcePalette.length && next.every((color, i) => color.toLowerCase() === sourcePalette[i].toLowerCase());
+  for (const index of new Set(indices)) {
+    if (index < 0) continue;
+    if (same) { mapping.set(index, index); continue; }
+    const color = sourcePalette[index];
+    if (typeof color !== 'string') throw new Error('The copied object uses an unknown color.');
+    let found = next.findIndex(existing => existing.toLowerCase() === color.toLowerCase());
+    if (found < 0 && next.length < MAX_COLORS) { next.push(color); found = next.length - 1; }
+    if (found < 0) found = nearestColor(...color.slice(1).match(/.{2}/g).map(c => parseInt(c, 16)), next);
+    mapping.set(index, found);
+  }
+  return { palette: next, mapping };
+}
+
+function locate(project, target) {
+  const animation = project.animations.find(a => a.id === target.animationId);
+  const frame = animation?.frames.find(f => f.id === target.frameId);
+  const layer = project.layers.find(l => l.id === target.layerId);
+  const cel = frame?.cels.find(c => c.layerId === target.layerId);
+  if (!animation || !frame || !layer || !cel) throw new Error('This object no longer exists.');
+  return { animation, frame, layer, cel };
+}
+
+/** Capture what the object looks like in one frame. Instances keep their shared definition; groups keep their retained source. */
+export function copyObject(project, target, key) {
+  const { animation, layer, cel } = locate(project, target);
+  const nodes = celObjects(cel), base = { format: OBJECT_CLIPBOARD_FORMAT, version: 1, palette: [...project.palette], width: project.width, height: project.height, animationId: animation.id };
+  const celIn = frame => frame.cels.find(c => c.layerId === layer.id);
+  const usedParts = ops => {
+    const ids = new Set(ops.filter(op => op.type === 'use').map(op => op.partId));
+    return cloneArtwork((project.parts || []).filter(part => ids.has(part.id)));
+  };
+  if (key === '@group' || (nodes.length === 1 && nodes[0].key === key && nodes[0].type === 'pixels')) {
+    // Each frame of the source animation is kept so pasting back into it (Duplicate) preserves the animation.
+    const frames = Object.fromEntries(animation.frames.map(f => { const c = celIn(f); return [f.id, { source: c.source ? cloneArtwork(c.source) : null, pixels: [...c.pixels] }]; }));
+    return { ...base, kind: 'container', name: layer.name, group: key === '@group' && layer.group !== false,
+      source: cel.source ? cloneArtwork(cel.source) : null, pixels: [...cel.pixels], frames,
+      parts: usedParts(animation.frames.flatMap(f => celIn(f).source?.ops || [])) };
+  }
+  const node = nodes.find(n => n.key === key);
+  if (!node) throw new Error('Select an object to copy.');
+  if (node.type === 'instance') {
+    const op = node.instance, frames = {};
+    for (const f of animation.frames) {
+      const pose = celIn(f).source?.ops.find(o => o.type === 'use' && o.id === op.id && o.partId === op.partId);
+      if (pose) frames[f.id] = { x: pose.x, y: pose.y, transform: pose.transform };
+    }
+    return { ...base, kind: 'instance', name: node.name, instance: { id: op.id, partId: op.partId, x: op.x, y: op.y, transform: op.transform }, frames, parts: usedParts([op]) };
+  }
+  const ops = node.type === 'overrides' ? cel.source.overrides : cel.source.ops.slice(node.start, node.end);
+  return { ...base, kind: 'container', name: nodes.length === 1 ? layer.name : node.name, group: false,
+    source: node.type === 'overrides' ? null : { ops: cloneArtwork(ops), overrides: [] }, pixels: renderOperations(ops, project.width, project.height), parts: [] };
+}
+
+function readClipboard(clip) {
+  if (!clip || clip.format !== OBJECT_CLIPBOARD_FORMAT || !['instance', 'container'].includes(clip.kind)) throw new Error('Copy an object first.');
+  if (!Array.isArray(clip.palette) || !clip.palette.length || !Array.isArray(clip.parts)) throw new Error('The copied object is incomplete.');
+  return clip;
+}
+function usedColors(clip) {
+  const colors = [];
+  const add = ops => { for (const op of ops || []) op.type === 'span' ? colors.push(...op.values) : op.type !== 'use' && colors.push(op.color); };
+  for (const part of clip.parts) add(part.ops);
+  for (const data of [clip, ...(clip.kind === 'container' ? Object.values(clip.frames || {}) : [])]) {
+    if (data.source) { add(data.source.ops); add(data.source.overrides); }
+    if (data.pixels) colors.push(...data.pixels);
+  }
+  return colors;
+}
+function uniqueName(project, base) {
+  const names = new Set(project.layers.map(layer => layer.name.toLowerCase()));
+  let name = String(base || 'Object').slice(0, 80), n = 2;
+  while (names.has(name.toLowerCase())) { const suffix = ` ${n++}`; name = String(base).slice(0, 80 - suffix.length) + suffix; }
+  return name;
+}
+function addContainer(p, afterId, name, group) {
+  const frames = p.animations.reduce((n, a) => n + a.frames.length, 0);
+  if (p.layers.length >= MAX_LAYERS || frames * (p.layers.length + 1) * p.width * p.height > MAX_TOTAL_PIXELS) throw new Error('The project has reached its object storage limit.');
+  const layer = { id: uid(), name: uniqueName(p, name), group, visible: true, locked: false };
+  insertProjectLayer(p, layer, afterId);
+  return layer;
+}
+
+/**
+ * Paste a copied object into the target frame, or every frame of its animation.
+ * Instances go into the selected group when it is an unlocked group, otherwise into a new object above the selection.
+ * Identical part definitions are reused so the paste stays a shared instance; `independent` always copies the definition.
+ */
+export function pasteObject(project, target, clipboard, { scope = 'animation', independent = false, offset = 0 } = {}) {
+  const clip = readClipboard(clipboard);
+  if (!['frame', 'animation'].includes(scope)) throw new Error('Choose current frame or current animation.');
+  const p = validateProject(project), { animation, frame } = locate(p, target);
+  const frames = scope === 'animation' ? animation.frames : [frame];
+  const { palette, mapping } = mapPaletteColors(p.palette, clip.palette, usedColors(clip));
+  p.palette = palette;
+  const color = c => c < 0 ? c : mapping.get(c);
+  const remap = ops => (ops || []).map(op => op.type === 'span' ? { ...op, values: op.values.map(color) } : op.type === 'use' ? { ...op } : { ...op, color: color(op.color) });
+  const sameSize = clip.width === p.width && clip.height === p.height;
+  const keepsSource = clip.kind === 'instance' || (clip.source && sameSize) || Boolean(clip.frames && sameSize && clip.kind === 'container');
+  // Pasting back into the copied animation keeps each frame's pose or artwork; elsewhere the copied frame is used.
+  const perFrame = scope === 'animation' && clip.frames && clip.animationId === animation.id && sameSize && frames.some(f => clip.frames[f.id]);
+  const partIds = new Map();
+  if (keepsSource) for (const part of clip.parts) {
+    const definition = { id: part.id, width: part.width, height: part.height, ops: remap(part.ops) };
+    const existing = (p.parts || []).find(x => x.id === part.id);
+    if (!independent && existing && JSON.stringify({ ...existing, id: part.id }) === JSON.stringify(definition)) { partIds.set(part.id, part.id); continue; }
+    p.version = 3; p.parts ||= [];
+    const id = existing || p.parts.some(x => x.id === part.id) ? nextPartId(p, `${part.id}_copy`) : part.id;
+    p.parts.push({ ...definition, id });
+    partIds.set(part.id, id);
+  }
+  const host = p.layers.find(l => l.id === target.layerId);
+  if (clip.kind === 'instance') {
+    const part = p.parts.find(x => x.id === partIds.get(clip.instance.partId));
+    if (!part) throw new Error('The copied object is incomplete.');
+    p.version = 3; p.parts ||= [];
+    const layer = host && host.group !== false && !host.locked ? host : addContainer(p, target.layerId, clip.name, false);
+    const celOf = f => f.cels.find(c => c.layerId === layer.id);
+    const poses = new Map();
+    for (const f of frames) {
+      const pose = perFrame ? clip.frames[f.id] : clip.instance;
+      if (!pose) continue;
+      let x = pose.x + offset, y = pose.y + offset;
+      const bounds = objectBounds(p, { type: 'instance', instance: { partId: part.id, transform: pose.transform, x, y } });
+      if (!perFrame && (x >= p.width || y >= p.height || x + bounds.width <= 0 || y + bounds.height <= 0)) { x = 0; y = 0; }
+      poses.set(f, { x, y, transform: pose.transform });
+    }
+    let id = clip.instance.id, n = 2;
+    while (frames.some(f => celOf(f).source?.ops.some(op => op.type === 'use' && op.id === id))) id = `${clip.instance.id.slice(0, 85)}_${n++}`;
+    for (const [f, pose] of poses) {
+      const cel = celOf(f);
+      cel.source = sourceForCel(cel, p.width);
+      cel.source.ops.push({ type: 'use', id, partId: part.id, ...pose, name: clip.name.slice(0, 80) });
+    }
+    return { project: validateProject(p), layerId: layer.id, key: id };
+  }
+  const layer = addContainer(p, host ? host.id : p.layers.at(-1).id, clip.name, Boolean(clip.group));
+  for (const f of frames) {
+    const cel = f.cels.find(c => c.layerId === layer.id), data = perFrame ? clip.frames[f.id] : clip;
+    if (!data) continue;
+    if (keepsSource && data.source) {
+      p.version = 3; p.parts ||= [];
+      cel.source = { ops: remap(data.source.ops).map(op => op.type === 'use' ? { ...op, partId: partIds.get(op.partId) } : op), overrides: remap(data.source.overrides) };
+    } else {
+      // Different canvas sizes keep the artwork at the same coordinates and crop what falls outside.
+      for (let yy = 0; yy < Math.min(clip.height, p.height); yy++) for (let xx = 0; xx < Math.min(clip.width, p.width); xx++) {
+        const value = data.pixels[yy * clip.width + xx];
+        if (value >= 0) cel.pixels[yy * p.width + xx] = color(value);
+      }
+    }
+  }
+  const clean = validateProject(p), cel = clean.animations.find(a => a.id === animation.id).frames.find(f => f.id === frame.id).cels.find(c => c.layerId === layer.id);
+  return { project: clean, layerId: layer.id, key: layer.group ? '@group' : celObjects(cel).at(-1).key };
+}
+
+/** Bounding box of a node's visible pixels in one frame, for canvas highlighting. */
+export function objectPixelBounds(project, cel, key) {
+  const nodes = celObjects(cel), node = key === '@group' ? null : nodes.find(n => n.key === key);
+  let pixels;
+  if (!node || !cel.source) pixels = cel.pixels;
+  else if (node.type === 'instance') return objectBounds(project, node);
+  else pixels = renderOperations(node.type === 'overrides' ? cel.source.overrides : cel.source.ops.slice(node.start, node.end), project.width, project.height, renderParts(project.parts || []));
+  let left = Infinity, top = Infinity, right = -1, bottom = -1;
+  pixels.forEach((value, i) => {
+    if (value < 0) return;
+    const x = i % project.width, y = Math.floor(i / project.width);
+    left = Math.min(left, x); top = Math.min(top, y); right = Math.max(right, x); bottom = Math.max(bottom, y);
+  });
+  return right < 0 ? null : { x: left, y: top, width: right - left + 1, height: bottom - top + 1 };
+}

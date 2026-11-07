@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { decodeAIProject, encodeAIProject } from '../src/formats/pxa.js';
 import { encodePixelProject, decodePixelProject } from '../src/formats/pxs.js';
-import { validateProject, compositeFrame, makeLayeredFrame } from '../src/domain/project.js';
-import { celObjects, frameObjects, reorderObject, reorderObjectContainer, translateObject, forkObject, updateObject, deleteObject, addObjectContainer, moveObjectToGroup, removeObjectContainer, hitTestObject, objectBounds } from '../src/domain/objects.js';
+import { validateProject, compositeFrame, makeLayeredFrame, blankProject, getAnimationLayers } from '../src/domain/project.js';
+import { copyObject, pasteObject } from '../src/domain/object-clipboard.js';
+import { celObjects, frameObjects, reorderObject, reorderObjectContainer, translateObject, forkObject, updateObject, deleteObject, addObjectContainer, moveObjectToGroup, removeObjectContainer, hitTestObject, objectBounds, placeObject, dropObject, placeObjectContainer } from '../src/domain/objects.js';
 import { paintSharedPart, flattenCel } from '../src/domain/parts.js';
 import { createAIRequest, prepareAIResult } from '../src/features/ai/requests.js';
 import { projectFingerprint } from '../src/features/ai/patch-engine.js';
@@ -150,4 +151,88 @@ test('canvas hits match rendered transparent pixels under every non-square part 
       assert.equal(hit.layerId,frame.cels[1].pixels[y*clean.width+x]>=0?'effects':'back',`${transform} at ${x},${y}`);
     }
   }
+});
+
+test('dragging places objects and stacks relative to a drop target within the selected scope',()=>{
+  const p=overlapping();
+  const above=placeObject(p,target,'glint','square','above','animation');
+  for(const f of above.animations[0].frames)assert.equal(f.cels[1].source.ops.filter(o=>o.type==='use').at(-1).id,'glint');
+  assert.deepEqual(above.animations[1],p.animations[1]);
+  const frameOnly=placeObject(p,target,'glint','square','above','frame');
+  assert.equal(frameOnly.animations[0].frames[0].cels[1].source.ops.at(-1).id,'glint');
+  assert.equal(frameOnly.animations[0].frames[1].cels[1].source.ops.at(-1).id,'square');
+  assert.deepEqual(placeObject(p,target,'glint','square','below','animation').animations,p.animations);
+  const stacked=placeObjectContainer(p,{...target,layerId:'back'},'effects','above','animation');
+  assert.deepEqual(stacked.animations[0].layerOrder,['effects','back']);
+  assert.equal(stacked.animations[1].layerOrder,undefined);
+  const locked=updateObject(p,target,'square',{locked:true},'animation');
+  assert.throws(()=>placeObject(locked,target,'square','glint','below'),/Unlock/);
+});
+
+test('copied instances paste into other animations and projects, reusing or remapping shared parts',()=>{
+  const p=overlapping(), clip=JSON.parse(JSON.stringify(copyObject(p,target,'glint')));
+  const still={animationId:'still',frameId:'f3',layerId:'effects'};
+  const pasted=pasteObject(p,still,clip,{scope:'animation'});
+  assert.equal(pasted.key,'glint_2');
+  assert.equal(pasted.project.parts.length,p.parts.length);
+  assert.ok(pasted.project.animations[1].frames[0].cels[1].source.ops.some(o=>o.id==='glint_2' && o.partId==='star'));
+  assert.deepEqual(pasted.project.animations[0],p.animations[0]);
+  const independent=pasteObject(p,still,clip,{independent:true});
+  assert.equal(independent.project.parts.length,p.parts.length+1);
+
+  const other=blankProject('Other',16,16);
+  const target2={animationId:other.animations[0].id,frameId:other.animations[0].frames[0].id,layerId:other.layers[0].id};
+  const first=pasteObject(other,target2,clip,{scope:'frame'});
+  const frame=first.project.animations[0].frames[0], pixels=compositeFrame(first.project,frame);
+  assert.equal(first.project.palette[pixels[6*16+5]],'#ffffff');
+  assert.equal(first.project.palette[pixels[4*16+5]],'#ffdc70');
+  assert.notEqual(first.layerId,target2.layerId);
+  const again=pasteObject(first.project,{...target2,layerId:first.layerId},clip,{scope:'frame'});
+  assert.equal(again.project.parts.length,1);
+  // Another project may reuse the same animation ID; its frames still get the copied pose.
+  const twin=blankProject('Twin',16,16);
+  twin.animations[0].id=clip.animationId;
+  const twinTarget={animationId:clip.animationId,frameId:twin.animations[0].frames[0].id,layerId:twin.layers[0].id};
+  const twinPaste=pasteObject(twin,twinTarget,clip,{scope:'animation'});
+  assert.ok(twinPaste.project.animations[0].frames[0].cels.some(c=>c.source?.ops.some(o=>o.id===twinPaste.key)));
+
+  // Duplicating within the copied animation keeps each frame's own pose.
+  const duplicate=pasteObject(p,target,clip,{scope:'animation'});
+  for(const frame of p.animations[0].frames) {
+    const original=frame.cels.find(c=>c.layerId==='effects').source?.ops.find(o=>o.id==='glint');
+    const copy=duplicate.project.animations[0].frames.find(f=>f.id===frame.id).cels.find(c=>c.layerId==='effects').source?.ops.find(o=>o.id===duplicate.key);
+    assert.deepEqual(copy && {x:copy.x,y:copy.y,transform:copy.transform},original && {x:original.x,y:original.y,transform:original.transform});
+  }
+});
+
+test('copied groups keep their retained source on equal canvases and bake to pixels otherwise',()=>{
+  const p=overlapping(), clip=copyObject(p,target,'@group');
+  const same=blankProject('Same',16,16), t={animationId:same.animations[0].id,frameId:same.animations[0].frames[0].id,layerId:same.layers[0].id};
+  const pasted=pasteObject(same,t,clip,{scope:'frame'});
+  const cel=pasted.project.animations[0].frames[0].cels.find(c=>c.layerId===pasted.layerId);
+  assert.equal(pasted.key,'@group');
+  assert.ok(cel.source.ops.some(o=>o.type==='use' && o.id==='square'));
+  assert.deepEqual(cel.pixels.map(v=>v<0?null:pasted.project.palette[v]),p.animations[0].frames[0].cels[1].pixels.map(v=>v<0?null:p.palette[v]));
+  const small=blankProject('Small',8,8), s={animationId:small.animations[0].id,frameId:small.animations[0].frames[0].id,layerId:small.layers[0].id};
+  const baked=pasteObject(small,s,clip,{scope:'frame'}), bakedCel=baked.project.animations[0].frames[0].cels.find(c=>c.layerId===baked.layerId);
+  assert.equal(bakedCel.source,undefined);
+  assert.equal(baked.project.palette[bakedCel.pixels[4*8+5]],p.palette[p.animations[0].frames[0].cels[1].pixels[4*16+5]]);
+});
+
+test('dropping rows moves instances between groups, creates stacks beside groups and cleans up empty ones',()=>{
+  const p=overlapping(), sparkle=p.layers[0].id;
+  // Into another group.
+  let r=dropObject(p,target,{layerId:'effects',key:'square'},{layerId:sparkle,key:'@group',outer:true},'into');
+  const ops=l=>r.project.animations[0].frames[0].cels.find(c=>c.layerId===l).source?.ops.filter(o=>o.type==='use').map(o=>o.id) || [];
+  assert.equal(r.layerId,sparkle);assert.ok(ops(sparkle).includes('square'));assert.ok(!ops('effects').includes('square'));
+  // Beside a group header: a new ungrouped stack below it.
+  r=dropObject(p,target,{layerId:'effects',key:'square'},{layerId:sparkle,key:'@group',outer:true},'below');
+  const order=getAnimationLayers(r.project,r.project.animations[0]).map(l=>l.id);
+  assert.equal(order[0],r.layerId);assert.equal(r.project.layers.find(l=>l.id===r.layerId).group,false);
+  // Dragging that lone object back into the group removes its now-empty stack.
+  const back=dropObject(r.project,{...target,layerId:r.layerId},{layerId:r.layerId,key:'square',outer:true},{layerId:'effects',key:'glint'},'above');
+  assert.equal(back.layerId,'effects');assert.ok(!back.project.layers.some(l=>l.id===r.layerId));
+  assert.deepEqual(compositeFrame(back.project,back.project.animations[0].frames[1]).length,p.width*p.height);
+  // Pixel runs cannot leave their group.
+  assert.throws(()=>dropObject(p,target,{layerId:sparkle,key:'pixels'},{layerId:'effects',key:'glint'},'above'),/stays in its group/);
 });

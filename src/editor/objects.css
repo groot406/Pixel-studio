@@ -5,10 +5,27 @@
 .object-scope-label { display: flex; align-items: center; gap: 8px; margin: 4px 0 10px; }
 .object-scope-label > span { flex: 0 0 auto; }
 .object-scope-label select { min-width: 0; flex: 1; }
-.object-list { display: flex; flex-direction: column; max-height: 320px; overflow: auto; scrollbar-width: thin; scrollbar-color: #ccd6c5 transparent; }
+.object-list { display: flex; flex-direction: column; gap: 1px; max-height: 420px; overflow: auto; scrollbar-width: thin; scrollbar-color: #ccd6c5 transparent; }
 .object-row { display: grid; grid-template-columns: 16px minmax(0,1fr) 24px 24px; align-items: center; gap: 2px; padding: 3px 1px; border: 1px solid transparent; border-radius: 5px; }
 .object-row:hover { background: #f5f7ef; }
-.object-row.selected { background: #edf3e5; border-color: #dbe7ce; }
+.object-row { position: relative; cursor: grab; }
+.object-row.selected { background: #fff0f6; border-color: #ff2d87; box-shadow: inset 3px 0 0 #ff2d87; }
+.object-row.selected .object-name { color: #b0125a; }
+.object-row.object-group { background: #f7f9f3; }
+.object-row.object-group.selected { background: #fff0f6; }
+.object-row.dragging { opacity: .4; }
+.object-list.is-dragging .object-row:hover { background: transparent; }
+.object-row.drop-above::before, .object-row.drop-below::after { content: ""; position: absolute; left: 4px; right: 4px; height: 3px; border-radius: 3px; background: #ff2d87; box-shadow: 0 0 0 2px #fff; pointer-events: none; }
+.object-row.drop-above::before { top: -3px; }
+.object-row.drop-below::after { bottom: -3px; }
+.object-row.drop-into { background: #ffe3ef; border-color: #ff2d87; border-style: dashed; }
+.object-menu { position: fixed; z-index: 1000; display: flex; flex-direction: column; min-width: 210px; padding: 5px; border: 1px solid #d6e0ce; border-radius: 9px; background: #fffefb; box-shadow: 0 14px 34px #23302018, 0 2px 6px #23302014; }
+.object-menu button { display: flex; align-items: center; gap: 9px; padding: 7px 10px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.object-menu button:hover:not([disabled]), .object-menu button:focus-visible { background: #edf3e5; outline: none; }
+.object-menu button[disabled] { opacity: .4; cursor: default; }
+.object-menu button[data-menu="delete"] { color: #8b302b; }
+.object-menu svg { width: 15px; height: 15px; flex: 0 0 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.object-menu hr { margin: 4px 6px; border: 0; border-top: 1px solid #e3e9dc; }
 .object-row.object-child { margin-left: 12px; }
 .object-select { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 4px 0; border: 0; background: transparent; color: var(--ink); text-align: left; }
 .object-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -18,8 +35,9 @@
 .object-row .object-collapse { width: 16px; padding: 0; }
 .object-collapse[aria-expanded="false"] svg { transform: rotate(-90deg); }
 .object-row.is-hidden .object-select { opacity: .55; }
-.object-toolbar { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 4px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line,#dce4d5); }
+.object-toolbar { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)) 1px repeat(4,minmax(0,1fr)); gap: 4px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line,#dce4d5); }
 .object-toolbar .icon-button { width: 100%; height: 34px; }
+.object-toolbar-divider { align-self: stretch; margin: 6px 0; background: #dce4d5; }
 .object-edit-action { width: 100%; margin-top: 8px; }
 .object-detail { margin: 8px 0 12px; color: #52664d; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 .object-secondary-actions { display: flex; flex-wrap: wrap; gap: 6px; }

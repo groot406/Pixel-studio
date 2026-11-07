@@ -135,8 +135,9 @@
           <div class="in-place-buttons"><button id="in-place-cancel" class="button small">Cancel</button><button id="in-place-apply" class="button small primary">Apply edits</button></div>
           <p id="in-place-error" class="in-place-error" role="alert" hidden></p>
         </div>
-        <div id="selection-actions" class="selection-actions" role="group" aria-label="Selection actions" hidden>
-          <span id="selection-info" class="selection-info">Selection</span>
+        <div class="canvas-stage-wrap">
+          <div id="selection-actions" class="selection-actions" role="group" aria-label="Selection actions" hidden>
+          <span id="selection-info" class="selection-info" title="Drag inside to move · arrows to nudge · Esc to deselect">Selection</span>
           <div class="selection-buttons">
             <button id="select-all" class="icon-button" title="Select all pixels (Ctrl/⌘ A)" aria-label="Select all pixels"><svg aria-hidden="true"><use href="#i-select-all"/></svg></button>
             <button id="copy-selection" class="icon-button" title="Copy selected pixels (Ctrl/⌘ C)" aria-label="Copy selected pixels"><svg aria-hidden="true"><use href="#i-copy"/></svg></button>
@@ -145,9 +146,11 @@
             <button id="clear-selection" class="icon-button" title="Delete selected pixels" aria-label="Delete selected pixels"><svg aria-hidden="true"><use href="#i-trash"/></svg></button>
             <button id="deselect-selection" class="button small" title="Deselect" aria-label="Deselect"><svg aria-hidden="true"><use href="#i-check"/></svg><span>Done</span></button>
           </div>
-          <span id="selection-move-help" class="selection-move-help">Drag inside to move · arrows to nudge · Esc to deselect</span>
+          <span id="selection-move-help" class="sr-only">Drag inside to move · arrows to nudge · Esc to deselect</span>
         </div>
-        <div id="canvas-stage" class="canvas-stage"><div class="canvas-wrap"><canvas id="pixel-canvas" width="384" height="384" tabindex="0" role="img" aria-label="32 by 32 pixel drawing canvas. Choose a drawing tool and drag to draw.">Your browser needs Canvas support to draw pixel art.</canvas></div></div>
+          <div id="canvas-stage" class="canvas-stage"><div class="canvas-wrap"><canvas id="pixel-canvas" width="384" height="384" tabindex="0" role="img" aria-label="32 by 32 pixel drawing canvas. Choose a drawing tool and drag to draw.">Your browser needs Canvas support to draw pixel art.</canvas><div id="object-highlight" class="object-highlight" aria-hidden="true" hidden><span id="object-highlight-label" class="object-highlight-label"></span></div></div></div>
+          <div id="file-drop-hint" class="file-drop-hint" aria-hidden="true" hidden><div class="file-drop-card"><svg><use href="#i-import"/></svg><strong>Drop to open</strong><span>.pxa, .pxs and .pixel.json projects open in a new tab · PNG images import</span></div></div>
+        </div>
         <div class="canvas-bottom"><div class="canvas-coordinates"><span id="cursor-position">X — &nbsp; Y —</span><span class="status-separator">/</span><span id="tool-status">Pencil</span><span class="canvas-layer-label" title="Selected object"><svg aria-hidden="true"><use href="#i-layers"/></svg><span id="active-layer-name">Layer 1</span></span></div><div class="zoom-controls"><button id="zoom-out" class="icon-button" aria-label="Zoom out" title="Zoom out (-)"><svg><use href="#i-minus"/></svg></button><span id="zoom-value">1200%</span><button id="zoom-in" class="icon-button" aria-label="Zoom in" title="Zoom in (+)"><svg><use href="#i-plus"/></svg></button><button id="zoom-fit" class="icon-button" aria-label="Fit canvas to view" title="Fit canvas to view (0)"><svg><use href="#i-fit"/></svg></button></div></div>
       </div>
       <section class="timeline"><div class="timeline-heading"><div><h2>Frames <span id="frame-count" class="count-badge">4</span></h2><span id="animation-name-label" class="timeline-subtitle">Idle animation</span></div><div class="timeline-actions"><button id="duplicate-frame" class="icon-button" title="Duplicate selected frame (D)" aria-label="Duplicate selected frame"><svg><use href="#i-copy"/></svg></button><button id="delete-frame" class="icon-button" title="Delete selected frame" aria-label="Delete selected frame"><svg><use href="#i-trash"/></svg></button><span class="toolbar-divider"></span><button id="add-frame" class="button small"><svg><use href="#i-plus"/></svg>Add frame</button></div></div><div id="frame-list" class="frame-list" role="group" aria-label="Animation frames"></div><div class="timeline-footer"><span id="frame-position">Frame 1 of 4</span><label class="frame-timing"><span>Duration</span><input id="frame-duration" type="number" min="1" max="60000" step="1" value="125" aria-label="Selected frame duration in milliseconds"><span>ms</span></label><div class="frame-reorder"><button id="move-frame-left" class="text-button" title="Move frame left" aria-label="Move frame left">←</button><span>Reorder</span><button id="move-frame-right" class="text-button" title="Move frame right" aria-label="Move frame right">→</button></div><span class="timeline-hint">Duplicate a frame to keep drawing.</span></div></section>
@@ -155,22 +158,15 @@
 
     <aside class="right-panel" id="details-panel" aria-label="Preview, animations, and objects">
       <details class="preview-section panel-section" data-panel="preview" open><summary class="section-heading"><h2>LIVE PREVIEW</h2><span class="live-badge"><i></i> LIVE</span><svg class="panel-chevron" aria-hidden="true"><use href="#i-chevron"/></svg></summary><div class="preview-stage" id="preview-stage"><canvas id="preview-canvas" width="128" height="128" role="img" aria-label="Animation preview"></canvas><span id="preview-frame" class="preview-counter">1 / 4</span></div><div class="preview-controls"><button id="play-toggle" class="button small play-button" aria-label="Pause animation"><svg><use href="#i-pause"/></svg><span>Pause</span></button><label class="fps-control"><input id="fps-input" type="number" min="1" max="60" value="8" aria-label="Animation frames per second"><span>FPS</span></label><button id="preview-background" class="icon-button" title="Change preview background" aria-label="Change preview background"><svg><use href="#i-square"/></svg></button></div></details>
-      <details class="animations-section panel-section" data-panel="animations" open>
-        <summary class="section-heading"><h2>ANIMATIONS <span id="animation-count" class="inline-count">3</span></h2><svg class="panel-chevron" aria-hidden="true"><use href="#i-chevron"/></svg></summary>
-        <div id="animation-list" class="animation-list"></div>
-        <div class="animation-tools" role="group" aria-label="Animation tools">
-          <button id="duplicate-animation" class="button small" title="Duplicate this animation" aria-label="Duplicate animation"><svg aria-hidden="true"><use href="#i-copy"/></svg><span>Duplicate</span></button>
-          <button id="mirror-animation" class="button small" title="Create a mirrored copy of this animation" aria-label="Mirror animation"><svg aria-hidden="true"><use href="#i-flip-h"/></svg><span>Mirror</span></button>
-          <button id="reverse-animation" class="button small" title="Reverse the frame order of this animation" aria-label="Reverse animation"><svg aria-hidden="true"><use href="#i-swap"/></svg><span>Reverse</span></button>
-          <button id="add-animation" class="button small panel-add-button" title="Add named animation" aria-label="Add named animation"><svg aria-hidden="true"><use href="#i-plus"/></svg><span>Add</span></button>
-        </div>
-        <button id="edit-animation-ai" class="button small panel-add-button animation-ai-edit" title="Edit the selected animation with AI"><svg aria-hidden="true"><use href="#i-spark"/></svg><span>Edit with AI</span></button>
-      </details>
       <details class="objects-section panel-section" data-panel="layers" aria-labelledby="objects-heading" open>
         <summary class="section-heading"><h2 id="objects-heading">OBJECTS <span id="object-count" class="inline-count">1</span></h2><svg class="panel-chevron" aria-hidden="true"><use href="#i-chevron"/></svg></summary>
         <label class="tool-option object-scope-label"><span>Edit in</span><select id="object-scope" aria-label="Object editing scope"><option value="animation">Current animation</option><option value="frame">Current frame</option></select></label>
         <div id="object-list" class="object-list" role="group" aria-label="Artwork objects"></div>
         <div class="object-toolbar" role="group" aria-label="Object actions">
+          <button id="object-copy" class="icon-button" aria-label="Copy object" title="Copy object (Ctrl/⌘ C)"><svg aria-hidden="true"><use href="#i-copy"/></svg></button>
+          <button id="object-paste" class="icon-button" aria-label="Paste object" title="Paste object (Ctrl/⌘ V) · Shift for an independent copy"><svg aria-hidden="true"><use href="#i-paste"/></svg></button>
+          <button id="object-duplicate" class="icon-button" aria-label="Duplicate object" title="Duplicate object (Ctrl/⌘ D)"><svg aria-hidden="true"><use href="#i-plus"/></svg></button>
+          <span class="object-toolbar-divider" aria-hidden="true"></span>
           <button id="object-up" class="icon-button" aria-label="Move object up" title="Move object up"><svg aria-hidden="true"><use href="#i-up"/></svg></button>
           <button id="object-down" class="icon-button" aria-label="Move object down" title="Move object down"><svg aria-hidden="true"><use href="#i-down"/></svg></button>
           <button id="object-rename" class="icon-button" aria-label="Rename object" title="Rename object"><svg aria-hidden="true"><use href="#i-pencil"/></svg></button>
@@ -183,6 +179,17 @@
           <button id="object-isolated-edit" class="button small">Open isolated editor</button><button id="object-move-group" class="button small">Move to group…</button><button id="object-ungroup" class="button small">Ungroup</button><button id="object-independent" class="button small">Make independent</button><button id="outline-objects" class="button small">Outline artwork…</button>
         </div></details>
         <button id="manage-parts" class="button small panel-add-button">Part library / place part</button>
+      </details>
+      <details class="animations-section panel-section" data-panel="animations" open>
+        <summary class="section-heading"><h2>ANIMATIONS <span id="animation-count" class="inline-count">3</span></h2><svg class="panel-chevron" aria-hidden="true"><use href="#i-chevron"/></svg></summary>
+        <div id="animation-list" class="animation-list"></div>
+        <div class="animation-tools" role="group" aria-label="Animation tools">
+          <button id="duplicate-animation" class="button small" title="Duplicate this animation" aria-label="Duplicate animation"><svg aria-hidden="true"><use href="#i-copy"/></svg><span>Duplicate</span></button>
+          <button id="mirror-animation" class="button small" title="Create a mirrored copy of this animation" aria-label="Mirror animation"><svg aria-hidden="true"><use href="#i-flip-h"/></svg><span>Mirror</span></button>
+          <button id="reverse-animation" class="button small" title="Reverse the frame order of this animation" aria-label="Reverse animation"><svg aria-hidden="true"><use href="#i-swap"/></svg><span>Reverse</span></button>
+          <button id="add-animation" class="button small panel-add-button" title="Add named animation" aria-label="Add named animation"><svg aria-hidden="true"><use href="#i-plus"/></svg><span>Add</span></button>
+        </div>
+        <button id="edit-animation-ai" class="button small panel-add-button animation-ai-edit" title="Edit the selected animation with AI"><svg aria-hidden="true"><use href="#i-spark"/></svg><span>Edit with AI</span></button>
       </details>
       <details class="samples-section panel-section" data-panel="samples" open><summary class="section-heading"><h2>START SOMETHING</h2><svg class="panel-chevron" aria-hidden="true"><use href="#i-chevron"/></svg></summary><p class="section-intro">A few little things to make your own.</p><div id="sample-list" class="sample-list"></div><p class="sample-note">Load a sample, or <button id="download-samples" class="text-button">get the data files ↗</button></p></details>
     </aside>

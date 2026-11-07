@@ -93,3 +93,22 @@ export function canvasToPartPoint(instance, part, point) {
   }
 }
 
+
+/** Canvas position of part pixel (x,y) relative to its instance origin, matching the renderer's transforms. */
+export function partToCanvasOffset(transform, part, x, y) {
+  switch(transform) {
+    case 'N': return {x,y};
+    case 'FX': return {x:part.width-1-x,y};
+    case 'FY': return {x,y:part.height-1-y};
+    case 'R90': return {x:part.height-1-y,y:x};
+    case 'R180': return {x:part.width-1-x,y:part.height-1-y};
+    case 'R270': return {x:y,y:part.width-1-x};
+    default: throw new Error('Unknown instance transform.');
+  }
+}
+
+/** How far an instance must move so its existing pixels stay put after the part gains `left`/`top` padding and a new size. */
+export function grownInstanceShift(transform, before, after, left, top) {
+  const a=partToCanvasOffset(transform,before,0,0), b=partToCanvasOffset(transform,after,left,top);
+  return {x:a.x-b.x,y:a.y-b.y};
+}

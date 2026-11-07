@@ -4,6 +4,15 @@ Pixel Studio is a local pixel-art and animation editor with objects, optional gr
 
 The **Objects** panel exposes part instances and pixel artwork, with optional groups. Existing layers open as groups; new projects start with ungrouped pixels. Reorder objects for the current animation (the default), or choose one frame. Select **Object (V)** to pick and drag a part on the canvas; double-click it to open the shared editor. Paint, erase and fill with local Undo/Redo, preview the result in any animation frame, then **Apply to all instances** as one project Undo step. Groups can be added or ungrouped, and instances can move between them. Hidden and locked objects retain their source artwork; shared editing checks every locked reference.
 
+Working with objects:
+
+- **Copy, cut, paste and duplicate** objects with Ctrl/⌘+C, X, V and D, the Objects toolbar, or the right-click menu. The object clipboard is shared between project tabs, so you can copy an object and paste it into another animation or another project. Shift+paste makes an independent copy of shared parts. **Copy to animation…** places a copy in another animation.
+- **Drag and drop** rows in the Objects panel to reorder objects, move an instance into a group, or drop it between rows to give it its own stack.
+- The selected object gets a bright animated outline on the canvas. Click empty canvas or press Escape to deselect.
+- While editing an object on the canvas, paint outside its outline to grow its canvas. The **Select** tool works inside the object: select, move, copy, paste and delete pixels in the draft.
+- **Shift+click** with the pencil or eraser draws a straight line from the last point.
+- **Drop** .pxa, .pxs or .pixel.json files on the canvas to open them in a new tab; dropped PNGs import.
+
 Native saves and PXA 2 retain object names, instance settings, groups and shared artwork. PXA 1/PXS are raster copies that bake object structure. Custom animation/frame orders use PXA `ORDER`/`FRAMEORDER` or versioned PXS payloads. Existing files still import with their original appearance and timing. Use the combined **Outline artwork** action for one outer silhouette; baked-in outlines inside existing parts stay editable in the shared editor's full-sprite context.
 
 ## Hosted version

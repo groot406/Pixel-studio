@@ -1,5 +1,6 @@
 /** Part editing use cases shared by the editor's part controls. */
-import { validateProject } from './project.js';
+import { validateProject, MAX_SIZE } from './project.js';
+import { grownInstanceShift } from './geometry.js';
 import { sourceForCel, pixelSpans, cloneArtwork, artworkId, renderOperations, hasLockedInstances } from './artwork.js';
 
 export function referencesToPart(project, partId) {
@@ -89,5 +90,26 @@ export function flattenCel(project,target) {
   const {p,cel}=editable(project,target);
   if (hasLockedInstances(cel)) throw new Error('Unlock objects in this group before flattening it.');
   delete cel.source;
+  return validateProject(p);
+}
+
+/**
+ * Grow a part's canvas by padding it on each side. Existing artwork keeps its canvas position in every
+ * instance, whatever its transform.
+ */
+export function growPart(project,partId,{left=0,top=0,right=0,bottom=0}) {
+  const p=validateProject(project), part=p.parts?.find(part=>part.id===partId);
+  if(!part) throw new Error('Choose a part.');
+  if(![left,top,right,bottom].every(v=>Number.isInteger(v) && v>=0)) throw new Error('Parts can only grow by whole pixels.');
+  if(!(left||top||right||bottom)) return p;
+  const before={width:part.width,height:part.height}, after={width:part.width+left+right,height:part.height+top+bottom};
+  if(after.width>MAX_SIZE || after.height>MAX_SIZE) throw new Error(`Parts can be at most ${MAX_SIZE} × ${MAX_SIZE} pixels.`);
+  part.ops=part.ops.map(op=>op.type==='line'?{...op,x:op.x+left,y:op.y+top,x2:op.x2+left,y2:op.y2+top}:{...op,x:op.x+left,y:op.y+top});
+  Object.assign(part,after);
+  for(const a of p.animations) for(const f of a.frames) for(const c of f.cels) for(const op of c.source?.ops || []) {
+    if(op.type!=='use' || op.partId!==partId) continue;
+    const shift=grownInstanceShift(op.transform,before,after,left,top);
+    op.x+=shift.x; op.y+=shift.y;
+  }
   return validateProject(p);
 }

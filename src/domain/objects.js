@@ -76,6 +76,50 @@ export function reorderObject(project,target,key,direction,scope='animation') {
   return validateProject(p);
 }
 
+/** Drag-and-drop: move a container directly above or below another container in the scoped stack. */
+export function placeObjectContainer(project,target,anchorLayerId,position,scope='animation') {
+  if(!['above','below'].includes(position))throw new Error('Drop above or below another object.');
+  const {p,animation,layer,frame,frames}=context(project,target,scope);
+  if(anchorLayerId===layer.id || !p.layers.some(l=>l.id===anchorLayerId))return p;
+  unlocked(layer);
+  if(frames.some(f=>hasLockedInstances(f.cels.find(c=>c.layerId===layer.id))))throw new Error('Unlock objects inside this group before moving its stack.');
+  const place=ids=>{
+    const order=ids.filter(id=>id!==layer.id), index=order.indexOf(anchorLayerId);
+    if(index<0)return ids;
+    order.splice(position==='above'?index+1:index,0,layer.id);return order;
+  };
+  if(scope==='animation') {
+    for(const f of frames) if(f.layerOrder)f.layerOrder=place([...f.layerOrder]);
+    animation.layerOrder=place(getAnimationLayers(p,animation).map(l=>l.id));
+  } else frame.layerOrder=place(getAnimationLayers(p,animation,frame).map(l=>l.id));
+  return validateProject(p);
+}
+
+/** Drag-and-drop: move a sibling directly above or below another sibling, wherever both exist in scope. */
+export function placeObject(project,target,key,anchorKey,position,scope='animation') {
+  if(!['above','below'].includes(position))throw new Error('Drop above or below another object.');
+  const {p,layer,frames}=context(project,target,scope);
+  unlocked(layer);
+  if(key===anchorKey)return p;
+  for(const f of frames) {
+    const cel=f.cels.find(c=>c.layerId===layer.id);
+    if(!cel.source)continue;
+    const nodes=celObjects(cel), from=nodes.findIndex(n=>n.key===key), to=nodes.findIndex(n=>n.key===anchorKey);
+    if(from<0 || to<0)continue;
+    const [low,high]=from<to?[from+1,position==='above'?to:to-1]:[position==='above'?to+1:to,from-1];
+    for(const node of [nodes[from],...nodes.slice(low,high+1)]) {
+      unlocked(layer,node);
+      if(node.type==='overrides')throw new Error('Local pixel edits stay above this group. Flatten them before reordering.');
+    }
+    if(nodes[to].type==='overrides')throw new Error('Local pixel edits stay above this group. Flatten them before reordering.');
+    const node=nodes[from], anchor=nodes[to], moved=cel.source.ops.splice(node.start,node.end-node.start);
+    let at=position==='above'?anchor.end:anchor.start;
+    if(node.start<anchor.start)at-=moved.length;
+    cel.source.ops.splice(at,0,...moved);
+  }
+  return validateProject(p);
+}
+
 export function updateObject(project,target,key,changes,scope='animation') {
   const {p,layer,frames}=context(project,target,scope);
   unlocked(layer);
@@ -164,6 +208,56 @@ export function removeObjectContainer(project,layerId) {
     layer.group=false;
   } else removeProjectLayer(p,layerId);
   return validateProject(p);
+}
+
+/** True when a container holds no artwork in any frame. */
+function emptyContainer(p,layerId) {
+  return p.animations.every(a=>a.frames.every(f=>{
+    const cel=f.cels.find(c=>c.layerId===layerId);
+    return !cel.source?.ops.length && !cel.source?.overrides.length && cel.pixels.every(v=>v<0);
+  }));
+}
+
+/**
+ * Drag-and-drop in the Objects panel. `source`/`anchor` are rows: {layerId,key,outer}, where `outer`
+ * marks a row that represents its whole container (a group header or a lone ungrouped object).
+ * `position` is 'above', 'below' or 'into' (an unlocked group). Returns the moved row.
+ * Ungrouped containers left empty by a move are removed.
+ */
+export function dropObject(project,target,source,anchor,position,scope='animation') {
+  if(!['above','below','into'].includes(position))throw new Error('Drop above, below or into an object.');
+  const at=layerId=>({...target,layerId});
+  let p=validateProject(project);
+  const sourceLayer=p.layers.find(l=>l.id===source.layerId), anchorLayer=p.layers.find(l=>l.id===anchor.layerId);
+  if(!sourceLayer || !anchorLayer)throw new Error('This object no longer exists.');
+  const frame=p.animations.find(a=>a.id===target.animationId)?.frames.find(f=>f.id===target.frameId);
+  const node=celObjects(frame.cels.find(c=>c.layerId===source.layerId)).find(n=>n.key===source.key);
+  const side=position==='into'?'above':position;
+  // A lone ungrouped instance joins the anchor's group when dropped into it or among its children.
+  const movesContainer=source.outer && !(node?.instance && sourceLayer.group===false && (position==='into' || !anchor.outer));
+  if(movesContainer) {
+    if(source.layerId===anchor.layerId)return {project:p,layerId:source.layerId,key:source.key};
+    return {project:placeObjectContainer(p,at(source.layerId),anchor.layerId,side,scope),layerId:source.layerId,key:source.key};
+  }
+  if(!node?.instance) {
+    if(anchor.layerId!==source.layerId || anchor.outer)throw new Error('Pixel artwork stays in its group. Drag it among its siblings, or drag the group.');
+    return {project:placeObject(p,at(source.layerId),source.key,anchor.key,side,scope),layerId:source.layerId,key:source.key};
+  }
+  let layerId;
+  if(position==='into') {
+    if(anchorLayer.group===false)throw new Error('Drop into a group, or above or below an object.');
+    p=moveObjectToGroup(p,at(source.layerId),source.key,anchor.layerId,scope);layerId=anchor.layerId;
+  } else if(!anchor.outer) {
+    if(anchor.layerId!==source.layerId)p=moveObjectToGroup(p,at(source.layerId),source.key,anchor.layerId,scope);
+    layerId=anchor.layerId;
+    p=placeObject(p,at(layerId),source.key,anchor.key,side,scope);
+  } else {
+    const added=addObjectContainer(p,anchor.layerId,node.name,false);
+    p=moveObjectToGroup(added.project,at(source.layerId),source.key,added.layerId,scope);layerId=added.layerId;
+    if(side==='below')p=placeObjectContainer(p,at(layerId),anchor.layerId,'below',scope);
+  }
+  if(layerId!==source.layerId && sourceLayer.group===false && p.layers.length>1 && emptyContainer(p,source.layerId))p=removeObjectContainer(p,source.layerId);
+  return {project:p,layerId,key:source.key};
 }
 
 export function objectBounds(project,node) {

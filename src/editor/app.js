@@ -1,6 +1,7 @@
-import { createInPlaceEdit, setInPlaceScope, inPlaceRestriction, inPlaceDirty, inPlacePoint, beginInPlaceStroke, moveInPlaceStroke, finishInPlaceStroke, restoreInPlace, previewInPlaceEdit, prepareInPlaceEdit, PART_EDIT_TOOLS } from '../features/objects/in-place-edit.js';
+import { createInPlaceEdit, setInPlaceScope, inPlaceRestriction, inPlaceDirty, inPlacePoint, beginInPlaceStroke, moveInPlaceStroke, finishInPlaceStroke, restoreInPlace, previewInPlaceEdit, prepareInPlaceEdit, PART_EDIT_TOOLS, inPlaceCanvasRect, beginInPlaceSelection, moveInPlaceSelection, finishInPlaceSelection, selectAllInPlace, deselectInPlace, nudgeInPlaceSelection, clearInPlaceSelection, copyInPlaceSelection, pasteInPlace } from '../features/objects/in-place-edit.js';
+import { mapPaletteColors, copyObject, pasteObject, objectPixelBounds } from '../domain/object-clipboard.js';
 import { commitRasterEdits, writeCelPixels, cloneArtwork } from '../domain/artwork.js';
-import { celObjects, reorderObject, reorderObjectContainer, updateObject, translateObject, forkObject, deleteObject, addObjectContainer, moveObjectToGroup, removeObjectContainer, objectBounds, hitTestObject } from '../domain/objects.js';
+import { celObjects, reorderObject, reorderObjectContainer, updateObject, translateObject, forkObject, deleteObject, addObjectContainer, moveObjectToGroup, removeObjectContainer, objectBounds, hitTestObject, dropObject } from '../domain/objects.js';
 import { renderObjectsPanel } from './objects-panel.js';
 import { openSharedPartEditor } from './shared-part-editor.js';
 import { hasLockedInstances } from '../domain/artwork.js';
@@ -41,8 +42,8 @@ const state = {
   tool: 'pencil', color: 0, scale: 12, fit: true, grid: true, onion: false,
   filled: false, playing: true, previewIndex: 0, previewTime: 0, previewBackground: 0,
   inPlaceEdit:null, objectSelection:null, objectScope:'animation', collapsedGroups:new Set(), objectDrag:null,
-  cursor: null, drawing: null, selection: null, swap: false, swapFirst: null,
-  brushSize: 1, brushShape: 'square', symmetry: 'none', transformScope: 'frame', clipboard: null,
+  cursor: null, drawing: null, selection: null, lastPaint: null, shiftHeld: false, swap: false, swapFirst: null,
+  brushSize: 1, brushShape: 'square', symmetry: 'none', transformScope: 'frame', clipboard: null, objectClipboard: null, lastClipboard: 'pixels',
   undo: [], redo: [], samples: [], sampleData: new Map(), saveTimer: null, storageAvailable: true, importSkipEmpty: true,
   documents: new Map(), openIds: [], documentId: null, panels: {tools:false,details:false}, panelSections: {}, sessionSaveError: false,
 };
@@ -341,14 +342,14 @@ function renderCanvas() {
   }
   drawPixels(canvasPixels());
   if(state.inPlaceEdit) {
-    const {session}=state.inPlaceEdit, rotated=['R90','R270'].includes(session.instance.transform);
-    const x=Math.max(0,session.instance.x),y=Math.max(0,session.instance.y);
-    const right=Math.min(width,session.instance.x+(rotated?session.height:session.width)),bottom=Math.min(height,session.instance.y+(rotated?session.width:session.height));
+    const {session}=state.inPlaceEdit, outline=inPlaceCanvasRect(session);
+    const x=Math.max(0,outline.x),y=Math.max(0,outline.y);
+    const right=Math.min(width,outline.x+outline.width),bottom=Math.min(height,outline.y+outline.height);
     context.fillStyle='#fffefb88';
     context.fillRect(0,0,canvasWidth,y*state.scale);context.fillRect(0,bottom*state.scale,canvasWidth,canvasHeight-bottom*state.scale);
     context.fillRect(0,y*state.scale,x*state.scale,(bottom-y)*state.scale);context.fillRect(right*state.scale,y*state.scale,canvasWidth-right*state.scale,(bottom-y)*state.scale);
     context.strokeStyle='#285b47';context.lineWidth=1.5;context.setLineDash([5,3]);
-    context.strokeRect(session.instance.x*state.scale+.75,session.instance.y*state.scale+.75,(rotated?session.height:session.width)*state.scale-1.5,(rotated?session.width:session.height)*state.scale-1.5);context.setLineDash([]);
+    context.strokeRect(outline.x*state.scale+.75,outline.y*state.scale+.75,outline.width*state.scale-1.5,outline.height*state.scale-1.5);context.setLineDash([]);
   }
   if (state.grid && state.scale >= 5) {
     context.beginPath();
@@ -370,20 +371,18 @@ function renderCanvas() {
     if (['y','both'].includes(state.symmetry)) {context.moveTo(0,canvasHeight/2);context.lineTo(canvasWidth,canvasHeight/2);}
     context.stroke();context.setLineDash([]);
   }
-  if (state.selection) {
-    const rect=state.selection.rect, x=rect.x*state.scale, y=rect.y*state.scale, w=rect.width*state.scale, h=rect.height*state.scale;
+  const selectionRect=state.inPlaceEdit?(state.inPlaceEdit.session.selection && inPlaceCanvasRect(state.inPlaceEdit.session,state.inPlaceEdit.session.selection)):state.selection?.rect;
+  if (selectionRect) {
+    const rect=selectionRect, x=rect.x*state.scale, y=rect.y*state.scale, w=rect.width*state.scale, h=rect.height*state.scale;
     context.lineWidth=1.5;
     context.strokeStyle='#ffffff'; context.setLineDash([]); context.strokeRect(x+0.75,y+0.75,w-1.5,h-1.5);
     context.strokeStyle='#285b47'; context.setLineDash([5,4]); context.strokeRect(x+0.75,y+0.75,w-1.5,h-1.5); context.setLineDash([]);
   }
-  if(state.tool==='object') {
-    const selected=selectedObject(), node=celObjects(currentFrame().cels.find(c=>c.layerId===selected.layerId)).find(n=>n.key===selected.key);
-    const bounds=node && objectBounds(state.project,node);
-    if(bounds && node.instance.visible!==false && currentLayer().visible){context.strokeStyle='#285b47';context.lineWidth=1;context.setLineDash([4,3]);context.strokeRect(bounds.x*state.scale+.5,bounds.y*state.scale+.5,bounds.width*state.scale-1,bounds.height*state.scale-1);context.setLineDash([]);}
-  }
+  renderObjectHighlight();
   if (state.cursor && !['select','object'].includes(state.tool)) {
     const tool=state.drawing?.tool || state.tool, sized=BRUSH_TOOLS.includes(tool);
-    const points=brushPoints([state.cursor],sized?state.brushSize:1,sized?state.brushShape:'square',width,height,SYMMETRY_TOOLS.includes(tool)?state.symmetry:'none');
+    const from=shiftLineStart(tool);
+    const points=brushPoints(from?linePoints(from.x,from.y,state.cursor.x,state.cursor.y):[state.cursor],sized?state.brushSize:1,sized?state.brushShape:'square',width,height,SYMMETRY_TOOLS.includes(tool)?state.symmetry:'none');
     const occupied=new Set(points.map(point=>`${point.x},${point.y}`));
     context.beginPath();
     for (const {x,y} of points) {
@@ -401,6 +400,30 @@ function renderCanvas() {
   $('zoom-in').disabled = state.scale >= maxZoom();
   $('resize-canvas').textContent = `${width} × ${height} ↗`;
 }
+/** Bright, animated outline around the selected object; quieter while painting with other tools. */
+function renderObjectHighlight() {
+  const element=$('object-highlight');
+  let bounds=null, name='';
+  if(!state.inPlaceEdit && state.objectSelection) {
+    const selected=selectedObject(), layer=state.project.layers.find(l=>l.id===selected.layerId), cel=currentFrame().cels.find(c=>c.layerId===selected.layerId);
+    const node=cel && celObjects(cel).find(n=>n.key===selected.key);
+    if(layer?.visible && node?.instance?.visible!==false && (node || selected.key==='@group')) {
+      try{bounds=objectPixelBounds(state.project,cel,selected.key);}catch{bounds=null;}
+      name=node?.instance?node.name:layer.name;
+    }
+  }
+  element.hidden=!bounds;
+  if(!bounds)return;
+  const x=Math.max(0,bounds.x),y=Math.max(0,bounds.y),right=Math.min(state.project.width,bounds.x+bounds.width),bottom=Math.min(state.project.height,bounds.y+bounds.height);
+  Object.assign(element.style,{left:`${x*state.scale-2}px`,top:`${y*state.scale-2}px`,width:`${Math.max(1,right-x)*state.scale+4}px`,height:`${Math.max(1,bottom-y)*state.scale+4}px`});
+  element.classList.toggle('is-active',state.tool==='object');
+  element.classList.toggle('label-below',y*state.scale<22);
+  $('object-highlight-label').textContent=name;
+}
+/** Start of a Shift+click straight line: where the last pencil or eraser stroke ended. */
+function shiftLineStart(tool=state.tool) {
+  return state.shiftHeld && !state.drawing && ['pencil','eraser'].includes(tool) && state.lastPaint?.documentId===state.documentId ? state.lastPaint : null;
+}
 function renderTools() {
   document.querySelectorAll('[data-tool]').forEach(button => {
     const active = button.dataset.tool === state.tool;
@@ -409,7 +432,7 @@ function renderTools() {
   });
   const sized=BRUSH_TOOLS.includes(state.tool), shaped=['rectangle','ellipse'].includes(state.tool);
   $('active-tool-name').textContent=TOOL_NAMES[state.tool];
-  $('tool-hint').textContent=state.inPlaceEdit?'Draw inside the object outline. Other artwork stays visible. Ctrl/⌘ Z undoes draft strokes; Esc cancels the edit.':TOOL_HINTS[state.tool];
+  $('tool-hint').textContent=state.inPlaceEdit?(state.tool==='select'?'Select pixels inside the object. Drag the selection to move it; Ctrl/⌘ C, X, V and Delete work on the draft.':'Draw inside or beyond the outline: painting past an edge extends the object. Shift-click draws a straight line. Esc cancels.'):TOOL_HINTS[state.tool];
   $('brush-options').hidden=!sized;
   $('filled-row').hidden=!shaped;
   $('symmetry-options').hidden=!SYMMETRY_TOOLS.includes(state.tool);
@@ -424,7 +447,7 @@ function renderTools() {
   }
   $('undo').disabled = !(state.inPlaceEdit?state.inPlaceEdit.session.undo:state.undo).length;
   $('redo').disabled = !(state.inPlaceEdit?state.inPlaceEdit.session.redo:state.redo).length;
-  $('pixel-canvas').style.cursor = state.tool === 'eyedropper' ? 'copy' : currentLayer().locked || !currentLayer().visible ? 'not-allowed' : state.tool==='select' && state.selection ? 'grab' : 'crosshair';
+  $('pixel-canvas').style.cursor = state.tool === 'eyedropper' ? 'copy' : currentLayer().locked || !currentLayer().visible ? 'not-allowed' : state.tool==='select' && (state.inPlaceEdit?state.inPlaceEdit.session.selection:state.selection) ? 'grab' : 'crosshair';
   renderTransformControls();
   renderInPlaceControls();
 }
@@ -543,7 +566,7 @@ function selectObject(item) {
 }
 function renderLayers() {
   renderObjectsPanel({project:state.project,animation:currentAnimation(),frame:currentFrame(),selected:selectedObject(),scope:state.objectScope,collapsed:state.collapsedGroups,
-    onSelect:selectObject,onAction:objectAction,onScope:scope=>{finishDrawing();state.objectScope=scope;renderLayers();},paint:paintSprite});
+    canPaste:Boolean(state.objectClipboard),onSelect:selectObject,onAction:objectAction,onScope:scope=>{finishDrawing();state.objectScope=scope;renderLayers();},onDrop:dropObjectRow,paint:paintSprite});
   const selected=selectedObject(), node=celObjects(currentFrame().cels.find(c=>c.layerId===selected.layerId)).find(n=>n.key===selected.key);
   $('active-layer-name').textContent=node?.instance?node.name:currentLayer().name;
   $('active-layer-name').title=node?.instance?'Selected smart object':'Selected pixel object or group';
@@ -566,7 +589,7 @@ function beginCanvasPartEdit(item,partId) {
     for(const element of document.querySelectorAll('.app-header,#project-tabs,#new-project-tab,#open-saved-projects,#details-panel,.timeline,.transform-section,.account-section,.left-bottom')) {
       edit.inert.set(element,element.inert);element.inert=true;
     }
-    for(const element of document.querySelectorAll('[data-tool="object"],[data-tool="select"],#magic-outline,#resize-canvas,#toggle-onion,#color-picker,#hex-color,#add-color,#swap-colors')) {
+    for(const element of document.querySelectorAll('[data-tool="object"],#magic-outline,#resize-canvas,#toggle-onion,#color-picker,#hex-color,#add-color,#swap-colors')) {
       edit.disabled.set(element,element.disabled);element.disabled=true;
     }
     renderAll();renderSaveStatus();requestAnimationFrame(()=>{fitCanvas();$('pixel-canvas').focus({preventScroll:true});});
@@ -613,13 +636,24 @@ function endCanvasPartEdit(apply) {
   if(apply)toast(edit.session.scope==='shared'?'Shared artwork updated. Undo restores the whole edit.':'This frame’s object updated. Other appearances are unchanged.');
 }
 function canvasPartKey(event,key) {
+  const session=state.inPlaceEdit.session, command=event.ctrlKey || event.metaKey;
+  if(command && key==='a'){event.preventDefault();selectAllPixels();return;}
+  if(command && key==='c' && session.selection){event.preventDefault();copySelectionPixels();return;}
+  if(command && key==='x' && session.selection){event.preventDefault();copySelectionPixels(true);return;}
+  if(command && key==='v' && state.clipboard){event.preventDefault();pasteClipboardPixels();return;}
+  if(!command && state.tool==='select' && session.selection) {
+    const nudge={arrowleft:[-1,0],arrowright:[1,0],arrowup:[0,-1],arrowdown:[0,1]}[key];
+    if(nudge){event.preventDefault();const step=event.shiftKey?8:1;inPlaceSelectionChange(s=>nudgeInPlaceSelection(s,nudge[0]*step,nudge[1]*step));return;}
+    if(key==='delete' || key==='backspace'){event.preventDefault();clearSelectionPixels();return;}
+    if(key==='escape' || key==='enter'){event.preventDefault();deselectPixels();return;}
+  }
   if((event.ctrlKey || event.metaKey) && key==='z'){event.preventDefault();restoreCanvasPartEdit(event.shiftKey);return;}
   if((event.ctrlKey || event.metaKey) && key==='y'){event.preventDefault();restoreCanvasPartEdit(true);return;}
   if((event.ctrlKey || event.metaKey) && key==='enter'){event.preventDefault();endCanvasPartEdit(true);return;}
   if(key==='escape'){event.preventDefault();endCanvasPartEdit(false);return;}
   if(event.ctrlKey || event.metaKey){event.preventDefault();return;}
-  const tool={b:'pencil',e:'eraser',l:'line',f:'fill',u:'replace',i:'eyedropper',r:'rectangle',c:'ellipse'}[key];
-  if(tool){event.preventDefault();state.tool=tool;renderTools();renderCanvas();return;}
+  const tool={b:'pencil',e:'eraser',l:'line',f:'fill',u:'replace',i:'eyedropper',r:'rectangle',c:'ellipse',s:'select'}[key];
+  if(tool){event.preventDefault();state.tool=tool;renderTools();renderSelection();renderCanvas();return;}
   if(key==='g'){$('toggle-grid').click();return;}
   const move={arrowleft:[-1,0],arrowright:[1,0],arrowup:[0,-1],arrowdown:[0,1]}[key];
   if(move) {
@@ -640,8 +674,65 @@ function editSharedPart(partId) {
     mutate(()=>{state.project=project;});toast('Shared artwork updated in every instance. Undo is available.');
   }});
 }
+function dropObjectRow(source,anchor,position) {
+  finishDrawing();
+  try {
+    mutate(()=>{
+      const result=dropObject(state.project,objectTarget(source.layerId),source,anchor,position,state.objectScope);
+      state.project=result.project;state.layerId=result.layerId;state.objectSelection={layerId:result.layerId,key:result.key};
+      if(position==='into')state.collapsedGroups.delete(anchor.layerId);
+    });
+  } catch(error){toast(error.message);}
+}
+function copyObjectItem(item,cut=false) {
+  finishDrawing();
+  try {
+    state.objectClipboard=copyObject(state.project,objectTarget(item.layerId),item.key);state.lastClipboard='object';
+    if(cut)objectAction('delete',item);else renderLayers();
+    toast(`“${state.objectClipboard.name}” ${cut?'cut':'copied'}. Paste it into any frame, animation or project tab.`);
+  } catch(error){toast(error.message);}
+}
+/** Paste the object clipboard next to the selection, in the current animation (or frame) of any project tab. */
+function pasteObjectItem({independent=false,target=objectTarget(selectedObject().layerId),clip=state.objectClipboard,offset=0,scope=state.objectScope,message}={}) {
+  finishDrawing();
+  if(!clip){toast('Copy an object first.');return;}
+  try {
+    mutate(()=>{
+      const result=pasteObject(state.project,target,clip,{scope,independent,offset});
+      state.project=result.project;
+      if(target.animationId===currentAnimation().id){state.layerId=result.layerId;state.objectSelection={layerId:result.layerId,key:result.key};if(clip.kind==='instance')state.tool='object';}
+    });
+    toast(message || `“${clip.name}” pasted${independent?' as an independent copy':''}${scope==='animation'?' into every frame of this animation':''}.`);
+  } catch(error){toast(error.message);}
+}
+function duplicateObjectItem(item) {
+  finishDrawing();
+  try {
+    const clip=copyObject(state.project,objectTarget(item.layerId),item.key);
+    pasteObjectItem({clip,target:objectTarget(item.layerId),offset:clip.kind==='instance'?2:0,message:`“${clip.name}” duplicated.`});
+  } catch(error){toast(error.message);}
+}
+function copyToAnimationDialog(item) {
+  let clip;
+  try{clip=copyObject(state.project,objectTarget(item.layerId),item.key);}catch(error){toast(error.message);return;}
+  const animations=state.project.animations;
+  openDialog('Copy to animation',`<form id="copy-to-form"><p class="modal-body-text">Place a copy of “${escapeHTML(clip.name)}” in another animation. Shared parts stay linked, so editing one updates both.</p><label class="field"><span class="field-label">Animation</span><select id="copy-to-animation">${animations.map(a=>`<option value="${escapeHTML(a.id)}"${a.id===currentAnimation().id?' disabled':''}>${escapeHTML(a.name)} · ${a.frames.length} frame${a.frames.length===1?'':'s'}</option>`).join('')}</select></label><label class="field"><span class="field-label">Frames</span><select id="copy-to-scope"><option value="animation">Every frame</option><option value="frame">First frame only</option></select></label><label class="check-row"><input id="copy-to-independent" type="checkbox"> Make an independent copy of shared parts</label><p class="helper-text">To paste into another project, use Copy, switch tabs, then Paste.</p><div class="modal-actions"><button class="button primary" type="submit">Copy object</button></div></form>`,'OBJECTS');
+  const select=$('copy-to-animation'), first=[...select.options].find(o=>!o.disabled);
+  if(!first){$('copy-to-form').innerHTML='<p class="modal-body-text">Add another animation first, or use Duplicate to copy within this one.</p>';return;}
+  select.value=first.value;
+  $('copy-to-form').onsubmit=event=>{
+    event.preventDefault();
+    const animation=animations.find(a=>a.id===select.value);
+    $('modal').close();
+    pasteObjectItem({clip,target:{animationId:animation.id,frameId:animation.frames[0].id,layerId:item.layerId},scope:$('copy-to-scope').value,independent:$('copy-to-independent').checked,message:`“${clip.name}” copied to ${animation.name}.`});
+  };
+}
 function objectAction(action,item) {
   finishDrawing();
+  if(action==='copy' || action==='cut'){copyObjectItem(item,action==='cut');return;}
+  if(action==='paste' || action==='paste-independent'){pasteObjectItem({independent:action==='paste-independent'});return;}
+  if(action==='duplicate'){duplicateObjectItem(item);return;}
+  if(action==='copy-to'){copyToAnimationDialog(item);return;}
   const target=objectTarget(item.layerId), layer=state.project.layers.find(l=>l.id===item.layerId);
   const node=celObjects(currentFrame().cels.find(c=>c.layerId===item.layerId)).find(n=>n.key===item.key);
   try {
@@ -738,8 +829,15 @@ function setZoom(scale) {
 }
 
 function renderSelection() {
-  const selection=state.selection;
   $('selection-actions').hidden=state.tool!=='select';
+  if(state.inPlaceEdit) {
+    const rect=state.inPlaceEdit.session.selection;
+    $('selection-info').textContent=rect?`${rect.width} × ${rect.height} pixels · ${state.inPlaceEdit.session.partId}`:'Drag a rectangle to select pixels in this object.';
+    for(const id of ['clear-selection','deselect-selection','copy-selection','cut-selection'])$(id).disabled=!rect;
+    $('paste-selection').disabled=!state.clipboard;
+    renderTransformControls();return;
+  }
+  const selection=state.selection;
   $('selection-info').textContent=selection ? `${selection.rect.width} × ${selection.rect.height} pixels · ${currentLayer().name}` : 'Drag a rectangle to select pixels on this layer.';
   $('clear-selection').disabled=!selection || !canEditPixels();
   $('deselect-selection').disabled=!selection;
@@ -761,14 +859,29 @@ function renderTransformControls() {
   $('rotate-left').disabled=!editable || !canRotate;$('rotate-right').disabled=!editable || !canRotate;
   $('transform-help').textContent=smart?'Select pixel artwork to transform pixels. Use Part library to rotate or flip a part instance.':!editable?'Show the pixel object and unlock its group and objects to transform it.':!canRotate?'Flips affect the active pixel object. Select a smaller area to rotate without cropping.':state.transformScope==='selection'?'Transforms the selection on the active pixel object.':'Transforms pixels in this container; other containers stay in place.';
 }
+/** In-place edits change only the draft part; the result of `change` is shown without touching the project. */
+function inPlaceSelectionChange(change) {
+  finishDrawing();
+  try{change(state.inPlaceEdit.session);state.inPlaceEdit.error=null;}catch(error){state.inPlaceEdit.error=error.message;}
+  renderTools();renderSelection();renderCanvas();renderPreview();
+}
 function selectAllPixels() {
+  if(state.inPlaceEdit){state.tool='select';inPlaceSelectionChange(selectAllInPlace);return;}
   finishDrawing();state.tool='select';
   state.selection={rect:{x:0,y:0,width:state.project.width,height:state.project.height},frameId:state.frameId,layerId:state.layerId,canvasWidth:state.project.width,canvasHeight:state.project.height};
   state.transformScope='selection';renderAll();
 }
 function copySelectionPixels(cut=false) {
   finishDrawing();
+  if(state.inPlaceEdit) {
+    const copied=copyInPlaceSelection(state.inPlaceEdit.session);
+    if(!copied)return;
+    state.clipboard=copied;state.lastClipboard='pixels';
+    if(cut)inPlaceSelectionChange(clearInPlaceSelection);else renderSelection();
+    toast(cut?'Selection cut from the object draft.':'Selection copied. Paste it into this object or anywhere else.');return;
+  }
   if (!state.selection || (cut && !canEditPixels())) return;
+  state.lastClipboard='pixels';
   state.clipboard={...copyPixels(currentPixels(),state.project.width,state.project.height,state.selection.rect),palette:[...state.project.palette],x:state.selection.rect.x,y:state.selection.rect.y};
   if(cut) clearSelectionPixels();
   renderSelection();toast(cut?'Selection cut. Paste it into any frame, layer, or project.':'Selection copied. Paste it into any frame, layer, or project.');
@@ -777,6 +890,18 @@ function pasteClipboardPixels() {
   finishDrawing();
   const clipboard=state.clipboard;
   if (!clipboard) {toast('Select and copy some pixels first.');return;}
+  if(state.inPlaceEdit) {
+    // Drafts cannot add palette colors, so unknown colors use their nearest match.
+    const palette=state.inPlaceEdit.session.sourceProject.palette, {mapping}=mapPaletteColors(palette,clipboard.palette,clipboard.pixels);
+    const pixels=clipboard.pixels.map(color=>{
+      if(color<0)return -1;
+      const index=mapping.get(color);
+      return index<palette.length?index:nearestColor(...clipboard.palette[color].slice(1).match(/.{2}/g).map(c=>parseInt(c,16)),palette);
+    });
+    state.tool='select';inPlaceSelectionChange(session=>pasteInPlace(session,{...clipboard,pixels}));
+    if(!state.inPlaceEdit.error)toast('Pixels pasted into the object. Drag the selection to position it.');
+    return;
+  }
   if(!canEditPixels()){toast('Select visible pixel artwork and unlock its objects before pasting.');return;}
   try {
     const palette=[...state.project.palette];
@@ -856,13 +981,14 @@ function nudgeSelection(dx,dy) {
   });
 }
 function clearSelectionPixels() {
+  if(state.inPlaceEdit){inPlaceSelectionChange(clearInPlaceSelection);return;}
   if (!state.selection || !canEditPixels()) return;
   mutate(()=>{
     const rect=state.selection.rect,pixels=currentPixels();
     for(let y=rect.y;y<rect.y+rect.height;y++) for(let x=rect.x;x<rect.x+rect.width;x++) pixels[y*state.project.width+x]=-1;
   });
 }
-function deselectPixels() { finishDrawing(); state.selection=null; state.transformScope='frame';renderAll(); }
+function deselectPixels() { if(state.inPlaceEdit){inPlaceSelectionChange(deselectInPlace);return;} finishDrawing(); state.selection=null; state.transformScope='frame';renderAll(); }
 function magicOutlineDialog() {
   if (!canAddLayer()) { toast('This project has reached its layer or pixel limit.'); return; }
   const selectedColor=state.color>=0?state.color:0;
@@ -916,11 +1042,16 @@ function doubleClickObject(event) {
   const point=canvasPoint(event), hit=hitTestObject(state.project,currentAnimation(),currentFrame(),point.x,point.y);
   if(hit?.type==='instance'){event.preventDefault();finishDrawing();selectObject(hit);editSharedObject(hit);}
 }
+/** Clicking empty stage around the canvas with the object tool clears the object selection. */
+function deselectObjectOutside(event) {
+  if(event.button!==0 || event.target===$('pixel-canvas') || state.drawing || state.inPlaceEdit || state.tool!=='object' || !state.objectSelection)return;
+  state.objectSelection=null;renderAll();
+}
 function pointerDown(event) {
   if (event.button !== 0 && event.button !== 2) return;
   if (state.drawing) return;
   const point = canvasPoint(event);
-  if (!inside(point)) return;
+  if (!inside(point)) { if(event.button===0 && state.tool==='object' && !state.inPlaceEdit && state.objectSelection){state.objectSelection=null;renderAll();} return; }
   event.preventDefault();
   $('pixel-canvas').focus({preventScroll:true});
   $('pixel-canvas').setPointerCapture(event.pointerId);
@@ -934,11 +1065,12 @@ function pointerDown(event) {
   }
   if(state.inPlaceEdit) {
     try {
-      const stroke=beginInPlaceStroke(state.inPlaceEdit.session,point,{tool,color:tool==='eraser'?-1:state.color,brushSize:state.brushSize,brushShape:state.brushShape,symmetry:state.symmetry,filled:state.filled});
-      if(stroke){state.inPlaceEdit.error=null;state.drawing={...stroke,pointerId:event.pointerId,kind:'part-edit'};}
+      const from=event.shiftKey?shiftLineStart(tool):null;
+      const stroke=tool==='select'?beginInPlaceSelection(state.inPlaceEdit.session,point):beginInPlaceStroke(state.inPlaceEdit.session,point,{tool,from,color:tool==='eraser'?-1:state.color,brushSize:state.brushSize,brushShape:state.brushShape,symmetry:state.symmetry,filled:state.filled});
+      if(stroke){state.inPlaceEdit.error=null;state.drawing={...stroke,tool,pointerId:event.pointerId,kind:tool==='select'?'part-select':'part-edit'};}
       else if($('pixel-canvas').hasPointerCapture(event.pointerId))$('pixel-canvas').releasePointerCapture(event.pointerId);
     } catch(error) {state.inPlaceEdit.error=error.message;if($('pixel-canvas').hasPointerCapture(event.pointerId))$('pixel-canvas').releasePointerCapture(event.pointerId);}
-    renderInPlaceControls();renderCanvas();renderPreview();return;
+    renderInPlaceControls();renderSelection();renderCanvas();renderPreview();return;
   }
   const hit=hitTestObject(state.project,currentAnimation(),currentFrame(),point.x,point.y);
   const selected=selectedObject(), selectedNode=celObjects(currentFrame().cels.find(c=>c.layerId===selected.layerId)).find(n=>n.key===selected.key);
@@ -958,16 +1090,23 @@ function pointerDown(event) {
   state.drawing = {pointerId:event.pointerId,tool,origin:point,last:point,before:snapshot(),cel,base:[...cel.pixels],color:tool === 'eraser' ? -1 : state.color};
   if (tool === 'fill') floodFill(cel.pixels, point.x, point.y, state.drawing.color, state.project.width, state.project.height);
   else if(tool==='replace') cel.pixels=replaceColor(cel.pixels,state.project.width,state.project.height,cel.pixels[point.y*state.project.width+point.x],state.drawing.color);
-  else drawPoints([point], state.drawing.color);
+  else {
+    const from=event.shiftKey?shiftLineStart(tool):null;
+    drawPoints(from?linePoints(from.x,from.y,point.x,point.y):[point], state.drawing.color);
+  }
   renderCanvas(); renderPreview();
 }
 function pointerMove(event) {
+  state.shiftHeld=event.shiftKey;
   const point = canvasPoint(event, !!state.drawing);
   state.cursor = inside(point) ? point : null;
   $('cursor-position').textContent = state.cursor ? `X ${String(point.x).padStart(2,'0')}   Y ${String(point.y).padStart(2,'0')}` : 'X —   Y —';
   const drawing = state.drawing;
   if (drawing && event.pointerId === drawing.pointerId) {
-    if(drawing.kind==='part-edit') {
+    if(drawing.kind==='part-select') {
+      moveInPlaceSelection(state.inPlaceEdit.session,drawing,point);
+      renderSelection();
+    } else if(drawing.kind==='part-edit') {
       moveInPlaceStroke(state.inPlaceEdit.session,drawing,point,event.shiftKey);
       renderInPlaceControls();
     } else if(drawing.tool==='object') {
@@ -1009,8 +1148,9 @@ function finishDrawing(cancel = false) {
   const drawing = state.drawing;
   if (!drawing) return false;
   state.drawing = null;
-  if(drawing.kind==='part-edit') {
-    finishInPlaceStroke(state.inPlaceEdit.session,drawing,cancel);
+  if(!cancel && ['pencil','eraser'].includes(drawing.tool))state.lastPaint={...drawing.last,documentId:state.documentId};
+  if(drawing.kind==='part-select' || drawing.kind==='part-edit') {
+    (drawing.kind==='part-select'?finishInPlaceSelection:finishInPlaceStroke)(state.inPlaceEdit.session,drawing,cancel);
     if($('pixel-canvas').hasPointerCapture(drawing.pointerId))$('pixel-canvas').releasePointerCapture(drawing.pointerId);
     renderTools();renderCanvas();renderPreview();return true;
   }
@@ -1298,6 +1438,33 @@ function importAITextDialog() {
     } catch(error) { $('ai-import-error').textContent=error.message; $('ai-import-error').hidden=false; }
   };
   $('ai-import-text').focus();
+}
+const PROJECT_FILE=/\.(pxa|pxs|pixel|json)$/i;
+function hasFiles(event) { return [...(event.dataTransfer?.types || [])].includes('Files'); }
+function showFileDrop(show) {
+  $('file-drop-hint').hidden=!show;
+}
+/** Open dropped projects in new tabs, one after another; a dropped PNG uses the PNG import dialog. */
+async function openDroppedFiles(files) {
+  if(state.inPlaceEdit){toast('Apply or cancel the canvas object edit before opening files.');return;}
+  const projects=files.filter(file=>PROJECT_FILE.test(file.name)), png=files.find(file=>/\.png$/i.test(file.name) || file.type==='image/png');
+  if(!projects.length && !png){toast('Drop a .pxa, .pxs or .pixel.json project, or a PNG image.');return;}
+  for(const file of projects)await importData(file);
+  if(png && !$('modal').open)await importPng(png);
+}
+function bindFileDrop() {
+  const stage=$('canvas-stage');
+  let depth=0;
+  stage.addEventListener('dragenter',event=>{if(!hasFiles(event))return;event.preventDefault();depth++;showFileDrop(true);});
+  stage.addEventListener('dragover',event=>{if(!hasFiles(event))return;event.preventDefault();event.dataTransfer.dropEffect='copy';});
+  stage.addEventListener('dragleave',event=>{if(!hasFiles(event))return;depth=Math.max(0,depth-1);if(!depth)showFileDrop(false);});
+  stage.addEventListener('drop',event=>{
+    if(!hasFiles(event))return;
+    event.preventDefault();depth=0;showFileDrop(false);
+    openDroppedFiles([...event.dataTransfer.files]);
+  });
+  // A file dropped beside the canvas should not navigate away from the editor.
+  for(const type of ['dragover','drop'])window.addEventListener(type,event=>{if(hasFiles(event) && !stage.contains(event.target))event.preventDefault();});
 }
 async function importData(file) {
   try {
@@ -1638,7 +1805,7 @@ function samplesDialog() {
   render();
 }
 function helpDialog() {
-  const shortcuts = [['V','Select / move objects'],['B','Pencil'],['E','Eraser'],['L','Straight line'],['F','Flood fill'],['U','Replace color'],['I / Alt','Pick a color'],['R','Square / rectangle'],['C','Circle / ellipse'],['S','Select / move pixels'],['[ / ]','Smaller / larger brush'],['⌘ / Ctrl + A','Select all pixels'],['⌘ / Ctrl + C / X / V','Copy / cut / paste pixels'],['Arrows / ⇧ + arrows','Nudge selection by 1 / 8 pixels'],['Delete','Clear selected pixels'],['Enter / Esc','Deselect pixels'],['Shift + drag','Square, circle, or 45° line'],['G','Toggle grid'],['O','Onion skin'],['Space','Play / pause preview'],['D','Duplicate frame'],['← / →','Previous / next frame'],['+ / −','Zoom in / out'],['0','Fit canvas'],['⌘ / Ctrl + Z','Undo'],['⌘ / Ctrl + ⇧ + Z','Redo'],['⌘ / Ctrl + S','Export pixel data']];
+  const shortcuts = [['V','Select / move objects'],['B','Pencil'],['E','Eraser'],['L','Straight line'],['F','Flood fill'],['U','Replace color'],['I / Alt','Pick a color'],['R','Square / rectangle'],['C','Circle / ellipse'],['S','Select / move pixels'],['[ / ]','Smaller / larger brush'],['⌘ / Ctrl + A','Select all pixels'],['⌘ / Ctrl + C / X / V','Copy / cut / paste pixels, or the selected object'],['⌘ / Ctrl + ⇧ + V','Paste object as an independent copy'],['⌘ / Ctrl + D','Duplicate selected object'],['⇧ + click','Straight pencil / eraser line from the last stroke'],['Arrows / ⇧ + arrows','Nudge selection by 1 / 8 pixels'],['Delete','Clear selected pixels'],['Enter / Esc','Deselect pixels'],['Shift + drag','Square, circle, or 45° line'],['Drag object rows','Reorder, or drop into a group'],['Right-click object row','Object menu'],['G','Toggle grid'],['O','Onion skin'],['Space','Play / pause preview'],['D','Duplicate frame'],['← / →','Previous / next frame'],['+ / −','Zoom in / out'],['0','Fit canvas'],['⌘ / Ctrl + Z','Undo'],['⌘ / Ctrl + ⇧ + Z','Redo'],['⌘ / Ctrl + S','Export pixel data']];
   openDialog('Small canvas. Handy shortcuts.', `<p class="modal-body-text">Draw with a mouse, pen, or finger. Right-click to erase. Brush size and symmetry live below the tools; flip and rotate actions live in Transform. Use the palette picker to recolor a slot in every frame, or Swap to exchange two colors. AI prompt creates a complete generation brief with the pixel format and an ordered animation plan, even from an empty project.</p><div class="shortcut-grid">${shortcuts.map(([key,action])=>`<span>${action}</span><kbd>${key}</kbd>`).join('')}</div><div class="notice">Each project tab has its own artwork and Undo history. New projects and imports open in new tabs. Close a tab and reopen it from Saved projects; projects autosave on this device. Collapse individual panel headings, or hide either sidebar with the buttons above the canvas.</div><p class="helper-text">Tools edit the active pixel object. Transform can affect one frame or the active pixel object across an animation or project. Mirror animation copies each frame’s placements while retaining shared part definitions. Set individual frame holds in milliseconds below the timeline. Choose Object (V) to select and move part instances; double-click one to edit its shared artwork in every appearance. Object edits default to the current animation. Groups are optional; use Ungroup to expose their objects. Export PXA 2 for editable objects and timings; PNGs combine visible artwork.</p>`, 'QUICK GUIDE');
 }
 function accountDialog() {
@@ -1649,6 +1816,11 @@ function accountDialog() {
 }
 
 function bindEvents() {
+  bindFileDrop();
+  // Holding Shift previews the straight line a pencil or eraser click will draw.
+  const trackShift=event=>{if(state.shiftHeld!==event.shiftKey){state.shiftHeld=event.shiftKey;if(state.cursor)renderCanvas();}};
+  window.addEventListener('keydown',trackShift);window.addEventListener('keyup',trackShift);
+  window.addEventListener('blur',()=>{state.shiftHeld=false;});
   $('prompt-builder-button').onclick=()=>promptBuilderDialog();
   $('ai-edit-button').onclick=aiEditDialog;
   $('edit-animation-ai').onclick=aiEditDialog;
@@ -1714,6 +1886,7 @@ function bindEvents() {
   $('zoom-out').onclick = () => setZoom(state.scale - 2);
   $('zoom-fit').onclick = () => { state.fit = true; fitCanvas(); };
   $('pixel-canvas').addEventListener('pointerdown',pointerDown);
+  $('canvas-stage').addEventListener('pointerdown',deselectObjectOutside);
   $('pixel-canvas').addEventListener('dblclick',doubleClickObject);
   $('pixel-canvas').addEventListener('pointermove',pointerMove);
   $('pixel-canvas').addEventListener('pointerup',pointerEnd);
@@ -1807,6 +1980,10 @@ function bindEvents() {
     if ((event.ctrlKey || event.metaKey) && key === 'a') {event.preventDefault();selectAllPixels();return;}
     if ((event.ctrlKey || event.metaKey) && key === 'c' && state.selection) {event.preventDefault();copySelectionPixels();return;}
     if ((event.ctrlKey || event.metaKey) && key === 'x' && state.selection) {event.preventDefault();copySelectionPixels(true);return;}
+    // Without a pixel selection, copy commands act on the selected object.
+    if ((event.ctrlKey || event.metaKey) && (key === 'c' || key === 'x') && !event.shiftKey) {event.preventDefault();copyObjectItem(selectedObject(),key==='x');return;}
+    if ((event.ctrlKey || event.metaKey) && key === 'd') {event.preventDefault();duplicateObjectItem(selectedObject());return;}
+    if ((event.ctrlKey || event.metaKey) && key === 'v' && state.objectClipboard && (state.lastClipboard==='object' || !state.clipboard)) {event.preventDefault();pasteObjectItem({independent:event.shiftKey});return;}
     if ((event.ctrlKey || event.metaKey) && key === 'v' && state.clipboard) {event.preventDefault();pasteClipboardPixels();return;}
     if (event.ctrlKey || event.metaKey) return;
     if (event.target.closest('button,a') && (key==='enter' || key===' ')) return;
@@ -1823,6 +2000,7 @@ function bindEvents() {
       if (key==='delete' || key==='backspace') { event.preventDefault(); clearSelectionPixels(); return; }
       if (key==='escape' || key==='enter') { event.preventDefault(); deselectPixels(); return; }
     }
+    if (key==='escape' && state.objectSelection && !state.inPlaceEdit) { event.preventDefault(); state.objectSelection=null; renderAll(); return; }
     const tool = {v:'object',b:'pencil',e:'eraser',l:'line',f:'fill',u:'replace',i:'eyedropper',r:'rectangle',c:'ellipse',s:'select'}[key];
     if (tool) { state.tool = tool; if(tool!=='select')state.selection=null; renderTools(); renderSelection(); renderCanvas(); return; }
     if (key === 'g') $('toggle-grid').click();

@@ -140,14 +140,14 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--green); }
 
 /* The drawing area keeps integer-sized pixels, including when zoomed. */
 .editor-column { min-width: 0; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr) 194px; overflow: hidden; }
-.canvas-panel { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.canvas-panel { position: relative; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .canvas-toolbar { height: 56px; flex: 0 0 56px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 20px; border-bottom: 1px solid var(--line); background: #fafbf7; }
 .canvas-title { display: flex; align-items: center; gap: 10px; font-size: 12px; font-weight: 630; color: #65735e; white-space: nowrap; }
 .dimension-badge { padding: 4px 6px; border: 1px solid #e5eadf; border-radius: 4px; background: #f1f4eb; color: #92a083; font-family: "SFMono-Regular", Consolas, monospace; font-size: 9px; font-weight: 400; }
 .canvas-options { display: flex; align-items: center; gap: 4px; }
 .toolbar-divider { display: block; width: 1px; height: 17px; margin: 0 6px; background: var(--line); flex: 0 0 auto; }
 .canvas-stage { position: relative; flex: 1 1 auto; display: flex; align-items: flex-start; min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 32px; background-color: #edf0e9; background-image: radial-gradient(#c2ccba80 .75px, transparent .75px); background-size: 16px 16px; }
-.canvas-wrap { flex: 0 0 auto; margin: auto; line-height: 0; background: white; outline: 8px solid white; box-shadow: 0 0 0 9px #d4dcd08c, 0 9px 26px #36482c12; }
+.canvas-wrap { position: relative; flex: 0 0 auto; margin: auto; line-height: 0; background: white; outline: 8px solid white; box-shadow: 0 0 0 9px #d4dcd08c, 0 9px 26px #36482c12; }
 #pixel-canvas { display: block; max-width: none; touch-action: none; cursor: crosshair; }
 #pixel-canvas:focus-visible { outline: 2px solid var(--green); outline-offset: 8px; }
 .canvas-bottom { display: flex; align-items: center; justify-content: space-between; gap: 8px; height: 43px; flex: 0 0 43px; padding: 0 16px; border-top: 1px solid #e0e6d9; background: #f8faf4; }
@@ -768,7 +768,6 @@ canvas.sheet-export-preview { display: block; width: 100%; height: auto; max-hei
   .selection-buttons .icon-button { width: 36px; height: 36px; padding: 9px; }
   .selection-buttons .button { height: 36px; min-height: 36px; padding: 7px 10px; }
   .selection-move-help { font-size: 10px; }
-  .editor-column:has(.selection-actions:not([hidden])) { height: min(756px, max(686px, calc(80dvh + 76px))); }
 }
 
 
@@ -941,7 +940,6 @@ textarea.ai-text-input::placeholder { color: #7b8872; }
   .project-tab-close { flex-basis: 30px; width: 30px; height: 38px; margin-right: 1px; padding: 8px; }
   .workbench { height: auto; }
   .editor-column { height: min(760px, max(708px, 90dvh)); grid-template-rows: minmax(0, 1fr) 252px; }
-  .editor-column:has(.selection-actions:not([hidden])) { height: min(860px, max(806px, calc(90dvh + 98px))); }
   .left-panel { gap: 20px; padding: 18px; }
   .panel-section > .section-heading { min-height: 36px; }
   .panel-section > .section-heading h2 { font-size: 11px; letter-spacing: 1px; }
@@ -1127,3 +1125,34 @@ textarea.ai-text-input::placeholder { color: #7b8872; }
   .prompt-preview-details > summary > svg { margin-left: auto; }
   .prompt-builder .field #prompt-output { font-size: 13px; }
 }
+
+/* Dropping project files or PNGs on the canvas */
+.file-drop-hint { position: absolute; left: 0; right: 0; z-index: 5; display: grid; place-items: center; padding: 16px; pointer-events: none; background: #e6f3e9d9; outline: 3px dashed var(--green); outline-offset: -12px; }
+.file-drop-card { display: grid; justify-items: center; gap: 6px; max-width: 320px; padding: 22px 26px; border-radius: 14px; background: white; box-shadow: 0 12px 32px #36482c24; text-align: center; color: var(--green); }
+.file-drop-card svg { width: 30px; height: 30px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.file-drop-card strong { font-size: 15px; color: #1f2b22; }
+.file-drop-card span { font-size: 11px; color: #6c7764; line-height: 1.45; }
+
+/* Selected object on the canvas */
+.object-highlight { --hl: #ff2d87; position: absolute; box-sizing: border-box; pointer-events: none; border-radius: 2px;
+  background:
+    linear-gradient(90deg,#fff 50%,transparent 0) top / 10px 2px repeat-x,
+    linear-gradient(90deg,#fff 50%,transparent 0) bottom / 10px 2px repeat-x,
+    linear-gradient(0deg,#fff 50%,transparent 0) left / 2px 10px repeat-y,
+    linear-gradient(0deg,#fff 50%,transparent 0) right / 2px 10px repeat-y;
+  outline: 2px solid var(--hl); outline-offset: -2px; opacity: .7; }
+.object-highlight.is-active { opacity: 1; animation: object-ants .6s linear infinite, object-glow 1.4s ease-in-out infinite; }
+.object-highlight-label { position: absolute; left: -2px; bottom: 100%; margin-bottom: 3px; max-width: 220px; padding: 2px 7px; border-radius: 4px; background: var(--hl); color: #fff; font: 600 10px/16px system-ui, sans-serif; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: none; }
+.object-highlight.is-active .object-highlight-label:not(:empty) { display: block; }
+.object-highlight.label-below .object-highlight-label { bottom: auto; top: 100%; margin: 3px 0 0; }
+@keyframes object-ants { to { background-position: 10px 0, -10px 100%, 0 -10px, 100% 10px; } }
+@keyframes object-glow { 0%,100% { box-shadow: 0 0 0 1px #ff2d8733, 0 0 8px 1px #ff2d8755; } 50% { box-shadow: 0 0 0 3px #ff2d8744, 0 0 16px 4px #ff2d8788; } }
+@media (prefers-reduced-motion: reduce) { .object-highlight.is-active { animation: none; box-shadow: 0 0 0 3px #ff2d8744; } }
+
+/* The selection bar floats over the canvas so switching to Select never moves the artwork. */
+.canvas-stage-wrap { position: relative; flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.canvas-stage-wrap > .canvas-stage { flex: 1 1 auto; }
+.selection-actions { position: absolute; z-index: 4; top: 8px; left: 50%; transform: translateX(-50%); display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px 10px; width: max-content; max-width: calc(100% - 16px); padding: 4px 4px 4px 12px; border: 1px solid #d3dfc9; border-radius: 10px; background: #fffefbf2; box-shadow: 0 6px 18px #36482c1f; backdrop-filter: blur(6px); }
+.selection-actions .selection-info { max-width: 220px; }
+.selection-actions .selection-buttons { justify-content: flex-end; gap: 3px; }
+.file-drop-hint { top: 0; bottom: 0; }

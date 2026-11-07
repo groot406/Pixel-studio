@@ -1228,7 +1228,14 @@ body.is-resizing-panels { cursor: col-resize; }
 .floating-panel:hover .float-resize-se::after, .floating-panel.resizing .float-resize-se::after { border-color: var(--green); opacity: 1; }
 .floating-panel.resizing { box-shadow: 0 0 0 2px #2f6b4f55, 0 18px 48px #1c2b2230; }
 .panel-section.is-floating > .section-heading { display: none; }
-.floating-panel .preview-stage { aspect-ratio: auto; min-height: 120px; height: calc(100% - 90px); }
+/* A floating window's content grows with it: the body is a size container, lists drop their docked height caps and
+   the preview stage takes the space left above its controls (~88px), its canvas scaling up crisply. */
+.float-body { container-type: size; }
+.floating-panel .layer-list, .floating-panel .object-list, .floating-panel .part-strip { max-height: none; }
+.floating-panel .part-strip { grid-template-columns: repeat(auto-fill, minmax(clamp(58px, 18cqw, 104px), 1fr)); }
+.floating-panel .part-thumb canvas { width: 100%; max-width: clamp(40px, 13cqw, 80px); height: auto; aspect-ratio: 1; }
+.floating-panel .preview-stage { aspect-ratio: auto; height: max(120px, calc(100cqh - 88px)); }
+.floating-panel #preview-canvas { position: absolute; inset: 12px; width: calc(100% - 24px); height: calc(100% - 24px); max-width: 1024px; image-rendering: pixelated; object-fit: contain; }
 @media (max-width: 760px) {
   .panel-splitter, .panel-popout, .floating-panel { display: none; }
 }

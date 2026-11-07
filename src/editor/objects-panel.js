@@ -19,14 +19,14 @@ function uses(project) {
   return partId=>seen.get(partId)?.size || 0;
 }
 
-export function renderObjectsPanel({project,animation,frame,selected,scope,collapsed,canPaste,onSelect,onAction,onScope,onDrop,paint}) {
+export function renderObjectsPanel({project,animation,frame,selected,selection=[],scope,collapsed,canPaste,onSelect,onAction,onScope,onDrop,paint}) {
   closeMenu();
   const useCount=uses(project);
   const list=document.getElementById('object-list'), stacks=frameObjects(project,animation,frame), rows=[];
   const images=renderParts(project.parts || []);
   const row=(stack,node,group=false)=>{
     const {layer}=stack, instance=node?.instance, key=group?'@group':node.key;
-    const active=selected?.layerId===layer.id && selected.key===key;
+    const active=selection.some(item=>item.layerId===layer.id && item.key===key) || (selected?.layerId===layer.id && selected.key===key && !selection.length);
     const visible=group?layer.visible:instance?layer.visible && instance.visible!==false:layer.visible;
     const locked=group?layer.locked:Boolean(layer.locked || instance?.locked);
     const name=group?layer.name:node.type==='pixels' && stack.children.length===1?layer.name:node.name;
@@ -34,7 +34,7 @@ export function renderObjectsPanel({project,animation,frame,selected,scope,colla
     const kind=group?`Group · ${stack.children.length} item${stack.children.length===1?'':'s'}`:instance?(count>1?`Shared part · ${count} uses`:'Part'):node.type==='overrides'?'Local edits':'Pixels';
     const outer=group || (!stack.grouped && stack.children.length===1);
     const index=rows.length; rows.push({layerId:layer.id,key,node,group,outer,locked});
-    return `<div class="object-row${group?' object-group':''}${active?' selected':''}${!visible?' is-hidden':''}${!group && stack.grouped?' object-child':''}" data-object-row="${index}" draggable="${!locked}" title="Drag to reorder or move into a group · right-click for more">
+    return `<div class="object-row${group?' object-group':''}${active?' selected':''}${!visible?' is-hidden':''}${!group && stack.grouped?' object-child':''}" data-object-row="${index}" draggable="${!locked}" title="Drag to reorder or move into a group · Shift/Ctrl-click to select several · right-click for more">
       ${group?`<button class="object-collapse icon-button" aria-label="${collapsed.has(layer.id)?'Expand':'Collapse'} ${escape(name)} group" aria-expanded="${!collapsed.has(layer.id)}">${icon('chevron')}</button>`:'<span class="object-indent"></span>'}
       <button class="object-select" aria-pressed="${active}" aria-label="Select ${escape(name)} ${group?'group':'object'}"><canvas width="24" height="24" class="layer-thumb"></canvas><span class="object-copy"><span class="object-name">${escape(name)}</span><small>${kind}${locked?' · Locked':''}${!layer.visible && !group?' · Group hidden':''}</small></span></button>
       <button class="icon-button object-visibility" aria-label="${visible?'Hide':'Show'} ${escape(name)} ${group?'group':'object'}" aria-pressed="${visible}" ${!group && !instance && stack.grouped?'disabled':''}>${icon(visible?'eye':'eye-off')}</button>
@@ -51,12 +51,12 @@ export function renderObjectsPanel({project,animation,frame,selected,scope,colla
     let pixels=cel.pixels;
     if(!item.group && cel.source) pixels=renderOperations(item.node.type==='overrides'?cel.source.overrides:cel.source.ops.slice(item.node.start,item.node.end),project.width,project.height,images);
     paint(element.querySelector('canvas'),pixels,project.palette,true);
-    element.querySelector('.object-select').onclick=()=>onSelect(item);
+    element.querySelector('.object-select').onclick=event=>onSelect(item,event.shiftKey || event.ctrlKey || event.metaKey);
     element.querySelector('.object-select').ondblclick=()=>{if(item.node?.instance)onAction('edit',item);};
     element.querySelector('.object-visibility').onclick=()=>onAction('visibility',item);
     element.querySelector('.object-lock').onclick=()=>onAction('lock',item);
     element.querySelector('.object-collapse')?.addEventListener('click',()=>onAction('collapse',item));
-    element.addEventListener('contextmenu',event=>{event.preventDefault();if(!(selected?.layerId===item.layerId && selected.key===item.key))onSelect(item);openMenu(item,event);});
+    element.addEventListener('contextmenu',event=>{event.preventDefault();if(!selection.some(s=>s.layerId===item.layerId && s.key===item.key))onSelect(item);openMenu(item,event);});
     element.addEventListener('dragstart',event=>{
       drag=item;element.classList.add('dragging');list.classList.add('is-dragging');
       event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('text/plain',item.key);
@@ -79,7 +79,18 @@ export function renderObjectsPanel({project,animation,frame,selected,scope,colla
   const openMenu=(item,event)=>{
     closeMenu();
     const instance=item.node?.instance, pixels=item.node?.type==='pixels', editable=!item.locked;
-    const entries=[
+    const many=selection.length>1 && selection.some(s=>s.layerId===item.layerId && s.key===item.key), n=selection.length;
+    const turns=[['turn-right','Turn 90° clockwise','redo'],['turn-left','Turn 90° counter-clockwise','undo'],['flip-x','Flip horizontally','swap'],['flip-y','Flip vertically','swap']];
+    const entries=many?[
+      ['copy',`Copy ${n} objects`,'copy',true],
+      ['cut',`Cut ${n} objects`,'cut',true],
+      ['paste','Paste','paste',canPaste],
+      ['duplicate',`Duplicate ${n} objects`,'copy',true],
+      null,
+      ...turns.map(t=>[...t,true]),
+      null,
+      ['delete',`Delete ${n} objects`,'trash',true],
+    ]:[
       instance && ['edit','Edit on canvas','pencil',editable],
       ['copy','Copy','copy',true],
       ['cut','Cut','cut',editable],
@@ -92,6 +103,7 @@ export function renderObjectsPanel({project,animation,frame,selected,scope,colla
       instance && ['move-group','Move to group…','layers',editable],
       instance && ['independent','Make independent','spark',editable],
       instance && ['isolated','Open isolated editor','fit',true],
+      ...(instance?turns.map(t=>[...t,editable]):[]),
       pixels && ['convert','Convert to object','object-new',editable],
       pixels && ['split','Split into objects…','split',editable],
       null,
@@ -120,19 +132,20 @@ export function renderObjectsPanel({project,animation,frame,selected,scope,colla
   document.getElementById('object-count').textContent=stacks.reduce((n,s)=>n+s.children.length,0);
   document.getElementById('object-scope').value=scope;
   document.getElementById('object-scope').onchange=event=>onScope(event.target.value);
-  const editable=Boolean(item && !locked);
-  document.getElementById('edit-shared-object').disabled=!item?.node?.instance;
-  document.getElementById('object-isolated-edit').disabled=!item?.node?.instance;
-  document.getElementById('object-independent').disabled=!item?.node?.instance || locked;
-  document.getElementById('object-delete').disabled=!editable;
+  const many=selection.length>1, editable=Boolean(item && !locked && !many);
+  document.getElementById('edit-shared-object').disabled=!item?.node?.instance || many;
+  document.getElementById('object-isolated-edit').disabled=!item?.node?.instance || many;
+  document.getElementById('object-independent').disabled=!item?.node?.instance || locked || many;
+  document.getElementById('object-delete').disabled=!item || (!many && locked);
   document.getElementById('object-rename').disabled=!editable || (!item?.group && !item?.node?.instance && (stack?.grouped || siblings.length>1));
-  document.getElementById('object-ungroup').disabled=!stack?.grouped || locked;
-  document.getElementById('object-move-group').disabled=!item?.node?.instance || locked;
+  document.getElementById('object-ungroup').disabled=!stack?.grouped || locked || many;
+  document.getElementById('object-move-group').disabled=!item?.node?.instance || locked || many;
   const outerIndex=stacks.findIndex(s=>s.layer.id===layer?.id);
   const outer=item?.group || (siblings.length===1 && !stack?.grouped);
   document.getElementById('object-up').disabled=!editable || (outer?outerIndex>=stacks.length-1:index>=siblings.length-1 || item?.node?.type==='overrides' || siblings[index+1]?.type==='overrides');
   document.getElementById('object-down').disabled=!editable || (outer?outerIndex<=0:index<=0 || item?.node?.type==='overrides' || siblings[index-1]?.type==='overrides');
-  document.getElementById('object-detail').textContent=item?.node?.instance
+  document.getElementById('object-detail').textContent=many?`${selection.length} objects selected · copy, paste, duplicate, delete, nudge and drag apply to all. Shift/Ctrl-click to add or remove.`
+    : item?.node?.instance
     ? `${item.node.instance.partId} · ${item.node.instance.x}, ${item.node.instance.y} · double-click to edit, drag to reorder`
     : item?.group?'Group visibility and locks apply across the project. Group order follows the selected editing scope.':'Drag rows to reorder or into a group. Right-click for copy, paste and more.';
   document.getElementById('object-copy').disabled=!item;

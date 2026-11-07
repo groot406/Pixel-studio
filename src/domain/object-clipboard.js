@@ -1,7 +1,7 @@
 /** Copy objects between frames, animations and projects. Clipboards are plain JSON and carry their own palette and part definitions. */
 import { validateProject, insertProjectLayer, uid, nearestColor, MAX_COLORS, MAX_LAYERS, MAX_TOTAL_PIXELS } from './project.js';
 import { cloneArtwork, sourceForCel, renderOperations, renderParts } from './artwork.js';
-import { celObjects, objectBounds } from './objects.js';
+import { celObjects, objectBounds, orderObjects } from './objects.js';
 import { nextPartId } from './parts.js';
 
 export const OBJECT_CLIPBOARD_FORMAT = 'pixel-studio-object';
@@ -54,13 +54,37 @@ export function copyObject(project, target, key) {
     const op = node.instance, frames = {};
     for (const f of animation.frames) {
       const pose = celIn(f).source?.ops.find(o => o.type === 'use' && o.id === op.id && o.partId === op.partId);
-      if (pose) frames[f.id] = { x: pose.x, y: pose.y, transform: pose.transform, width: pose.width, height: pose.height };
+      if (pose) frames[f.id] = { x: pose.x, y: pose.y, transform: pose.transform, width: pose.width, height: pose.height, angle: pose.angle };
     }
-    return { ...base, kind: 'instance', name: node.name, instance: { id: op.id, partId: op.partId, x: op.x, y: op.y, transform: op.transform, width: op.width, height: op.height }, frames, parts: usedParts([op]) };
+    return { ...base, kind: 'instance', name: node.name, instance: { id: op.id, partId: op.partId, x: op.x, y: op.y, transform: op.transform, width: op.width, height: op.height, angle: op.angle }, frames, parts: usedParts([op]) };
   }
   const ops = node.type === 'overrides' ? cel.source.overrides : cel.source.ops.slice(node.start, node.end);
   return { ...base, kind: 'container', name: nodes.length === 1 ? layer.name : node.name, group: false,
     source: node.type === 'overrides' ? null : { ops: cloneArtwork(ops), overrides: [] }, pixels: renderOperations(ops, project.width, project.height), parts: [] };
+}
+
+/** Copy several objects of one frame; one item gives a normal clipboard, more give a `multi` clipboard in stacking order. */
+export function copyObjects(project, target, items) {
+  const frame = locate(project, target).frame, ordered = orderObjects(project, frame, items);
+  if (!ordered.length) throw new Error('Select an object to copy.');
+  if (ordered.length === 1) return copyObject(project, { ...target, layerId: ordered[0].layerId }, ordered[0].key);
+  return { format: OBJECT_CLIPBOARD_FORMAT, version: 1, kind: 'multi', name: `${ordered.length} objects`,
+    items: ordered.map(item => copyObject(project, { ...target, layerId: item.layerId }, item.key)) };
+}
+
+/** Paste a `multi` clipboard bottom to top, each item above the previous one, so the copied stacking order is kept. */
+function pasteObjects(project, target, clip, options) {
+  if (!Array.isArray(clip.items) || !clip.items.length || clip.items.length > MAX_LAYERS) throw new Error('The copied objects are incomplete.');
+  const host = project.layers.find(l => l.id === target.layerId), group = host && host.group !== false && !host.locked ? host.id : null;
+  let p = project, layerId = target.layerId;
+  const items = [];
+  for (const item of clip.items) {
+    if (item?.kind === 'multi') throw new Error('The copied objects are incomplete.');
+    const result = pasteObject(p, { ...target, layerId }, item, { ...options, intoGroup: layerId === group });
+    p = result.project; layerId = result.layerId;
+    items.push({ layerId: result.layerId, key: result.key });
+  }
+  return { project: p, layerId, key: items.at(-1).key, items };
 }
 
 function readClipboard(clip) {
@@ -99,7 +123,8 @@ function addContainer(p, afterId, name, group) {
  * With `fill`, frames where the object was absent or empty get the copied frame's version, so it appears in every frame;
  * without it (Duplicate), only frames that had the object get a copy.
  */
-export function pasteObject(project, target, clipboard, { scope = 'animation', independent = false, offset = 0, fill = true } = {}) {
+export function pasteObject(project, target, clipboard, { scope = 'animation', independent = false, offset = 0, fill = true, intoGroup = true } = {}) {
+  if (clipboard?.kind === 'multi' && clipboard.format === OBJECT_CLIPBOARD_FORMAT) return pasteObjects(project, target, clipboard, { scope, independent, offset, fill });
   const clip = readClipboard(clipboard);
   if (!['frame', 'animation'].includes(scope)) throw new Error('Choose current frame or current animation.');
   const p = validateProject(project), { animation, frame } = locate(p, target);
@@ -127,16 +152,16 @@ export function pasteObject(project, target, clipboard, { scope = 'animation', i
     const part = p.parts.find(x => x.id === partIds.get(clip.instance.partId));
     if (!part) throw new Error('The copied object is incomplete.');
     p.version = 3; p.parts ||= [];
-    const layer = host && host.group !== false && !host.locked ? host : addContainer(p, target.layerId, clip.name, false);
+    const layer = intoGroup && host && host.group !== false && !host.locked ? host : addContainer(p, target.layerId, clip.name, false);
     const celOf = f => f.cels.find(c => c.layerId === layer.id);
     const poses = new Map();
     for (const f of frames) {
       const pose = perFrame ? clip.frames[f.id] || (fill ? clip.instance : null) : clip.instance;
       if (!pose) continue;
       let x = pose.x + offset, y = pose.y + offset;
-      const size = { width: pose.width, height: pose.height };
+      const size = { width: pose.width, height: pose.height, angle: pose.angle };
       const bounds = objectBounds(p, { type: 'instance', instance: { partId: part.id, transform: pose.transform, x, y, ...size } });
-      if (!perFrame && (x >= p.width || y >= p.height || x + bounds.width <= 0 || y + bounds.height <= 0)) { x = 0; y = 0; }
+      if (!perFrame && (bounds.x >= p.width || bounds.y >= p.height || bounds.x + bounds.width <= 0 || bounds.y + bounds.height <= 0)) { x -= bounds.x; y -= bounds.y; }
       poses.set(f, { x, y, transform: pose.transform, ...size });
     }
     let id = clip.instance.id, n = 2;
@@ -146,7 +171,7 @@ export function pasteObject(project, target, clipboard, { scope = 'animation', i
       cel.source = sourceForCel(cel, p.width);
       cel.source.ops.push({ type: 'use', id, partId: part.id, ...pose, name: clip.name.slice(0, 80) });
     }
-    return { project: validateProject(p), layerId: layer.id, key: id };
+    return { project: validateProject(p), layerId: layer.id, key: id, items: [{ layerId: layer.id, key: id }] };
   }
   const layer = addContainer(p, host ? host.id : p.layers.at(-1).id, clip.name, Boolean(clip.group));
   for (const f of frames) {
@@ -166,7 +191,8 @@ export function pasteObject(project, target, clipboard, { scope = 'animation', i
     }
   }
   const clean = validateProject(p), cel = clean.animations.find(a => a.id === animation.id).frames.find(f => f.id === frame.id).cels.find(c => c.layerId === layer.id);
-  return { project: clean, layerId: layer.id, key: layer.group ? '@group' : celObjects(cel).at(-1).key };
+  const key = layer.group ? '@group' : celObjects(cel).at(-1).key;
+  return { project: clean, layerId: layer.id, key, items: [{ layerId: layer.id, key }] };
 }
 
 /** Bounding box of a node's visible pixels in one frame, for canvas highlighting. */

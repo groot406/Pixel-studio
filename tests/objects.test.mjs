@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { decodeAIProject, encodeAIProject } from '../src/formats/pxa.js';
 import { encodePixelProject, decodePixelProject } from '../src/formats/pxs.js';
 import { validateProject, compositeFrame, makeLayeredFrame, blankProject, getAnimationLayers } from '../src/domain/project.js';
-import { copyObject, pasteObject } from '../src/domain/object-clipboard.js';
-import { celObjects, frameObjects, reorderObject, reorderObjectContainer, translateObject, forkObject, updateObject, deleteObject, addObjectContainer, moveObjectToGroup, removeObjectContainer, hitTestObject, objectBounds, placeObject, dropObject, placeObjectContainer } from '../src/domain/objects.js';
+import { copyObject, pasteObject, copyObjects } from '../src/domain/object-clipboard.js';
+import { celObjects, frameObjects, reorderObject, reorderObjectContainer, translateObject, forkObject, updateObject, deleteObject, addObjectContainer, moveObjectToGroup, removeObjectContainer, hitTestObject, objectBounds, placeObject, dropObject, placeObjectContainer, orderObjects, translateObjects, deleteObjects } from '../src/domain/objects.js';
 import { paintSharedPart, flattenCel } from '../src/domain/parts.js';
 import { createAIRequest, prepareAIResult } from '../src/features/ai/requests.js';
 import { projectFingerprint } from '../src/features/ai/patch-engine.js';
@@ -235,4 +235,39 @@ test('dropping rows moves instances between groups, creates stacks beside groups
   assert.deepEqual(compositeFrame(back.project,back.project.animations[0].frames[1]).length,p.width*p.height);
   // Pixel runs cannot leave their group.
   assert.throws(()=>dropObject(p,target,{layerId:sparkle,key:'pixels'},{layerId:'effects',key:'glint'},'above'),/stays in its group/);
+});
+
+test('several objects can be ordered, copied, pasted, moved and deleted together',()=>{
+  const p=overlapping(), frame=p.animations[0].frames[0];
+  const mixed=[{layerId:'effects',key:'square'},{layerId:'back',key:'pixels-0'},{layerId:'effects',key:'glint'},{layerId:'effects',key:'glint'},{layerId:'gone',key:'x'}];
+  assert.deepEqual(orderObjects(p,frame,mixed),[{layerId:'back',key:'pixels-0'},{layerId:'effects',key:'glint'},{layerId:'effects',key:'square'}]);
+  assert.deepEqual(orderObjects(p,frame,[{layerId:'effects',key:'square'},{layerId:'effects',key:'@group'}]),[{layerId:'effects',key:'@group'}]);
+  assert.equal(copyObjects(p,target,[{layerId:'effects',key:'glint'}]).kind,'instance');
+
+  // Into the selected group: both instances land in it, in the copied order, with fresh ids.
+  const pair=JSON.parse(JSON.stringify(copyObjects(p,target,[{layerId:'effects',key:'square'},{layerId:'effects',key:'glint'}])));
+  assert.equal(pair.kind,'multi');assert.deepEqual(pair.items.map(i=>i.instance.id),['glint','square']);
+  const again=pasteObject(p,target,pair,{scope:'animation'});
+  assert.deepEqual(again.items.map(i=>i.layerId),['effects','effects']);
+  const ids=again.project.animations[0].frames[0].cels.find(c=>c.layerId==='effects').source.ops.filter(o=>o.type==='use').map(o=>o.id);
+  assert.deepEqual(ids.slice(-2),again.items.map(i=>i.key));assert.equal(new Set(ids).size,ids.length);
+
+  // Into another animation: each item gets its own row, stacked bottom to top.
+  const all=copyObjects(p,target,mixed), still={animationId:'still',frameId:'f3',layerId:'back'};
+  const pasted=pasteObject(p,still,all,{scope:'animation'});
+  const order=pasted.project.layers.map(l=>l.id), rows=pasted.items.map(i=>order.indexOf(i.layerId));
+  assert.equal(pasted.items.length,3);assert.deepEqual(rows,[...rows].sort((a,b)=>a-b));assert.equal(new Set(rows).size,3);
+  assert.deepEqual(pasted.items.slice(1).map(i=>i.key),['glint','square']);
+
+  const moved=translateObjects(p,target,mixed,2,-1,'animation');
+  assert.equal(moved.moved,2);
+  for(const f of moved.project.animations[0].frames)for(const op of f.cels.find(c=>c.layerId==='effects').source.ops.filter(o=>o.type==='use')) {
+    const was=p.animations[0].frames.find(x=>x.id===f.id).cels.find(c=>c.layerId==='effects').source.ops.find(o=>o.id===op.id);
+    assert.deepEqual([op.x,op.y],[was.x+2,was.y-1]);
+  }
+  assert.throws(()=>translateObjects(p,target,[{layerId:'back',key:'pixels-0'}],1,0),/placed objects/);
+
+  const deleted=deleteObjects(p,target,[{layerId:'effects',key:'glint'},{layerId:'effects',key:'square'}],'frame');
+  assert.ok(!celObjects(deleted.animations[0].frames[0].cels.find(c=>c.layerId==='effects')).some(n=>n.instance));
+  assert.ok(celObjects(deleted.animations[0].frames[1].cels.find(c=>c.layerId==='effects')).some(n=>n.key==='glint'));
 });

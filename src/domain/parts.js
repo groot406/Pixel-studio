@@ -1,6 +1,6 @@
 /** Part editing use cases shared by the editor's part controls. */
 import { validateProject, MAX_SIZE } from './project.js';
-import { grownInstanceShift } from './geometry.js';
+import { grownInstanceShift, transformedSize } from './geometry.js';
 import { sourceForCel, pixelSpans, cloneArtwork, artworkId, renderOperations, hasLockedInstances } from './artwork.js';
 
 export function referencesToPart(project, partId) {
@@ -94,6 +94,17 @@ export function flattenCel(project,target) {
 }
 
 /**
+ * A free angle turns about the box centre, which moves when the box grows by d = shift + (new − old size)/2.
+ * Moving the origin by shift − (I − R)·d keeps the old pixels in place; it is rounded to the nearest pixel.
+ */
+function keepRotatedCentre(op,shift,before,after) {
+  if(!op.angle)return;
+  const r=op.angle*Math.PI/180, cos=Math.cos(r), sin=Math.sin(r);
+  const dx=shift.x+(after.width-before.width)/2, dy=shift.y+(after.height-before.height)/2;
+  shift.x=Math.round(shift.x-(dx-(dx*cos-dy*sin)));
+  shift.y=Math.round(shift.y-(dy-(dx*sin+dy*cos)));
+}
+/**
  * Grow a part's canvas by padding it on each side. Existing artwork keeps its canvas position in every
  * instance, whatever its transform.
  */
@@ -108,15 +119,19 @@ export function growPart(project,partId,{left=0,top=0,right=0,bottom=0}) {
   Object.assign(part,after);
   for(const a of p.animations) for(const f of a.frames) for(const c of f.cels) for(const op of c.source?.ops || []) {
     if(op.type!=='use' || op.partId!==partId) continue;
+    const box=transformedSize(op,before);
     if(op.width===undefined && op.height===undefined) {
       const shift=grownInstanceShift(op.transform,before,after,left,top);
+      keepRotatedCentre(op,shift,box,transformedSize(op,after));
       op.x+=shift.x; op.y+=shift.y; continue;
     }
     // Resized instances keep their scale: padding grows by the same factor so the artwork stays put (to the pixel).
     const sx=(op.width??before.width)/before.width, sy=(op.height??before.height)/before.height;
     const shown={width:Math.round(after.width*sx),height:Math.round(after.height*sy)};
     const shift=grownInstanceShift(op.transform,{width:op.width??before.width,height:op.height??before.height},shown,Math.round(left*sx),Math.round(top*sy));
-    op.width=shown.width; op.height=shown.height; op.x+=shift.x; op.y+=shift.y;
+    op.width=shown.width; op.height=shown.height;
+    keepRotatedCentre(op,shift,box,transformedSize(op,before));
+    op.x+=shift.x; op.y+=shift.y;
   }
   return validateProject(p);
 }

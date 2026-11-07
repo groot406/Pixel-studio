@@ -1,7 +1,7 @@
 /** Object editing over the established cel format. Groups retain isolated erase/override semantics. */
 import { validateProject, getAnimationLayers, insertProjectLayer, removeProjectLayer, uid, MAX_LAYERS, MAX_TOTAL_PIXELS } from './project.js';
 import { cloneArtwork, sourceForCel, renderParts, hasLockedInstances } from './artwork.js';
-import { linePoints, ellipsePoints, canvasToPartPoint, instanceSize } from './geometry.js';
+import { linePoints, ellipsePoints, canvasToPartPoint, instanceSize, instanceBox, transformedSize, swapsAxes, composeTransform } from './geometry.js';
 import { nextPartId } from './parts.js';
 
 export function celObjects(cel) {
@@ -143,7 +143,8 @@ export function resizeObject(project,target,key,box,scope='animation') {
   const {p,layer,frame,frames}=context(project,target,scope);
   const here=frame.cels.find(c=>c.layerId===layer.id).source?.ops.find(op=>op.type==='use' && op.id===key);
   if(!here) throw new Error('Choose an object in this frame.');
-  const part=p.parts.find(part=>part.id===here.partId), rotated=['R90','R270'].includes(here.transform);
+  if(here.angle) throw new Error('Reset the rotation before resizing with handles.');
+  const part=p.parts.find(part=>part.id===here.partId), rotated=swapsAxes(here.transform);
   const size={width:rotated?box.height:box.width,height:rotated?box.width:box.height};
   const dx=box.x-here.x, dy=box.y-here.y;
   for(const frame of frames) {
@@ -166,6 +167,87 @@ export function translateObject(project,target,key,dx,dy,scope='animation') {
     unlocked(layer,{instance:op}); op.x+=dx;op.y+=dy;
   }
   return validateProject(p);
+}
+
+/** Selected objects of one frame without duplicates or children of a selected group, bottom to top (layer order, then stack order). */
+export function orderObjects(project,frame,items) {
+  const seen=new Set(), groups=new Set(items.filter(i=>i.key==='@group').map(i=>i.layerId));
+  const rank=new Map(project.layers.map((l,i)=>[l.id,i]));
+  return items.filter(item=>{
+    const id=`${item.layerId}/${item.key}`;
+    if(seen.has(id) || !rank.has(item.layerId) || (item.key!=='@group' && groups.has(item.layerId)))return false;
+    seen.add(id);
+    const cel=frame.cels.find(c=>c.layerId===item.layerId);
+    return Boolean(cel) && (item.key==='@group' || celObjects(cel).some(n=>n.key===item.key));
+  }).map(item=>({layerId:item.layerId,key:item.key,index:item.key==='@group'?-1:celObjects(frame.cels.find(c=>c.layerId===item.layerId)).findIndex(n=>n.key===item.key)}))
+    .sort((a,b)=>rank.get(a.layerId)-rank.get(b.layerId) || a.index-b.index).map(({layerId,key})=>({layerId,key}));
+}
+
+/** Move every selected placed object by the same amount; pixel objects stay put. Returns the project and how many moved. */
+export function translateObjects(project,target,items,dx,dy,scope='animation') {
+  const frame=project.animations.find(a=>a.id===target.animationId)?.frames.find(f=>f.id===target.frameId);
+  if(!frame)throw new Error('This object no longer exists.');
+  let p=project, moved=0;
+  for(const item of orderObjects(project,frame,items)) {
+    const node=celObjects(frame.cels.find(c=>c.layerId===item.layerId)).find(n=>n.key===item.key);
+    if(!node?.instance)continue;
+    p=translateObject(p,{...target,layerId:item.layerId},item.key,dx,dy,scope);moved++;
+  }
+  if(!moved)throw new Error('Only placed objects can be moved.');
+  return {project:p,moved};
+}
+
+function eachSelectedInstance(project,target,items,scope,change) {
+  const frame=project.animations.find(a=>a.id===target.animationId)?.frames.find(f=>f.id===target.frameId);
+  if(!frame)throw new Error('This object no longer exists.');
+  const instances=orderObjects(project,frame,items).filter(item=>celObjects(frame.cels.find(c=>c.layerId===item.layerId)).find(n=>n.key===item.key)?.instance);
+  if(!instances.length)throw new Error('Only placed objects can be turned or rotated.');
+  const {p,frames}=context(project,target,scope);
+  for(const item of instances) {
+    const layer=p.layers.find(l=>l.id===item.layerId);
+    const partId=frame.cels.find(c=>c.layerId===item.layerId).source.ops.find(op=>op.type==='use' && op.id===item.key).partId;
+    for(const f of frames) {
+      const op=f.cels.find(c=>c.layerId===layer.id).source?.ops.find(op=>op.type==='use' && op.id===item.key);
+      if(!op || op.partId!==partId)continue;
+      unlocked(layer,{instance:op});
+      change(op,p.parts.find(part=>part.id===op.partId));
+    }
+  }
+  return validateProject(p);
+}
+
+/**
+ * Lossless quarter turns and flips of each selected object about its own centre. Turns compose with the stored
+ * transform (R90·Rθ = Rθ·R90); flips also negate a free angle (FX·Rθ = R−θ·FX), so the result is exactly mirrored.
+ * When width and height swap, the origin moves by trunc((w−h)/2), which returns to the start after a full turn.
+ */
+export function turnObjects(project,target,items,turn,scope='animation') {
+  if(!['R90','R180','R270','FX','FY'].includes(turn))throw new Error('Choose a quarter turn or a flip.');
+  return eachSelectedInstance(project,target,items,scope,(op,part)=>{
+    const before=transformedSize(op,part), transform=composeTransform(op.transform,turn);
+    if(swapsAxes(transform)!==swapsAxes(op.transform)){op.x+=Math.trunc((before.width-before.height)/2);op.y+=Math.trunc((before.height-before.width)/2);}
+    op.transform=transform;
+    if(op.angle && (turn==='FX' || turn==='FY'))op.angle=-op.angle;
+  });
+}
+
+/** Add `delta` whole degrees of free rotation to each selected object (about its centre), in every frame of the scope. */
+export function rotateObjects(project,target,items,delta,scope='animation') {
+  if(!Number.isInteger(delta))throw new Error('Rotation uses whole degrees.');
+  return eachSelectedInstance(project,target,items,scope,op=>{
+    const angle=((((op.angle || 0)+delta)%360)+540)%360-180;
+    if(angle)op.angle=angle===-180?180:angle;else delete op.angle;
+  });
+}
+
+/** Delete several objects at once, top first so pixel-object keys of lower items stay valid. */
+export function deleteObjects(project,target,items,scope='animation') {
+  const frame=project.animations.find(a=>a.id===target.animationId)?.frames.find(f=>f.id===target.frameId);
+  if(!frame)throw new Error('This object no longer exists.');
+  let p=project;
+  for(const item of orderObjects(project,frame,items).reverse())
+    p=item.key==='@group'?removeObjectContainer(p,item.layerId):deleteObject(p,{...target,layerId:item.layerId},item.key,scope);
+  return p;
 }
 
 export function forkObject(project,target,key,scope='animation') {
@@ -285,9 +367,7 @@ export function dropObject(project,target,source,anchor,position,scope='animatio
 
 export function objectBounds(project,node) {
   if(node.type!=='instance') return null;
-  const part=project.parts.find(p=>p.id===node.instance.partId), op=node.instance, size=instanceSize(op,part);
-  const rotated=['R90','R270'].includes(op.transform);
-  return {x:op.x,y:op.y,width:rotated?size.height:size.width,height:rotated?size.width:size.height};
+  return instanceBox(node.instance,project.parts.find(p=>p.id===node.instance.partId));
 }
 
 function operationPixel(op,x,y,images,width,height) {

@@ -15,7 +15,8 @@ export function createInPlaceEdit(project,target,scope='shared') {
   const instance=frame?.cels.find(c=>c.layerId===layer?.id)?.source?.ops.find(op=>op.type==='use' && op.id===target.instanceId);
   if(!instance || !layer)throw new Error('Choose a part instance to edit on the canvas.');
   if(!layer.visible || layer.locked || instance.visible===false || instance.locked)throw new Error('Show and unlock this object and its group before editing it.');
-  if(instance.width!==undefined)throw new Error('This object is resized in this frame. Edit it in a frame where it has its original size, or reset its size with the Resize tool.');
+  if(instance.angle)throw new Error('This object is rotated in this frame. Edit it where it is not rotated, or reset its angle with the Transform tool.');
+  if(instance.width!==undefined)throw new Error('This object is resized in this frame. Edit it in a frame where it has its original size, or reset its size with the Transform tool.');
   const images=renderParts(sourceProject.parts), image=images.get(instance.partId);
   let previewId='in_place_preview';
   while(images.has(previewId))previewId+='_';

@@ -1,11 +1,11 @@
 /** Retained pixel artwork. Source is authoritative; pixels are derived editing buffers. */
 import { MAX_SIZE, MAX_TOTAL_PIXELS } from './limits.js';
-import { linePoints, rectanglePoints, ellipsePoints, sampleIndex } from './geometry.js';
+import { linePoints, rectanglePoints, ellipsePoints, canvasToPartPoint, instanceBox, TRANSFORM_NAMES } from './geometry.js';
 
 export const MAX_PARTS = 256;
 export const MAX_OPERATIONS = 32768;
 export const MAX_RENDER_WORK = 8 * MAX_TOTAL_PIXELS;
-export const TRANSFORMS = ['N', 'FX', 'FY', 'R90', 'R180', 'R270'];
+export const TRANSFORMS = TRANSFORM_NAMES;
 export const cloneArtwork = value => JSON.parse(JSON.stringify(value));
 export const hasLockedInstances = cel => Boolean(cel?.source?.ops.some(op => op.type === 'use' && op.locked));
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
@@ -43,7 +43,11 @@ export function validateOperations(ops, width, height, paletteLength, parts, bud
       const width = op.width === undefined ? part.width : integer(op.width, 1, MAX_SIZE, 'Instance width');
       const height = op.height === undefined ? part.height : integer(op.height, 1, MAX_SIZE, 'Instance height');
       if (width !== part.width || height !== part.height) Object.assign(metadata, { width, height });
-      spend(budget, (metadata.width ?? part.width) * (metadata.height ?? part.height));
+      // Free rotation in whole degrees, normalised to -179…180; quarter turns belong in the lossless transform instead.
+      const angle = op.angle === undefined ? 0 : ((integer(op.angle, -360, 360, 'Instance angle') + 539) % 360) - 179;
+      if (angle) metadata.angle = angle;
+      const box = instanceBox({ ...op, transform: op.transform, ...metadata, width, height }, part);
+      spend(budget, box.width * box.height);
       for (const flag of ['visible','locked']) if (op[flag] !== undefined) {
         if (typeof op[flag] !== 'boolean') throw new Error(`Instance ${flag} must be boolean.`);
         metadata[flag] = op[flag];
@@ -110,18 +114,12 @@ export function renderOperations(ops, width, height, partImages = new Map()) {
       if (op.visible === false) continue;
       const part = partImages.get(op.partId);
       if (!part) throw new Error(`Unknown part ${op.partId}.`);
-      const w = op.width ?? part.width, h = op.height ?? part.height;
-      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-        const color = part.pixels[sampleIndex(y, h, part.height) * part.width + sampleIndex(x, w, part.width)];
-        if (color < 0) continue;
-        let tx = x, ty = y;
-        if (op.transform === 'FX') tx = w - 1 - x;
-        if (op.transform === 'FY') ty = h - 1 - y;
-        if (op.transform === 'R90') { tx = h - 1 - y; ty = x; }
-        if (op.transform === 'R180') { tx = w - 1 - x; ty = h - 1 - y; }
-        if (op.transform === 'R270') { tx = y; ty = w - 1 - x; }
-        tx += op.x; ty += op.y;
-        if (tx >= 0 && ty >= 0 && tx < width && ty < height) pixels[ty * width + tx] = color;
+      const box = instanceBox(op, part);
+      for (let y = Math.max(0, box.y); y < Math.min(height, box.y + box.height); y++) for (let x = Math.max(0, box.x); x < Math.min(width, box.x + box.width); x++) {
+        const local = canvasToPartPoint(op, part, { x, y });
+        if (local.x < 0 || local.y < 0 || local.x >= part.width || local.y >= part.height) continue;
+        const color = part.pixels[local.y * part.width + local.x];
+        if (color >= 0) pixels[y * width + x] = color;
       }
     } else {
       const points = op.type === 'line' ? linePoints(op.x, op.y, op.x2, op.y2)

@@ -93,34 +93,84 @@ export function sampleIndex(i, target, source) {
   return target===source ? i : Math.floor(((2*i+1)*source)/(2*target));
 }
 
-/** Map a canvas pixel into a placed part's untransformed pixel coordinates. */
-export function canvasToPartPoint(instance, part, point) {
-  const size=instanceSize(instance,part), x=point.x-instance.x, y=point.y-instance.y;
-  let local;
-  switch(instance.transform) {
-    case 'N': local={x,y}; break;
-    case 'FX': local={x:size.width-1-x,y}; break;
-    case 'FY': local={x,y:size.height-1-y}; break;
-    case 'R90': local={x:y,y:size.height-1-x}; break;
-    case 'R180': local={x:size.width-1-x,y:size.height-1-y}; break;
-    case 'R270': local={x:size.width-1-y,y:x}; break;
-    default: throw new Error('Unknown instance transform.');
-  }
-  return {x:sampleIndex(local.x,size.width,part.width),y:sampleIndex(local.y,size.height,part.height)};
+/**
+ * The 8 lossless orientations of a pixel grid (the dihedral group): flips and quarter turns only move pixels, never
+ * resample them. Each is a 2×2 integer matrix [a,b,c,d] acting on (x,y) with y pointing down; R90 turns clockwise.
+ * R90FX (a transpose) and R270FX complete the group so every turn/flip combination has a name.
+ */
+export const TRANSFORM_MATRICES = { N: [1,0,0,1], FX: [-1,0,0,1], FY: [1,0,0,-1], R90: [0,-1,1,0], R180: [-1,0,0,-1], R270: [0,1,-1,0], R90FX: [0,1,1,0], R270FX: [0,-1,-1,0] };
+export const TRANSFORM_NAMES = Object.keys(TRANSFORM_MATRICES);
+function matrix(transform) {
+  const m = TRANSFORM_MATRICES[transform];
+  if (!m) throw new Error('Unknown instance transform.');
+  return m;
+}
+const named = m => TRANSFORM_NAMES.find(name => TRANSFORM_MATRICES[name].every((v, i) => v === m[i]));
+/** Whether a transform swaps the displayed width and height. */
+export function swapsAxes(transform) { return matrix(transform)[0] === 0; }
+/** The transform that applies `first`, then `then` (for example the current transform, then a 90° turn). */
+export function composeTransform(first, then) {
+  const [a, b, c, d] = matrix(first), [e, f, g, h] = matrix(then);
+  return named([e*a + f*c, e*b + f*d, g*a + h*c, g*b + h*d]);
+}
+/** Map pixel (x,y) of a w×h grid to its pixel in the transformed grid (h×w when the axes swap). */
+export function transformPoint(transform, w, h, x, y) {
+  const [a, b, c, d] = matrix(transform);
+  return { x: a*x + b*y + (a < 0 ? w - 1 : 0) + (b < 0 ? h - 1 : 0), y: c*x + d*y + (c < 0 ? w - 1 : 0) + (d < 0 ? h - 1 : 0) };
+}
+/** Inverse of transformPoint: the matrices are orthogonal, so the inverse is the transpose. */
+function untransformPoint(transform, w, h, x, y) {
+  const [a, b, c, d] = matrix(transform), swap = b !== 0;
+  return transformPoint(named([a, c, b, d]), swap ? h : w, swap ? w : h, x, y);
 }
 
+/** Free rotation in whole degrees, after size and transform, about the centre of the transformed box. */
+export function instanceAngle(instance) { return instance.angle || 0; }
+const EPSILON = 1e-9;
+function turned(angle) {
+  // Exact values for quarter turns; elsewhere the platform's sin/cos, nudged by EPSILON so pixel centres on an edge round alike.
+  const r = angle * Math.PI / 180, q = ((angle % 360) + 360) % 360;
+  return q === 0 ? [1, 0] : q === 90 ? [0, 1] : q === 180 ? [-1, 0] : q === 270 ? [0, -1] : [Math.cos(r), Math.sin(r)];
+}
+/** Size of the transformed (unrotated) box on the canvas. */
+export function transformedSize(instance, part) {
+  const size = instanceSize(instance, part);
+  return swapsAxes(instance.transform) ? { width: size.height, height: size.width } : size;
+}
+/** Canvas pixel rectangle covered by an instance, including free rotation. */
+export function instanceBox(instance, part) {
+  const { width, height } = transformedSize(instance, part), angle = instanceAngle(instance);
+  if (!angle) return { x: instance.x, y: instance.y, width, height };
+  const [cos, sin] = turned(angle), cx = instance.x + width / 2, cy = instance.y + height / 2;
+  const xs = [], ys = [];
+  for (const [dx, dy] of [[-width/2, -height/2], [width/2, -height/2], [width/2, height/2], [-width/2, height/2]]) {
+    xs.push(cx + dx*cos - dy*sin); ys.push(cy + dx*sin + dy*cos);
+  }
+  const left = Math.floor(Math.min(...xs) + EPSILON), top = Math.floor(Math.min(...ys) + EPSILON);
+  return { x: left, y: top, width: Math.ceil(Math.max(...xs) - EPSILON) - left, height: Math.ceil(Math.max(...ys) - EPSILON) - top };
+}
+
+/**
+ * Map a canvas pixel into a placed part's untransformed pixel coordinates. Every step is affine or monotonic, so a
+ * pixel past one edge of the box lands past the matching edge of the part (in-place editing grows parts that way).
+ * Free angles turn the pixel centre back by -angle about the box centre (inverse-mapped nearest neighbour), so each
+ * canvas pixel shows exactly one part pixel and the part itself never changes.
+ */
+export function canvasToPartPoint(instance, part, point) {
+  const size = instanceSize(instance, part), box = transformedSize(instance, part), angle = instanceAngle(instance);
+  let x = point.x - instance.x, y = point.y - instance.y;
+  if (angle) {
+    const [cos, sin] = turned(angle), vx = x + .5 - box.width / 2, vy = y + .5 - box.height / 2;
+    x = Math.floor(vx*cos + vy*sin + box.width / 2 + EPSILON);
+    y = Math.floor(-vx*sin + vy*cos + box.height / 2 + EPSILON);
+  }
+  const local = untransformPoint(instance.transform, size.width, size.height, x, y);
+  return { x: sampleIndex(local.x, size.width, part.width), y: sampleIndex(local.y, size.height, part.height) };
+}
 
 /** Canvas position of part pixel (x,y) relative to its instance origin, matching the renderer's transforms. */
 export function partToCanvasOffset(transform, part, x, y) {
-  switch(transform) {
-    case 'N': return {x,y};
-    case 'FX': return {x:part.width-1-x,y};
-    case 'FY': return {x,y:part.height-1-y};
-    case 'R90': return {x:part.height-1-y,y:x};
-    case 'R180': return {x:part.width-1-x,y:part.height-1-y};
-    case 'R270': return {x:y,y:part.width-1-x};
-    default: throw new Error('Unknown instance transform.');
-  }
+  return transformPoint(transform, part.width, part.height, x, y);
 }
 
 /** How far an instance must move so its existing pixels stay put after the part gains `left`/`top` padding and a new size. */

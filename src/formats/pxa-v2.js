@@ -11,8 +11,15 @@ ELLIPSE x y width height color
 LINE x y end-x end-y color
 Rectangles/ellipses are filled, grid-aligned, without antialiasing. Draw commands overwrite in order and must fit their canvas. Shapes use decimal palette indices; -1 erases.
 SPAN symbols: ${PXA2_ALPHABET}; dot erases. A{6} repeats six times. No spaces; positive counts. x/y are zero-based.
-Within a cel use drawing commands or USE instance-id part-id x y [transform]. Transform defaults to N; supported: N FX FY R90 R180 R270 R90FX R270FX (R90FX = turn 90° clockwise, then flip horizontally). Flips and clockwise quarter turns operate inside the part bounds, then place the transformed top-left at x/y. Placement may be off canvas within -128..128 and is clipped; transparent part pixels leave underlying artwork visible.
-AT instance-id x y sets its absolute position. TURN instance-id transform changes its transform. SWAP instance-id part-id changes its part. DROP instance-id removes it. RESIZE instance-id width height shows the part at that size (before its transform) by nearest-neighbour sampling; the part itself is unchanged and its own size resets it. ROTATE instance-id degrees turns it clockwise about its centre by whole degrees (nearest-neighbour; 0 resets). These change the existing instance without changing draw order; they do not paint trails.
+Within a cel use drawing commands or USE instance-id part-id x y [transform] to place a part (an object).
+Object transforms (combine freely; they never change the part itself, so edits to the part still reach every copy):
+- Flip/quarter turn: transform N (default) FX FY R90 R180 R270 R90FX R270FX. FX mirrors left-right, FY top-bottom, R90/R180/R270 turn clockwise, R90FX = turn 90° clockwise then mirror. Lossless; applied inside the part bounds, then the transformed top-left sits at x y.
+- Resize, squash and stretch: RESIZE instance-id width height (1–128 each) draws the part at that size by nearest-neighbour sampling, measured before the flip/turn. Unequal scaling squashes or stretches (a 16×16 part at RESIZE id 20 12 is squashed). RESIZE to the part's own size resets it.
+- Free rotation: ROTATE instance-id degrees (whole degrees, -360..360, stored as -179..180; positive = clockwise; 0 resets) turns the resized, flipped result about its centre by nearest-neighbour sampling. Use TURN for exact 90°/180°/270° turns.
+- Order: resize, then flip/quarter turn, then free rotation. x y is the top-left of the unrotated box; rotation keeps that box's centre.
+To place a transformed object, write its USE line, then RESIZE/ROTATE lines for the same instance-id in that cel.
+Changing an existing object in a later cel (for example after FRAME FROM): AT instance-id x y sets its absolute position. TURN instance-id transform changes its flip/quarter turn. RESIZE and ROTATE as above. SWAP instance-id part-id changes its part (keeping position and transforms). DROP instance-id removes it. These keep draw order and do not paint trails.
+Placement may be off canvas within -128..128 and is clipped; transparent part pixels leave underlying artwork visible. Animate objects by changing AT, TURN, RESIZE (squash and stretch) and ROTATE across frames, keeping the same instance-id.
 OVERRIDE x y pixels writes final local pixels after all cel operations. Dot explicitly erases the cel pixel; omitted coordinates remain unchanged. Overrides stay in canvas coordinates when instances move.`;
 
 export const PXA2_GUIDE = `PXA 2: uppercase commands, one per line; blank lines and full-line # comments allowed. No Markdown. Finish with END.

@@ -130,8 +130,6 @@ export function renderObjectsPanel({project,animation,frame,selected,selection=[
   const index=siblings.findIndex(n=>n.key===item?.key), layer=stack?.layer;
   const locked=Boolean(layer?.locked || item?.node?.instance?.locked);
   document.getElementById('object-count').textContent=stacks.reduce((n,s)=>n+s.children.length,0);
-  document.getElementById('object-scope').value=scope;
-  document.getElementById('object-scope').onchange=event=>onScope(event.target.value);
   const many=selection.length>1, editable=Boolean(item && !locked && !many);
   document.getElementById('edit-shared-object').disabled=!item?.node?.instance || many;
   document.getElementById('object-isolated-edit').disabled=!item?.node?.instance || many;

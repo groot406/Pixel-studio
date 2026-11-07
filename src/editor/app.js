@@ -8,7 +8,8 @@ import { renderObjectsPanel } from './objects-panel.js';
 import { initPanelLayout } from './panel-layout.js';
 import { openSharedPartEditor } from './shared-part-editor.js';
 import { hasLockedInstances } from '../domain/artwork.js';
-import { openPartsDialog } from './parts-dialog.js';
+import { openPartLibrary, renderPartsStrip, PART_DRAG_TYPE } from './part-library.js';
+import { placePartInFrames } from '../domain/parts.js';
 import { PXA2_GUIDE } from '../formats/pxa-v2.js';
 import { MAX_SIZE, MAX_TOTAL_PIXELS, MAX_COLORS, MAX_LAYERS, uid, getAnimationLayers, insertProjectLayer, makeLayeredFrame, getLayerPixels, compositeFrame, stripEmptyFrames, blankProject, validateProject, linePoints, rectanglePoints, ellipsePoints, floodFill, paletteFromRgba, mapRgbaToPalette, resizePixels, nearestColor } from '../domain/project.js';
 import { inspectSheet, sliceSpritesheet, createSheetMetadata, validateSheetMetadata } from '../formats/spritesheet.js';
@@ -46,7 +47,7 @@ const TOOL_HINTS = {
 const BRUSH_TOOLS = ['pencil','eraser','line','dither','shade'];
 const SYMMETRY_TOOLS = [...BRUSH_TOOLS,'rectangle','ellipse'];
 const FREEHAND_TOOLS = ['pencil','eraser','dither','shade'];
-/** Pixel tools whose strokes repeat in every frame of the animation when “Edit in” is the whole animation. */
+/** Pixel tools whose strokes repeat in every frame of the animation when the Edit switch is on All frames. */
 const PAINT_TOOLS = ['pencil','eraser','line','rectangle','ellipse','fill','replace','dither','shade'];
 const SELECT_TOOLS = ['select','wand'];
 const state = {
@@ -642,6 +643,26 @@ function editColor(value) {
   if (!/^#[0-9a-f]{6}$/i.test(normalized)) { toast('Use a six-digit hex color, like #285B47.'); renderPalette(); return; }
   mutate(() => { state.project.palette[state.color] = normalized.toLowerCase(); });
 }
+function selectFrameAt(index) {
+  const frames = currentAnimation().frames;
+  if (!frames.length) return;
+  finishDrawing();
+  const i = (index + frames.length) % frames.length;
+  state.frameId = frames[i].id; state.previewIndex = i; state.previewTime = 0;
+  renderAll(); scheduleSave();
+}
+/** Compact thumbnails shown in the minimised Frames bar; reuses the full cards' painted canvases. */
+function renderMiniFrames(animation, selectedIndex) {
+  const strip = $('frame-mini-strip'), cards = $('frame-list').querySelectorAll('canvas');
+  strip.innerHTML = animation.frames.map((frame, index) => `<button type="button" class="frame-mini${index === selectedIndex ? ' selected' : ''}" data-index="${index}" aria-label="Frame ${index + 1}" aria-pressed="${index === selectedIndex}" title="Frame ${index + 1} · ${frame.duration} ms"><canvas width="32" height="32"></canvas></button>`).join('');
+  strip.querySelectorAll('.frame-mini').forEach((button, index) => {
+    if (cards[index]) button.querySelector('canvas').getContext('2d').drawImage(cards[index], 0, 0);
+    button.onclick = () => selectFrameAt(index);
+  });
+  $('frame-mini-position').textContent = `${selectedIndex + 1} / ${animation.frames.length}`;
+  $('mini-prev-frame').disabled = $('mini-next-frame').disabled = animation.frames.length < 2;
+  strip.querySelector('.selected')?.scrollIntoView({block:'nearest',inline:'nearest'});
+}
 function renderTimeline() {
   const animation = currentAnimation();
   const selectedIndex = animation.frames.findIndex(f => f.id === state.frameId);
@@ -662,6 +683,7 @@ function renderTimeline() {
     });
   });
   $('frame-list').scrollLeft = scroll;
+  renderMiniFrames(animation, selectedIndex);
   $('delete-frame').disabled = animation.frames.length <= 1;
   $('move-frame-left').disabled = selectedIndex <= 0;
   $('move-frame-right').disabled = selectedIndex >= animation.frames.length - 1;
@@ -761,11 +783,17 @@ function selectObject(item) {
 }
 function renderLayers() {
   renderObjectsPanel({project:state.project,animation:currentAnimation(),frame:currentFrame(),selected:selectedObject(),selection:selectedItems(),scope:state.objectScope,collapsed:state.collapsedGroups,
-    canPaste:Boolean(state.objectClipboard),onSelect:(item,additive)=>additive?toggleObjectItem(item):selectObject(item),onAction:objectAction,onScope:scope=>{finishDrawing();state.objectScope=scope;renderLayers();renderTools();},onDrop:dropObjectRow,paint:paintSprite});
+    canPaste:Boolean(state.objectClipboard),onSelect:(item,additive)=>additive?toggleObjectItem(item):selectObject(item),onAction:objectAction,onDrop:dropObjectRow,paint:paintSprite});
   const selected=selectedObject(), node=celObjects(currentFrame().cels.find(c=>c.layerId===selected.layerId)).find(n=>n.key===selected.key);
   $('active-layer-name').textContent=node?.instance?node.name:currentLayer().name;
   $('active-layer-name').title=node?.instance?'Selected smart object':'Selected pixel object or group';
+  // Parts and palette are replaced on every project change, so their identity is a cheap cache key.
+  if(partsStripKey.parts!==state.project.parts || partsStripKey.palette!==state.project.palette) {
+    partsStripKey={parts:state.project.parts,palette:state.project.palette};
+    renderPartsStrip({project:state.project,paint:paintSprite,onOpen:id=>partLibrary(id),onPlace:id=>{try{placePartAt(id);}catch(error){toast(error.message);}}});
+  }
 }
+let partsStripKey={};
 function editSharedObject(item) {
   finishDrawing();
   const cel=currentFrame().cels.find(c=>c.layerId===item.layerId), op=cel.source?.ops.find(op=>op.type==='use' && op.id===item.key);
@@ -828,7 +856,7 @@ function renderInPlaceControls() {
     :mode==='baked'?` You edit the pixels exactly as this frame draws them (${pose}). Applying bakes them into this placement: it becomes its own artwork at 0°, other frames keep theirs.`:'';
   const text=`${mode==='baked'?'':impact}${note} ${dirty?'Unsaved draft.':'Draw inside the outline.'}`.trim();
   if($('in-place-impact').textContent!==text)$('in-place-impact').textContent=text;
-  $('in-place-scope').value=session.scope;
+  renderEditScope();
   $('in-place-apply').textContent=session.scope==='shared'?`Apply to ${session.references.length} instance${session.references.length===1?'':'s'}`:'Apply to this frame';
   $('in-place-apply').disabled=Boolean(restriction || !dirty || state.drawing);
   const error=restriction || edit.error;
@@ -887,6 +915,36 @@ function canvasPartKey(event,key) {
     catch(error){state.inPlaceEdit.error=error.message;}
     renderTools();renderCanvas();renderPreview();
   }
+}
+/** Where Place puts a part follows the Edit scope switch: every frame of the animation, or only this one. */
+function partPlacementFrames() {
+  const animation=currentAnimation();
+  return state.objectScope==='animation'?animation.frames.map(f=>f.id):[state.frameId];
+}
+function partPlaceLabel() {
+  const n=partPlacementFrames().length;
+  return n>1?`Place in all ${n} frames`:`Place in frame ${currentAnimation().frames.findIndex(f=>f.id===state.frameId)+1}`;
+}
+/** Place a part centred on `at` (canvas pixel), or in the middle of the canvas, then select it for dragging. */
+function placePartAt(partId,at=null) {
+  if(state.inPlaceEdit)throw new Error('Apply or cancel the canvas object edit first.');
+  const part=state.project.parts?.find(p=>p.id===partId);
+  if(!part)throw new Error('That part no longer exists.');
+  const x=at?at.x-Math.floor(part.width/2):Math.floor((state.project.width-part.width)/2);
+  const y=at?at.y-Math.floor(part.height/2):Math.floor((state.project.height-part.height)/2);
+  const layerId=currentLayer().id, frames=partPlacementFrames();
+  mutate(()=>{
+    const result=placePartInFrames(state.project,{animationId:currentAnimation().id,layerId,frameIds:frames},partId,x,y);
+    state.project=result.project;state.objectSelection={layerId,key:result.instanceId};state.objectMulti=null;state.selection=null;state.tool='object';
+  });
+  toast(`${partId} placed${frames.length>1?` in ${frames.length} frames`:''}. Drag it into position.`);
+}
+function partLibrary(initialPart='') {
+  if(finishDrawing())renderAll();
+  if(state.inPlaceEdit){toast('Apply or cancel the canvas object edit first.');return;}
+  openPartLibrary({getProject:()=>state.project,openDialog,paint:paintSprite,initialPart,selection:Boolean(state.selection),target:()=>objectTarget(),
+    actions:{place:id=>placePartAt(id),placeLabel:partPlaceLabel,editArtwork:id=>{$('modal').close();editSharedPart(id);},
+      change:project=>mutate(()=>{state.project=project;}),makeFromSelection:makeObjectDialog}});
 }
 function editSharedPart(partId) {
   const documentId=state.documentId,revision=state.documents.get(documentId)?.revision;
@@ -1115,7 +1173,39 @@ function renderSampleCards(container) {
 function renderAll() {
   normalizeSelection();
   if (document.activeElement !== $('project-name')) $('project-name').value = state.project.name;
-  renderProjectTabs();renderPanelState();renderTools(); renderPalette(); renderTimeline(); renderAnimations(); renderLayers(); renderSelection(); renderCanvas(); renderPreview(); renderPlaybackControls();renderInPlaceControls();
+  renderProjectTabs();renderPanelState();renderTools(); renderPalette(); renderTimeline(); renderAnimations(); renderLayers(); renderSelection(); renderCanvas(); renderPreview(); renderPlaybackControls();renderInPlaceControls();renderEditScope();
+}
+/**
+ * The edit scope switch in the canvas toolbar. Normally it chooses between every frame of the current
+ * animation and only this frame; while editing an object on canvas it chooses all copies or this frame.
+ */
+function renderEditScope() {
+  const animation=currentAnimation(), index=animation.frames.findIndex(f=>f.id===state.frameId), session=state.inPlaceEdit?.session;
+  const frameOnly=session?session.scope==='frame':state.objectScope==='frame';
+  const copies=session?.references.length || 0;
+  $('edit-scope-wide-label').textContent=session?'All copies':'All frames';
+  $('edit-scope-wide-detail').textContent=session?`${copies} instance${copies===1?'':'s'}`:`${animation.name} · ${animation.frames.length}`;
+  $('edit-scope-frame-detail').textContent=`Frame ${index+1}`;
+  for(const button of $('edit-scope').querySelectorAll('[data-scope]')) {
+    const on=(button.dataset.scope==='frame')===frameOnly;
+    button.classList.toggle('active',on);button.setAttribute('aria-checked',String(on));button.tabIndex=on?0:-1;
+    button.title=button.dataset.scope==='frame'
+      ?(session?'Change only this placement, in this frame (you can fix pixels a rotation drew badly)':`Drawing and object changes affect only frame ${index+1}`)
+      :(session?`Change the shared artwork: every copy of ${session.partId} updates`:`Drawing and object changes repeat in all ${animation.frames.length} frames of ${animation.name}`);
+  }
+  $('workbench').classList.toggle('scope-frame',frameOnly);
+}
+function setEditScope(frameOnly) {
+  finishDrawing();
+  if(state.inPlaceEdit) {
+    try{setInPlaceScope(state.inPlaceEdit.session,frameOnly?'frame':'shared');state.inPlaceEdit.error=null;}
+    catch(error){toast(error.message);}
+    renderInPlaceControls();renderCanvas();renderPreview();
+  } else {
+    state.objectScope=frameOnly?'frame':'animation';
+    renderLayers();renderTools();
+  }
+  renderEditScope();
 }
 function fitCanvas() {
   if (!state.fit) return;
@@ -1521,7 +1611,7 @@ function pointerEnd(event) {
   if (event.pointerType !== 'mouse') state.cursor = null;
   renderAll();
 }
-/** With “Edit in: Current animation”, a finished paint stroke changes the same pixels in every frame of the animation. Returns frames skipped because of locked objects. */
+/** With the Edit switch on All frames, a finished paint stroke changes the same pixels in every frame of the animation. Returns frames skipped because of locked objects. */
 function repeatStrokeInAnimation(drawing) {
   if(state.objectScope!=='animation' || !PAINT_TOOLS.includes(drawing.tool) || !drawing.cel)return 0;
   const {width,height,palette}=state.project;
@@ -1668,7 +1758,7 @@ function animationTick(time) {
 function openDialog(title, content, eyebrow = 'PIXEL STUDIO') {
   if (finishDrawing()) renderAll();
   $('modal').dispatchEvent(new Event('pixel-studio:dialog-replace'));
-  $('modal').classList.remove('wide','start-modal','prompt-builder-modal','ai-edit-modal','shared-part-modal');
+  $('modal').classList.remove('wide','start-modal','part-library-modal','prompt-builder-modal','ai-edit-modal','shared-part-modal');
   $('modal-title').textContent = title;
   $('modal-eyebrow').textContent = eyebrow;
   $('modal-content').innerHTML = content;
@@ -1853,6 +1943,15 @@ function bindFileDrop() {
   stage.addEventListener('dragenter',event=>{if(!hasFiles(event))return;event.preventDefault();depth++;showFileDrop(true);});
   stage.addEventListener('dragover',event=>{if(!hasFiles(event))return;event.preventDefault();event.dataTransfer.dropEffect='copy';});
   stage.addEventListener('dragleave',event=>{if(!hasFiles(event))return;depth=Math.max(0,depth-1);if(!depth)showFileDrop(false);});
+  // Parts dragged from the sidebar: place where they are dropped.
+  const isPart=event=>[...event.dataTransfer.types].includes(PART_DRAG_TYPE);
+  stage.addEventListener('dragover',event=>{if(!isPart(event))return;event.preventDefault();event.dataTransfer.dropEffect='copy';stage.classList.add('part-drop-target');});
+  stage.addEventListener('dragleave',event=>{if(isPart(event) && !stage.contains(event.relatedTarget))stage.classList.remove('part-drop-target');});
+  stage.addEventListener('drop',event=>{
+    if(!isPart(event))return;
+    event.preventDefault();stage.classList.remove('part-drop-target');
+    try{placePartAt(event.dataTransfer.getData(PART_DRAG_TYPE),canvasPoint(event));}catch(error){toast(error.message);}
+  });
   stage.addEventListener('drop',event=>{
     if(!hasFiles(event))return;
     event.preventDefault();depth=0;showFileDrop(false);
@@ -2289,12 +2388,12 @@ function bindEvents() {
   $('redo').onclick = () => state.inPlaceEdit?restoreCanvasPartEdit(true):restore(state.redo,state.undo);
   $('in-place-cancel').onclick=()=>endCanvasPartEdit(false);
   $('in-place-apply').onclick=()=>endCanvasPartEdit(true);
-  $('in-place-scope').onchange=event=>{
-    if(!state.inPlaceEdit)return;finishDrawing();
-    try{setInPlaceScope(state.inPlaceEdit.session,event.target.value);state.inPlaceEdit.error=null;}
-    catch(error){toast(error.message);}
-    renderInPlaceControls();renderCanvas();renderPreview();
-  };
+  for(const button of $('edit-scope').querySelectorAll('[data-scope]'))button.onclick=()=>setEditScope(button.dataset.scope==='frame');
+  $('edit-scope').addEventListener('keydown',event=>{
+    if(!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(event.key))return;
+    event.preventDefault();const frameOnly=['ArrowRight','ArrowDown'].includes(event.key);
+    setEditScope(frameOnly);$('edit-scope').querySelector(`[data-scope="${frameOnly?'frame':'wide'}"]`).focus();
+  });
   $('toggle-grid').onclick = () => { state.grid = !state.grid; renderTools(); renderCanvas(); };
   $('toggle-onion').onclick = () => { state.onion = !state.onion; renderTools(); renderCanvas(); };
   $('zoom-in').onclick = () => setZoom(state.scale + 2);
@@ -2327,10 +2426,10 @@ function bindEvents() {
     if(!Number.isInteger(duration) || duration<1 || duration>60000){toast('Frame duration must be 1–60,000 milliseconds.');event.target.value=currentFrame().duration;return;}
     mutate(()=>{currentFrame().duration=duration;state.previewTime=0;});
   };
-  $('manage-parts').onclick=()=>{
-    if(finishDrawing())renderAll();
-    openPartsDialog({getProject:()=>state.project,target:{animationId:currentAnimation().id,frameId:currentFrame().id,layerId:currentLayer().id},selection:state.selection?.rect,openDialog,onEditPart:editSharedPart,onChange:project=>mutate(()=>{state.project=project;})});
-  };
+  $('manage-parts').onclick=()=>partLibrary();
+  $('open-part-library').onclick=()=>partLibrary();
+  $('mini-prev-frame').onclick=()=>selectFrameAt(currentAnimation().frames.findIndex(f=>f.id===state.frameId)-1);
+  $('mini-next-frame').onclick=()=>selectFrameAt(currentAnimation().frames.findIndex(f=>f.id===state.frameId)+1);
   $('add-pixel-object').onclick=()=>addObject(false);
   $('add-object-group').onclick=()=>addObject(true);
   $('outline-objects').onclick=magicOutlineDialog;

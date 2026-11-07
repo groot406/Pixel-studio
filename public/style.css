@@ -1229,15 +1229,48 @@ body.is-resizing-panels { cursor: col-resize; }
 .start-sample:hover, .start-sample:focus-visible { border-color: #d6e0ce; background: #f5f7ef; outline: none; }
 .start-sample canvas { width: 40px; height: 40px; border-radius: 5px; background: #edf1e2; image-rendering: pixelated; }
 .start-sample span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* Minimised frames panel */
-.timeline-actions .timeline-toggle { margin-left: 4px; }
-.timeline-toggle svg { transform: rotate(90deg); transition: transform .15s ease; }
+/* Minimised frames panel: one slim bar with a thumbnail strip to keep navigating frames */
+.timeline-title { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.timeline-toggle { flex: 0 0 auto; width: 26px; height: 26px; margin-left: -8px; padding: 5px; }
+.timeline-toggle svg { width: 14px; height: 14px; transform: rotate(90deg); transition: transform .15s ease; }
 .workbench.timeline-collapsed .timeline-toggle svg { transform: rotate(-90deg); }
+.timeline-mini { display: none; flex: 1 1 auto; align-items: center; gap: 4px; min-width: 0; }
+.timeline-mini .icon-button { flex: 0 0 auto; width: 26px; height: 26px; padding: 5px; }
+.timeline-mini .icon-button svg { width: 14px; height: 14px; }
+.frame-mini-strip { display: flex; gap: 4px; min-width: 0; overflow-x: auto; padding: 2px; scrollbar-width: none; }
+.frame-mini-strip::-webkit-scrollbar { display: none; }
+.frame-mini { flex: 0 0 auto; width: 30px; height: 30px; padding: 2px; border: 1px solid #dce4d5; border-radius: 5px; background: #f6f8f0; cursor: pointer; }
+.frame-mini canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
+.frame-mini:hover { border-color: #b5c6a1; }
+.frame-mini.selected { border-color: var(--green); box-shadow: 0 0 0 1px var(--green); background: #fff; }
+.frame-mini-position { flex: 0 0 auto; margin-left: 2px; color: #8a9680; font-size: 10px; font-variant-numeric: tabular-nums; }
 .workbench.timeline-collapsed .editor-column { grid-template-rows: minmax(0, 1fr) auto; }
-.workbench.timeline-collapsed .timeline { padding-bottom: 12px; }
+.workbench.timeline-collapsed .timeline { padding-top: 7px; padding-bottom: 7px; }
+.workbench.timeline-collapsed .timeline-heading { gap: 14px; }
+.workbench.timeline-collapsed .timeline-mini { display: flex; }
+.workbench.timeline-collapsed .timeline-subtitle,
+.workbench.timeline-collapsed #duplicate-frame,
+.workbench.timeline-collapsed #delete-frame,
+.workbench.timeline-collapsed .timeline-actions .toolbar-divider,
 .workbench.timeline-collapsed .timeline .frame-list,
 .workbench.timeline-collapsed .timeline .timeline-footer,
 .workbench.timeline-collapsed .splitter-timeline { display: none; }
+
+/* Edit scope switch (canvas toolbar). "This frame" is amber everywhere so single-frame edits are never a surprise. */
+.edit-scope { display: flex; align-items: center; gap: 2px; min-width: 0; padding: 3px; border: 1px solid #dce4d5; border-radius: 10px; background: #fff; }
+.edit-scope-label { padding: 0 6px 0 5px; color: #8a9680; font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.edit-scope-option { display: flex; align-items: center; gap: 7px; min-width: 0; height: 36px; padding: 0 11px 0 9px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: #65735e; font: inherit; text-align: left; cursor: pointer; }
+.edit-scope-option:hover:not(.active) { background: #f3f6ee; }
+.edit-scope-option:focus-visible { outline: 2px solid var(--green); outline-offset: 1px; }
+.edit-scope-option svg { flex: 0 0 auto; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.edit-scope-copy { display: flex; flex-direction: column; min-width: 0; line-height: 1.15; }
+.edit-scope-copy strong { font-size: 12px; font-weight: 650; white-space: nowrap; }
+.edit-scope-copy small { overflow: hidden; max-width: 130px; color: inherit; font-size: 10px; opacity: .8; text-overflow: ellipsis; white-space: nowrap; }
+.edit-scope-option[data-scope="wide"].active { border-color: var(--green); background: var(--green); color: #fff; }
+.edit-scope-option[data-scope="frame"].active { border-color: #d98a12; background: #fff4df; color: #8a4f00; }
+.workbench.scope-frame .canvas-stage { box-shadow: inset 0 0 0 3px #f0a531; }
+@media (max-width: 1100px) { .edit-scope-label { display: none; } .edit-scope-copy small { display: none; } .edit-scope-option { height: 32px; } }
+@media (max-width: 540px) { .edit-scope-option { padding: 0 8px; gap: 5px; } .edit-scope-copy strong { font-size: 11px; } }
 
 /* App chrome behaves like a native tool: a mis-drag must not highlight labels and buttons.
    Text you might want to copy (fields, dialog text, code) stays selectable. */

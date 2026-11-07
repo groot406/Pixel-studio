@@ -48,7 +48,12 @@ AT glint 7 4
 END
 ```
 
-Parts contain filled rectangles/ellipses, integer lines, and exact pixel spans. Parts do not contain other parts. Cels contain ordered drawing operations and instances. This keeps reference expansion finite and easy to inspect. Instance placement supports translation, horizontal/vertical flips and clockwise quarter turns, with the transformed top-left at the placement coordinates.
+Parts contain filled rectangles/ellipses, integer lines, and exact pixel spans. Parts do not contain other parts. Cels contain ordered drawing operations and instances. This keeps reference expansion finite and easy to inspect. Instance placement supports translation, horizontal/vertical flips and clockwise quarter turns (`N FX FY R90 R180 R270 R90FX R270FX`), with the transformed top-left at the placement coordinates. Two optional per-instance commands follow the `USE` line (or change an existing instance in a later cel):
+
+- `RESIZE instance-id width height` (1–128) draws the part at that size by nearest-neighbour sampling, measured before the flip/turn. Unequal scaling gives squash and stretch. The part's own size resets it.
+- `ROTATE instance-id degrees` (whole degrees, −360…360, stored as −179…180, positive is clockwise, 0 resets) turns the result about the centre of its unrotated box. Exact quarter turns belong in the lossless transform.
+
+Composition order is resize, then flip/quarter turn, then free rotation. `AT`, `TURN`, `SWAP`, `RESIZE` and `ROTATE` keep the instance's other properties and draw order.
 
 Part references are live: changing the definition updates its instances. `PART copy FROM original` creates an independent definition. Frame `FROM` copies an earlier composition, including across animations; it does not make later frame placements follow edits to an earlier frame. `AT` changes a placement rather than painting translated pixels over an old image.
 

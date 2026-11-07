@@ -143,3 +143,76 @@ export function grownInstance(instance,before,after,left,top) {
   op.x+=shift.x; op.y+=shift.y;
   return op;
 }
+
+/**
+ * Where each part is used: instance count plus, per animation, the frame indices that place it.
+ * Feeds the part library ("Used 6× · Idle 1–4, Walk 2").
+ */
+export function partUsage(project) {
+  const usage=new Map((project.parts || []).map(part=>[part.id,{instances:0,animations:[]}]));
+  for(const animation of project.animations) {
+    const perPart=new Map();
+    animation.frames.forEach((frame,index)=>{
+      for(const cel of frame.cels) for(const op of cel.source?.ops || []) {
+        if(op.type!=='use' || !usage.has(op.partId))continue;
+        usage.get(op.partId).instances++;
+        const frames=perPart.get(op.partId) || new Set();frames.add(index);perPart.set(op.partId,frames);
+      }
+    });
+    for(const [partId,frames] of perPart)usage.get(partId).animations.push({id:animation.id,name:animation.name,frames:[...frames].sort((a,b)=>a-b)});
+  }
+  return usage;
+}
+
+/** "1–4, 6" style list of zero-based frame indices, shown one-based. */
+export function frameRanges(indices) {
+  const ranges=[];
+  for(const i of indices) {
+    const last=ranges.at(-1);
+    if(last && i===last[1]+1)last[1]=i;else ranges.push([i,i]);
+  }
+  return ranges.map(([a,b])=>a===b?`${a+1}`:`${a+1}–${b+1}`).join(', ');
+}
+
+/** Rename a part and every instance that points at it. */
+export function renamePart(project,partId,nextId) {
+  const id=artworkId(nextId);
+  const p=validateProject(project);
+  if(!p.parts?.some(part=>part.id===partId))throw new Error('Choose a part.');
+  if(id===partId)return p;
+  if(p.parts.some(part=>part.id===id))throw new Error(`A part named ${id} already exists.`);
+  p.parts.find(part=>part.id===partId).id=id;
+  for(const animation of p.animations) for(const frame of animation.frames) for(const cel of frame.cels)
+    for(const op of cel.source?.ops || []) if(op.type==='use' && op.partId===partId)op.partId=id;
+  return validateProject(p);
+}
+
+/** Delete a part that nothing uses any more. */
+export function removePart(project,partId) {
+  if(referencesToPart(project,partId).length)throw new Error('This part is still placed. Delete its objects first.');
+  const p=validateProject(project);
+  if(!p.parts?.some(part=>part.id===partId))throw new Error('Choose a part.');
+  p.parts=p.parts.filter(part=>part.id!==partId);
+  return validateProject(p);
+}
+
+/**
+ * Place a part at the same position in several frames of one animation. Every new instance shares one id
+ * when possible, so the Objects panel treats it as one object across the animation.
+ * Returns the project and the instance id used in the first frame.
+ */
+export function placePartInFrames(project,{animationId,layerId,frameIds},partId,x=0,y=0) {
+  if(!frameIds.length)throw new Error('Choose at least one frame.');
+  let p=project, id=null;
+  for(const frameId of frameIds) {
+    const target={animationId,frameId,layerId};
+    const before=new Set(opsAt(p,target).map(op=>op.id));
+    p=placePart(p,target,partId,x,y);
+    const added=opsAt(p,target).find(op=>op.type==='use' && !before.has(op.id));
+    id??=added.id;
+  }
+  return {project:p,instanceId:id};
+}
+function opsAt(project,{animationId,frameId,layerId}) {
+  return project.animations.find(a=>a.id===animationId).frames.find(f=>f.id===frameId).cels.find(c=>c.layerId===layerId).source?.ops || [];
+}

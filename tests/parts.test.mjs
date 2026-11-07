@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { decodeAIProject, encodeAIProject } from '../src/formats/pxa.js';
 import { validateProject, compositeFrame, floodFill } from '../src/domain/project.js';
-import { extractPart, placePart, changeInstance, forkInstance, paintSharedPart, flattenCel } from '../src/domain/parts.js';
+import { extractPart, placePart, changeInstance, forkInstance, paintSharedPart, flattenCel, partUsage, frameRanges, renamePart, removePart, placePartInFrames, referencesToPart } from '../src/domain/parts.js';
 import { commitRasterEdits } from '../src/domain/artwork.js';
 import { sparklePxa } from './fixtures/pxa-v2.mjs';
 const target={animationId:'idle',frameId:'f0',layerId:'effects'};
@@ -149,4 +149,28 @@ test('“this frame only” edits a rotated object exactly as drawn and bakes it
     m.setInPlaceScope(session,'shared');
     assert.equal(m.inPlaceMode(session),'original',label);
   }
+});
+
+test('part library: usage per animation, rename keeps references, delete only when unused',()=>{
+  const p=decodeAIProject(sparklePxa);
+  const usage=partUsage(p).get('star');
+  assert.equal(usage.instances,4);
+  assert.deepEqual(usage.animations.map(a=>[a.id,a.frames]),[['idle',[0,1,2]],['still',[0]]]);
+  assert.equal(frameRanges([0,1,2,4,6,7]),'1–3, 5, 7–8');
+  const renamed=renamePart(p,'star','spark');
+  assert.equal(referencesToPart(renamed,'spark').length,4);
+  assert.equal(referencesToPart(renamed,'star').length,0);
+  assert.deepEqual(compositeFrame(renamed,renamed.animations[0].frames[1]),compositeFrame(p,p.animations[0].frames[1]));
+  assert.throws(()=>renamePart(p,'star','bad name'),/./);
+  assert.throws(()=>removePart(p,'star'),/still placed/);
+  const extracted=extractPart(p,target,{x:3,y:4,width:5,height:5},'corner');
+  const flat=flattenCel(extracted,target);
+  assert.equal(removePart(flat,'corner').parts.some(part=>part.id==='corner'),false);
+});
+test('placing a part in every frame uses one instance id so it is one object across the animation',()=>{
+  const p=decodeAIProject(sparklePxa);
+  const {project,instanceId}=placePartInFrames(p,{animationId:'idle',layerId:'effects',frameIds:['f0','f1','f2']},'star',2,3);
+  const placed=project.animations[0].frames.map(f=>f.cels.find(c=>c.layerId==='effects').source.ops.filter(op=>op.id===instanceId));
+  assert.ok(placed.every(ops=>ops.length===1 && ops[0].x===2 && ops[0].y===3));
+  assert.equal(partUsage(project).get('star').instances,7);
 });

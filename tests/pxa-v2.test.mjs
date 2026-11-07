@@ -65,6 +65,12 @@ test('guides used by prompts and downloads remain identical', async () => {
   assert.equal(await readFile(new URL('../public/pxa-format.txt',import.meta.url),'utf8'),AI_FORMAT_GUIDE+'\n');
   assert.equal(await readFile(new URL('../public/pxa-v2-format.txt',import.meta.url),'utf8'),PXA2_GUIDE+'\n');
 });
+test('the prompt guide documents every PXA 2 command and object transform', async () => {
+  const source = await readFile(new URL('../src/formats/pxa-v2.js',import.meta.url),'utf8');
+  const parsed = new Set([...source.slice(source.indexOf('export function')).matchAll(/'([A-Z][A-Z0-9]+)'/g)].map(m => m[1]));
+  for (const command of parsed) assert.match(PXA2_GUIDE, new RegExp(`\\b${command}\\b`), command);
+  for (const term of ['RESIZE instance-id width height','ROTATE instance-id degrees','squash','stretch','R90FX','R270FX','TURN instance-id transform']) assert.ok(PXA2_GUIDE.includes(term), term);
+});
 test('bounded frame inheritance round trips at the operation budget and rejects excessive rendering', () => {
   const p=decodeAIProject('PXA 2\nSIZE 1 1\nNAME "Budget"\nPAL #123456\nLAYER art "Art" 1 0\nANIM a "A" 8\nFRAME f 125 CLEAR\nCEL art\nRECT 0 0 1 1 0\nEND');
   const source={ops:Array.from({length:32},()=>({type:'rect',x:0,y:0,width:1,height:1,color:0})),overrides:[]};

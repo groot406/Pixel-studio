@@ -205,6 +205,7 @@
           <p id="in-place-error" class="in-place-error" role="alert" hidden></p>
         </div>
         <div class="canvas-stage-wrap">
+          <div id="motion-bar" class="motion-bar" role="toolbar" aria-label="Motion mode" hidden></div>
           <div id="selection-actions" class="selection-actions" role="group" aria-label="Selection actions" hidden>
           <span id="selection-info" class="selection-info" title="Drag inside to move · arrows to nudge · Esc to deselect">Selection</span>
           <div class="selection-buttons">
@@ -256,14 +257,14 @@
       </details>
       <details class="animate-section panel-section" data-panel="animate" open>
         <summary class="section-heading"><h2>ANIMATE</h2><svg class="panel-chevron" aria-hidden="true"><use href="#i-chevron"/></svg></summary>
-        <p id="animate-hint" class="part-hint">Select a placed object to animate it.</p>
+        <p id="animate-hint" class="part-hint">Pick a motion, then work on the canvas.</p>
         <div class="object-action-list" role="group" aria-label="Animate the selected object">
-          <button id="animate-tween" class="object-action" type="button"><svg aria-hidden="true"><use href="#i-tween"/></svg><span class="object-action-copy"><strong>Tween to frame…</strong><small>In-betweens along a line or arc</small></span></button>
-          <button id="animate-squash" class="object-action" type="button"><svg aria-hidden="true"><use href="#i-squash"/></svg><span class="object-action-copy"><strong>Squash &amp; stretch</strong><small>Stretch with speed, squash on landing</small></span></button>
-          <button id="animate-follow" class="object-action" type="button"><svg aria-hidden="true"><use href="#i-follow"/></svg><span class="object-action-copy"><strong>Follow-through</strong><small>Lag behind another object, springy</small></span></button>
-          <button id="animate-ik" class="object-action" type="button"><svg aria-hidden="true"><use href="#i-ik"/></svg><span class="object-action-copy"><strong>IK limb</strong><small>Bend two parts to reach a point</small></span></button>
+          <button id="animate-tween" class="object-action" type="button"><svg aria-hidden="true"><use href="#i-tween"/></svg><span class="object-action-copy"><strong>Animate a move</strong><small>Drag a ghost to where it ends</small></span></button>
+          <button id="animate-squash" class="object-action" type="button"><svg aria-hidden="true"><use href="#i-squash"/></svg><span class="object-action-copy"><strong>Bounce · squash &amp; stretch</strong><small>Bounce in place, or squash a move</small></span></button>
+          <button id="animate-follow" class="object-action" type="button"><svg aria-hidden="true"><use href="#i-follow"/></svg><span class="object-action-copy"><strong>Follow-through</strong><small>Click what it hangs from: tail, hair, cape</small></span></button>
+          <button id="animate-ik" class="object-action" type="button"><svg aria-hidden="true"><use href="#i-ik"/></svg><span class="object-action-copy"><strong>IK limb</strong><small>Click shoulder, elbow, then drag the hand</small></span></button>
           <button id="animate-wave" class="object-action" type="button"><svg aria-hidden="true"><use href="#i-wave"/></svg><span class="object-action-copy"><strong>Wave motion</strong><small>Ripple a flag, water or hair</small></span></button>
-          <button id="animate-smear" class="object-action" type="button"><svg aria-hidden="true"><use href="#i-smear"/></svg><span class="object-action-copy"><strong>Smear frame</strong><small>Motion trail to the next frame</small></span></button>
+          <button id="animate-smear" class="object-action" type="button"><svg aria-hidden="true"><use href="#i-smear"/></svg><span class="object-action-copy"><strong>Smear into next frame</strong><small>One-click motion trail</small></span></button>
         </div>
       </details>
       <details class="effects-section panel-section" data-panel="effects" open>

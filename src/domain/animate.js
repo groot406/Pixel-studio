@@ -4,8 +4,8 @@
  * by `{animationId, layerId, instanceId}`; instance ids are stable across frames, so one id is one object over time.
  */
 import { validateProject, makeLayeredFrame, getLayerPixels, MAX_TOTAL_PIXELS } from './project.js';
-import { sourceForCel, hasLockedInstances, writeCelPixels } from './artwork.js';
-import { instancePivot, transformedSize, swapsAxes } from './geometry.js';
+import { sourceForCel, hasLockedInstances, writeCelPixels, renderParts } from './artwork.js';
+import { instancePivot, instancePixel, transformedSize, swapsAxes, pivotUnder, withPivot } from './geometry.js';
 import {
   ease, tweenPose, poseOf, applyPose, squashStretch, impactSquash, linePath, arcThrough, bezierPoint, pathLengthParam,
   springFollow as springSeries, loopSpring, overlapDelay, solveTwoBone, normalizeAngle, roundInt, rotatePoint,
@@ -128,6 +128,74 @@ export function tweenObject(project, { animationId, layerId, instanceId, fromFra
 const angleTurn = (a, b) => normalizeAngle(b - a);
 
 /**
+ * Animate a move from one frame: insert `frames` copies of the from-frame after it, give the object `endPose` (pose
+ * fields, see motion.poseOf) in the last copy and tween the copies in between (tweenObject options: easing, path,
+ * orient, autoSquash). Returns { project, frameIds (in-betweens), inserted (all new frame ids), endFrameId }.
+ */
+export function tweenToPose(project, { animationId, layerId, instanceId, fromFrameId, endPose, frames = 6, ...tween }) {
+  if (!Number.isInteger(frames) || frames < 1 || frames > 64) throw new Error('A move takes 1 to 64 frames.');
+  const p = validateProject(project), animation = animationOf(p, animationId);
+  editableLayer(p, layerId);
+  const i = animation.frames.findIndex(f => f.id === fromFrameId), from = i < 0 ? null : opIn(animation.frames[i], layerId, instanceId);
+  if (!from) throw new Error('The object must appear in the first frame of the move.');
+  unlockedOp(from);
+  const inserted = insertCopies(p, animation, i, animation.frames[i], frames), end = inserted.at(-1);
+  writeOp(end, layerId, applyPose(from, endPose, partOf(p, from)));
+  const ids = inserted.map(f => f.id);
+  if (frames === 1) return { project: validateProject(p), frameIds: [], inserted: ids, endFrameId: end.id };
+  const result = tweenObject(p, { ...tween, animationId, layerId, instanceId, fromFrameId, toFrameId: end.id });
+  return { ...result, inserted: ids, endFrameId: end.id };
+}
+
+/**
+ * A looping bounce from a single frame, where the object rests on the ground. The from-frame becomes the ground
+ * contact and `frames − 1` copies follow it: the bottom edge rises by height·4u(1−u) (u = k/frames, a gravity
+ * parabola: slowing to the top, speeding up on the way down), so the last frame flows back into the contact. The contact
+ * frame is squashed (wider and shorter, bottom on the ground) and fast frames stretch upright, both keeping the area;
+ * `squash` (0..1) sets how much. Returns { project, frameIds (the loop, in order), inserted, frames: [{width, height, lift}] }.
+ */
+export function bounceInPlace(project, { animationId, layerId, instanceId, fromFrameId, height = 8, frames = 8, squash = 0.5 }) {
+  if (!Number.isInteger(frames) || frames < 3 || frames > 32) throw new Error('A bounce takes 3 to 32 frames.');
+  if (!Number.isFinite(height) || height < 1 || height > 512) throw new Error('Bounce at least 1 pixel high.');
+  const p = validateProject(project), animation = animationOf(p, animationId), amount = Math.max(0, Math.min(1, Number(squash) || 0));
+  editableLayer(p, layerId);
+  const i = animation.frames.findIndex(f => f.id === fromFrameId), base = i < 0 ? null : opIn(animation.frames[i], layerId, instanceId);
+  if (!base) throw new Error('The object must appear in this frame.');
+  unlockedOp(base);
+  const part = partOf(p, base), box = transformedSize(base, part), swap = swapsAxes(base.transform);
+  const centre = base.x + box.width / 2, ground = base.y + box.height, lift = k => { const u = (((k % frames) + frames) % frames) / frames; return height * 4 * u * (1 - u); };
+  const list = [animation.frames[i], ...insertCopies(p, animation, i, animation.frames[i], frames - 1)];
+  const report = list.map((frame, k) => {
+    const size = k ? squashStretch({ x: 0, y: (lift(k + 1) - lift(k - 1)) / 2 }, box, { strength: amount, max: amount * .8 }) : impactSquash(box, amount * .8);
+    const rise = roundInt(lift(k)), x = roundInt(centre - size.width / 2), y = ground - rise - size.height;
+    writeOp(frame, layerId, applyPose(opIn(frame, layerId, instanceId), { x, y, width: swap ? size.height : size.width, height: swap ? size.width : size.height }, part));
+    return { width: size.width, height: size.height, lift: rise };
+  });
+  return { project: validateProject(p), frameIds: list.map(f => f.id), inserted: list.slice(1).map(f => f.id), frames: report };
+}
+
+/**
+ * Set an object's pivot to the pixel under canvas `point` as it is shown in `frameId`, in every frame placing it (or
+ * `frameIds`), each moved so its artwork stays put (geometry.withPivot). Returns { project, pivot }.
+ */
+export function setPivotAt(project, { animationId, layerId, instanceId, frameId, point, frameIds }) {
+  const p = validateProject(project), animation = animationOf(p, animationId);
+  editableLayer(p, layerId);
+  const here = opIn(animation.frames.find(f => f.id === frameId) || {cels: []}, layerId, instanceId);
+  if (!here) throw new Error('The object must appear in this frame.');
+  const pivot = pivotUnder(here, partOf(p, here), point);
+  for (const { frame, op } of appearances(p, animation, layerId, instanceId, frameIds)) writeOp(frame, layerId, withPivot(unlockedOp(op), partOf(p, op), pivot));
+  return { project: validateProject(p), pivot };
+}
+
+/** Canvas joints of a two-object limb in one frame (as ikLimb sees them): shoulder and elbow pivots and the hand end. */
+export function limbJoints(project, { animationId, frameId, layerId, upperId, lowerId, lowerLayerId = layerId }) {
+  const frame = animationOf(project, animationId).frames.find(f => f.id === frameId), up = frame && opIn(frame, layerId, upperId), low = frame && opIn(frame, lowerLayerId, lowerId);
+  if (!up || !low) return null;
+  return { shoulder: instancePivot(up, partOf(project, up)), elbow: instancePivot(low, partOf(project, low)), hand: limbEnd(low, partOf(project, low)) };
+}
+
+/**
  * Motion squash & stretch, area preserving. For each frame placing the object, the velocity of its pivot (central
  * difference of neighbouring frames; `loop` wraps the ends) stretches it along the motion by
  * k = 1 + min(max, strength·speed/√area) and squashes it across by 1/k (motion.squashStretch); `tilt` (default true)
@@ -173,12 +241,14 @@ export function autoSquashStretch(project, { animationId, layerId, instanceId, s
  * Secondary motion: the follower copies the leader's motion with a spring lag (follow-through and overlap).
  * property 'angle': follower angle = spring(leader angle + offset); 'position': the follower's pivot springs after the
  * leader's pivot + offset. The offset is their difference in the first shared frame, so that frame keeps its pose.
+ * 'swing' (a tail, hair, a cape): the follower's pivot stays attached to the leader (moving and turning with it) and
+ * its far end springs after where the leader carries it, so it trails behind moves and turns and swings back.
  * stiffness (0..1, default .25), damping (0..1, default .7), delay (frames of extra overlap), loop (loopSpring: the
  * last frame flows into the first). The leader may be in another container (`leaderLayerId`, default `layerId`).
  * Only frames placing both objects are used. Returns { project, frameIds, values }.
  */
 export function springFollow(project, { animationId, layerId, instanceId, leaderId, leaderLayerId = layerId, property = 'angle', stiffness = 0.25, damping = 0.7, delay = 0, loop = false, frameIds }) {
-  if (!['angle', 'position'].includes(property)) throw new Error('Follow the angle or the position.');
+  if (!['angle', 'position', 'swing'].includes(property)) throw new Error('Follow the angle, the position or swing.');
   if (![stiffness, damping].every(v => Number.isFinite(v) && v > 0 && v <= 1)) throw new Error('Stiffness and damping must be between 0 and 1.');
   if (leaderId === instanceId && leaderLayerId === layerId) throw new Error('Choose a different object to follow.');
   const p = validateProject(project), animation = animationOf(p, animationId);
@@ -194,6 +264,19 @@ export function springFollow(project, { animationId, layerId, instanceId, leader
     const offset = (list[0].op.angle || 0) - (list[0].leader.angle || 0);
     values = run(list.map(a => (a.leader.angle || 0) + offset), true).map(v => normalizeAngle(roundInt(v)));
     list.forEach((a, k) => writeOp(a.frame, layerId, applyPose(unlockedOp(a.op), { angle: values[k] }, partOf(p, a.op))));
+  } else if (property === 'swing') {
+    const first = list[0], ownPart = partOf(p, first.op), lead = list.map(a => instancePivot(a.leader, partOf(p, a.leader)));
+    const a0 = first.leader.angle || 0, attach0 = instancePivot(first.op, ownPart), end0 = limbEnd(first.op, ownPart);
+    const length = Math.hypot(end0.x - attach0.x, end0.y - attach0.y), rest = Math.atan2(end0.y - attach0.y, end0.x - attach0.x) * DEG;
+    if (length < .5) throw new Error('Move the follower’s pivot to where it is attached.');
+    const attach = list.map((a, k) => rotatePoint({ x: lead[k].x + attach0.x - lead[0].x, y: lead[k].y + attach0.y - lead[0].y }, lead[k], (a.leader.angle || 0) - a0));
+    const goal = list.map((a, k) => { const r = (rest + (a.leader.angle || 0) - a0) / DEG; return { x: attach[k].x + length * Math.cos(r), y: attach[k].y + length * Math.sin(r) }; });
+    const xs = run(goal.map(g => g.x), false), ys = run(goal.map(g => g.y), false);
+    values = list.map((_, k) => normalizeAngle(roundInt((first.op.angle || 0) + Math.atan2(ys[k] - attach[k].y, xs[k] - attach[k].x) * DEG - rest)));
+    list.forEach((a, k) => {
+      const part = partOf(p, a.op), next = applyPose(unlockedOp(a.op), { angle: values[k] }, part), off = offsetOf(next, part);
+      writeOp(a.frame, layerId, { ...next, x: roundInt(attach[k].x - off.x), y: roundInt(attach[k].y - off.y) });
+    });
   } else {
     const lead = list.map(a => instancePivot(a.leader, partOf(p, a.leader))), own = instancePivot(list[0].op, partOf(p, list[0].op));
     const dx = own.x - lead[0].x, dy = own.y - lead[0].y, xs = run(lead.map(c => c.x + dx), false), ys = run(lead.map(c => c.y + dy), false);
@@ -281,7 +364,8 @@ function centroid(pixels, width) {
  * Smear frame between two frames of one container: the to-frame's pixels plus a trail swept back to where they were
  * in the from-frame (pixel-fx smear). The motion is the object's pivot movement (`instanceId`) or the shift of the
  * container's pixel centroid. With `insert` (default) a copy of the to-frame (all containers) is inserted just before
- * it, with `duration` (default the from-frame's); otherwise the to-frame itself becomes the smear. The trail is written
+ * it (after the last frame when the to-frame is the first: a loop), with `duration` (default the from-frame's);
+ * otherwise the to-frame itself becomes the smear. The trail is written
  * like a paint stroke: retained cels keep their objects and get local pixel edits, raster cels get pixels.
  * `steps` (default: the distance) and `color` ('source' or a palette index) style the trail.
  * Returns { project, frameId (the smeared frame), offset }.
@@ -304,8 +388,16 @@ export function smearFrame(project, { animationId, layerId, fromFrameId, toFrame
     offset = { x: roundInt(e.x - s.x), y: roundInt(e.y - s.y) };
   }
   if (!offset.x && !offset.y) throw new Error('Nothing moves between these frames.');
-  const frame = insert ? insertCopies(p, animation, j - 1, b, 1, duration ?? a.duration)[0] : b, cel = celOf(frame, layerId);
+  // Smearing from the last frame into the first (a loop) appends the smear at the end.
+  const at = j > 0 ? j - 1 : animation.frames.length - 1;
+  const frame = insert ? insertCopies(p, animation, at, b, 1, duration ?? a.duration)[0] : b, cel = celOf(frame, layerId);
   if (hasLockedInstances(cel)) throw new Error('Unlock objects in this container before smearing it.');
-  writeCelPixels(cel, smear(null, cel.pixels, p.width, p.height, { offset, steps, color }), p.width);
+  writeCelPixels(cel, instanceId ? smearInstance(p, cel, opIn(frame, layerId, instanceId), { offset, steps, color }) : smear(null, cel.pixels, p.width, p.height, { offset, steps, color }), p.width);
   return { project: validateProject(p), frameId: frame.id, offset };
+}
+/** Smear only one object's pixels: its trail fills empty pixels (and its own) and leaves other objects untouched. */
+function smearInstance(p, cel, op, options) {
+  const image = renderParts(p.parts).get(op.partId), own = cel.pixels.map((v, i) => (v >= 0 && instancePixel(op, image, { x: i % p.width, y: Math.floor(i / p.width) }) >= 0 ? v : -1));
+  const trail = smear(null, own, p.width, p.height, options);
+  return cel.pixels.map((v, i) => (trail[i] >= 0 && (v < 0 || own[i] >= 0) ? trail[i] : v));
 }

@@ -92,17 +92,19 @@ See the [PXA 2 format, editor workflow, and benchmarks](docs/pxa-v2.md). The ben
 
 Objects (placed parts) keep their artwork while you pose them, so these tools change poses or paint pixels without redrawing anything by hand. Tools that change several frames follow the **Edit** switch above the canvas (*All frames* / *This frame*).
 
+The **Animate** panel rows open *motion modes*: you work directly on the canvas with ghosts of the result, a mode bar holds the options, and the Live Preview plays the candidate animation. **Enter** applies (one undo step), **Esc** cancels. Modes are unavailable while an object's artwork is edited in place.
+
 | # | Tool | Where in the UI |
 |---|------|-----------------|
-| 1 | **Tweening with easing** – eased position, size, rotation, skew and wave phase between two key frames (linear, ease, cubic, back, elastic, bounce); a curve preview shows the easing. | **Animate** panel → *Tween to frame…* |
-| 2 | **Auto squash & stretch** – stretch along the motion, squash on impact, keeping the area. | **Animate** → *Squash & stretch* (also a checkbox in the tween dialog) |
+| 1 | **Tweening with easing** – drag the end ghost (or use arrow keys) to where the object ends, drag the round mid handle to bend the path into an arc; numbered in-between ghosts show the eased positions. Choose frames, easing (Smooth, Speed up, Slow down, Overshoot, Bounce, Elastic, Linear), *Squash & stretch* and *Turn along path*; *To frame N* tweens to a pose the object already has in a later frame. | **Animate** panel → *Animate a move* |
+| 2 | **Bounce · squash & stretch** – *Bounce in place* builds a looping bounce from a single frame (drag the height handle; frames and squash amount in the bar); *Add to existing motion* stretches along motion and squashes on impact, keeping the area. | **Animate** → *Bounce · squash & stretch* (also a toggle in *Animate a move*) |
 | 3 | **Pivots and motion arcs** – rotation and skew turn about a pivot (joint); tweens follow a line, an arc or a bézier, optionally turning with the path. | **Transform** panel → *Object pose* → Pivot (drag the pink crosshair on the canvas with the Object/Transform tool; *Centre* resets); path options in the tween dialog |
-| 4 | **Spring follow-through** – an object follows a leader's angle or position with spring lag. | **Animate** → *Follow-through* |
-| 5 | **Two-bone IK** – upper and lower limb reach a target; set pivots on the joints first. | **Animate** → *IK limb* (*Pick target on canvas*) |
-| 6 | **Smear frames** – a motion-trail frame between the current and next frame. | **Animate** → *Smear frame* |
+| 4 | **Spring follow-through** – click the object to follow; the pivot is set to the attachment point (drag it to adjust). Presets Tail, Hair, Cape, Antenna and a *Lag* slider. If the leader does not move, *Animate the leader first* opens a move for it. | **Animate** → *Follow-through* |
+| 5 | **Two-bone IK** – click the shoulder on the upper part, the elbow on the lower part, then drag the hand; bones and joints are drawn live. *Flip bend*, frame stepping and *Done* in the bar; the rig is remembered for the session. | **Animate** → *IK limb* |
+| 6 | **Smear frames** – one click inserts a trail frame of the selected object (its own colours) towards the next frame, or towards the first frame on the last frame of a loop; *Options* tweak steps, colour and insert/replace. | **Animate** → *Smear into next frame* |
 | 7 | **RotSprite rotation** – clean free rotations, skews and deforms. | **Transform** → *Object pose* → *Smooth rotation (RotSprite)* |
 | 8 | **Skew** – horizontal/vertical shear about the pivot. | **Transform** → *Object pose* → Skew X / Skew Y |
-| 9 | **Wave, bulge, pinch and twist** – non-destructive deforms; wave phase can be animated. | **Transform** → *Object pose* → Deform; **Animate** → *Wave motion* (reports seamless loops) |
+| 9 | **Wave, bulge, pinch and twist** – non-destructive deforms; wave phase can be animated. | **Transform** → *Object pose* → Deform; **Animate** → *Wave motion* (live preview; reports seamless loops) |
 | 10 | **Seamless tiles** – wrap-around drawing, faded 3×3 repeat, seam score. | Canvas toolbar → **Tile mode** toggle; the seam count and *Offset ½* appear in a badge on the canvas stage |
 | 11 | **Distance-field effects** – outline, selective outline, inner glow, rim light (8-way light picker), auto shade. | **Effects** panel (before/after preview in each dialog; a selection limits the effect) |
 | 12 | **Hue-shifted shading ramps** – an OKLCH ramp from the active colour. | **Color palette** → *Shading ramp* |

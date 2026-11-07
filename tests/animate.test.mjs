@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { validateProject, blankProject, compositeFrame, makeLayeredFrame } from '../src/domain/project.js';
-import { instancePivot } from '../src/domain/geometry.js';
+import { instancePivot, instancePixel, withPivot } from '../src/domain/geometry.js';
+import { renderParts } from '../src/domain/artwork.js';
 import { poseOf, applyPose } from '../src/domain/motion.js';
-import { tweenObject, autoSquashStretch, springFollow, ikLimb, waveAnimate, smearFrame, motionPath } from '../src/domain/animate.js';
+import { tweenObject, autoSquashStretch, springFollow, ikLimb, waveAnimate, smearFrame, motionPath, tweenToPose, bounceInPlace, setPivotAt, limbJoints } from '../src/domain/animate.js';
 import { encodeAIProject, decodeAIProject } from '../src/formats/pxa.js';
 import { encodePixelProject, decodePixelProject } from '../src/formats/pxs.js';
 import { copyObject, pasteObject } from '../src/domain/object-clipboard.js';
@@ -147,10 +148,73 @@ test('smearFrame inserts a trail frame that keeps the objects and stores the tra
   const cel = project.animations[0].frames[1].cels[0];
   assert.deepEqual(cel.source.ops, project.animations[0].frames[2].cels[0].source.ops);
   assert.ok(cel.source.overrides.length > 0 && opaque(project, 1) > opaque(project, 2) * 3);
+  // Only the moving object is smeared: a still object in the same container keeps its pixels.
+  const two = scene(2, k => [use({ x: 4 + 20 * k, y: 10 }), use({ x: 12, y: 11 }, 'still')]), trail = smearFrame(two, { ...T, fromFrameId: 'f0', toFrameId: 'f1', instanceId: 'o' }).project;
+  const [before, after] = [two.animations[0].frames[1], trail.animations[0].frames[1]].map(f => f.cels[0].pixels);
+  const stillAt = [...before.keys()].filter(i => i % 48 >= 12 && i % 48 < 18 && before[i] >= 0);
+  assert.ok(stillAt.length && stillAt.every(i => after[i] === before[i]) && after.slice(14 * 48, 14 * 48 + 12).every(v => v < 0));
   // Without an instance the pixel centroid gives the motion; insert:false smears the frame itself.
   const raster = smearFrame(p, { ...T, fromFrameId: 'f0', toFrameId: 'f1', insert: false, steps: 2 });
   assert.deepEqual([raster.frameId, raster.offset, raster.project.animations[0].frames.length], ['f1', { x: 20, y: 0 }, 2]);
   assert.throws(() => smearFrame(scene(2, () => [use({ x: 4, y: 4 })]), { ...T, fromFrameId: 'f0', toFrameId: 'f1' }), /Nothing moves/);
+});
+
+test('tweenToPose animates a move from a single frame: inserted copies, end pose, eased in-betweens on a path', () => {
+  const p = scene(2, k => [use({ x: 2, y: 20 }), use({ x: 30, y: 30 }, 'still')]);
+  const r = tweenToPose(p, { ...T, instanceId: 'o', fromFrameId: 'f0', endPose: { x: 26, y: 20 }, frames: 4, easing: 'linear' });
+  const ids = r.project.animations[0].frames.map(f => f.id);
+  assert.deepEqual(ids, ['f0', ...r.inserted, 'f1']);
+  assert.equal(r.endFrameId, r.inserted[3]);
+  assert.deepEqual([1, 2, 3, 4].map(k => op(r.project, k).x), [8, 14, 20, 26]);
+  assert.ok([1, 2, 3, 4].every(k => op(r.project, k, 'still').x === 30), 'other objects are copied unchanged');
+  assert.equal(op(r.project, 5).x, 2, 'later frames are untouched');
+  const arc = tweenToPose(p, { ...T, instanceId: 'o', fromFrameId: 'f0', endPose: { x: 26, y: 20 }, frames: 4, path: { kind: 'arc', via: { x: 17, y: 10 } } });
+  assert.ok(op(arc.project, 2).y < 14, 'the arc lifts the middle of the move');
+  assert.equal(tweenToPose(p, { ...T, instanceId: 'o', fromFrameId: 'f0', endPose: { x: 9, y: 1 }, frames: 1 }).frameIds.length, 0);
+  assert.throws(() => tweenToPose(p, { ...T, instanceId: 'x', fromFrameId: 'f0', endPose: { x: 0, y: 0 } }), /must appear/);
+  assert.throws(() => tweenToPose(p, { ...T, instanceId: 'o', fromFrameId: 'f0', endPose: { x: 0, y: 0 }, frames: 0 }), /1 to 64/);
+});
+
+test('bounceInPlace builds a looping bounce from one frame: squashed contact, kept area, continuous loop', () => {
+  const p = scene(1, () => [use({ x: 20, y: 30 })]), W = 6, H = 4, ground = 34;
+  const r = bounceInPlace(p, { ...T, instanceId: 'o', fromFrameId: 'f0', height: 12, frames: 8, squash: 0.6 });
+  assert.equal(r.project.animations[0].frames.length, 8);
+  assert.deepEqual(r.frameIds, ['f0', ...r.inserted]);
+  const ops = [...Array(8).keys()].map(k => op(r.project, k)), size = o => ({ w: o.width ?? W, h: o.height ?? H });
+  const contact = size(ops[0]);
+  assert.ok(contact.w > W && contact.h < H && ops[0].y + contact.h === ground, 'contact frame squashed on the ground');
+  for (const o of ops) assert.ok(Math.abs(size(o).w * size(o).h - W * H) <= Math.max(size(o).w, size(o).h), 'area kept');
+  assert.equal(ops[4].y + size(ops[4]).h, ground - 12, 'the top of the bounce');
+  assert.deepEqual([ops[7].y + size(ops[7]).h, ops[7].x + size(ops[7]).w / 2], [ops[1].y + size(ops[1]).h, ops[1].x + size(ops[1]).w / 2], 'last frame mirrors the first rise: loops');
+  assert.ok(size(ops[1]).h > H, 'fast frames stretch upright');
+  assert.throws(() => bounceInPlace(p, { ...T, instanceId: 'o', fromFrameId: 'f0', frames: 2 }), /3 to 32/);
+});
+
+test('setPivotAt keeps rotated art in place; limbJoints reads the limb; swing follow trails a moving leader', () => {
+  const p = scene(2, k => [use({ x: 10 + k * 6, y: 10 }, 'body'), use({ x: 16 + k * 6, y: 11, angle: 30 }, 'tail', 'bone')]);
+  const images = renderParts(p.parts), art = o => {
+    const shown = [...Array(48 * 48).keys()].filter(i => instancePixel(o, images.get('bone'), { x: i % 48, y: Math.floor(i / 48) }) >= 0);
+    return [shown.reduce((a, i) => a + i % 48, 0) / shown.length, shown.reduce((a, i) => a + Math.floor(i / 48), 0) / shown.length];
+  };
+  const near = (a, b) => assert.ok(Math.hypot(a[0] - b[0], a[1] - b[1]) < 1, `${a} ≈ ${b}`);
+  const pivoted = setPivotAt(p, { ...T, instanceId: 'tail', frameId: 'f0', point: instancePivot(op(p, 0, 'tail'), p.parts[1]) });
+  assert.deepEqual(op(pivoted.project, 0, 'tail').pivot, pivoted.pivot);
+  near(art(op(pivoted.project, 0, 'tail')), art(op(p, 0, 'tail')));
+  near(art(withPivot(op(p, 0, 'tail'), p.parts[1], { x: 8, y: 0 })), art(op(p, 0, 'tail')));
+  assert.notDeepEqual(op(p, 0, 'tail').x, withPivot(op(p, 0, 'tail'), p.parts[1], { x: 8, y: 0 }).x, 'the position compensates');
+  const joints = limbJoints(p, { animationId: 'A', frameId: 'f0', layerId: 'L', upperId: 'body', lowerId: 'tail' });
+  assert.ok(joints && Math.abs(joints.hand.x - joints.elbow.x) > 3);
+  const flat = scene(4, k => [use({ x: 10, y: 10 + k * 6 }, 'body'), use({ x: 16, y: 11 + k * 6, pivot: { x: 0, y: 0 } }, 'tail', 'bone')]);
+  const swing = springFollow(flat, { ...T, instanceId: 'tail', leaderId: 'body', property: 'swing', stiffness: 0.3, damping: 0.5 });
+  const tail = k => op(swing.project, k, 'tail'), body = k => op(swing.project, k, 'body');
+  assert.ok([1, 2, 3].every(k => Math.abs(instancePivot(tail(k), p.parts[1]).y - body(k).y - 1.5) <= 1), 'pivot stays attached to the leader');
+  assert.ok(swing.values.slice(1).some(a => a !== 0), 'the tail swings as the body moves');
+});
+
+test('smearFrame from the last frame into the first appends the smear (loop)', () => {
+  const p = scene(2, k => [use({ x: 4 + 20 * k, y: 10 })]);
+  const { project, frameId } = smearFrame(p, { ...T, fromFrameId: 'f1', toFrameId: 'f0', instanceId: 'o' });
+  assert.deepEqual(project.animations[0].frames.map(f => f.id), ['f0', 'f1', frameId]);
 });
 
 test('animated pivots, skew, deforms, sizes and RotSprite round-trip through PXA 2, PXS, the clipboard and frame copies', async () => {

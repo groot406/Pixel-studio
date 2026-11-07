@@ -24,6 +24,7 @@ import { openAIEdit } from '../features/ai/edit-dialog.js';
 import { initToolExtras, renderToolExtras, gradientStatus, unclampedDrawing, lineToolPoints, wrappedFootprint, wrappedIndex, beginGradient, moveGradient, drawCanvasOverlay, renderTileGhost } from './tool-extras.js';
 import { initObjectPose, renderObjectPose, renderPivotMarker } from './object-pose.js';
 import { initAnimatePanel, renderAnimatePanel } from './animate-panel.js';
+import { initMotionModes, syncMotionMode, drawMotionOverlay } from './motion-modes.js';
 import { initEffectsPanel, renderEffectsPanel } from './effects-panel.js';
 import { initPaletteTools } from './palette-tools.js';
 import { instancePivot } from '../domain/geometry.js';
@@ -61,7 +62,7 @@ const state = {
   project: blankProject(), animationId: null, frameId: null, layerId: null,
   tool: 'pencil', color: 0, scale: 12, fit: true, grid: true, onion: false,
   filled: false, playing: true, previewIndex: 0, previewTime: 0, previewBackground: 0,
-  inPlaceEdit:null, objectSelection:null, objectScope:'animation', collapsedGroups:new Set(), objectDrag:null,
+  inPlaceEdit:null, previewOverride:null, objectSelection:null, objectScope:'animation', collapsedGroups:new Set(), objectDrag:null,
   cursor: null, drawing: null, selection: null, lastPaint: null, shiftHeld: false, swap: false, swapFirst: null,
   brushSize: 1, brushShape: 'square', symmetry: 'none', pixelPerfect: false, wandMode: 'shape', resizeMode: 'free', transformScope: 'frame', clipboard: null, objectClipboard: null, objectMulti: null, lastClipboard: 'pixels',
   undo: [], redo: [], samples: [], sampleData: new Map(), saveTimer: null, storageAvailable: true, importSkipEmpty: true,
@@ -423,6 +424,7 @@ function renderCanvas() {
     context.strokeStyle='#285b47';context.lineWidth=1;context.stroke();
   }
   drawCanvasOverlay(context);
+  drawMotionOverlay(context);
   renderPivotMarker();
   renderTileGhost();
   $('zoom-value').textContent = `${state.scale * 100}%`;
@@ -1156,10 +1158,15 @@ function insertLayer(name, source = null) {
   state.layerId = layer.id;
   return layer;
 }
+/** The project and animation the Live Preview plays: a motion mode's candidate result, or the current one. */
+function previewAnimation() {
+  const project = state.previewOverride, animation = project?.animations.find(a => a.id === state.animationId);
+  return animation ? { project, animation, playing: true } : { project: state.project, animation: currentAnimation(), playing: state.playing };
+}
 function renderPreview() {
-  const animation = currentAnimation();
-  const index = state.playing ? state.previewIndex % animation.frames.length : animation.frames.findIndex(f => f.id === state.frameId);
-  paintSprite($('preview-canvas'), state.inPlaceEdit?previewInPlaceEdit(state.inPlaceEdit.session,true):compositeFrame(state.project,animation.frames[Math.max(0,index)]), state.project.palette);
+  const { project, animation, playing } = previewAnimation();
+  const index = playing ? state.previewIndex % animation.frames.length : animation.frames.findIndex(f => f.id === state.frameId);
+  paintSprite($('preview-canvas'), state.inPlaceEdit?previewInPlaceEdit(state.inPlaceEdit.session,true):compositeFrame(project,animation.frames[Math.max(0,index)]), project.palette);
   $('preview-frame').textContent = `${Math.max(0,index) + 1} / ${animation.frames.length}`;
 }
 function renderPlaybackControls() {
@@ -1183,6 +1190,7 @@ function renderSampleCards(container) {
 }
 function renderAll() {
   normalizeSelection();
+  syncMotionMode();
   if (document.activeElement !== $('project-name')) $('project-name').value = state.project.name;
   renderProjectTabs();renderPanelState();renderTools(); renderPalette(); renderTimeline(); renderAnimations(); renderLayers(); renderSelection(); renderCanvas(); renderPreview(); renderPlaybackControls();renderInPlaceControls();renderEditScope();renderAnimatePanel();renderEffectsPanel();
 }
@@ -1758,8 +1766,8 @@ function togglePlay() {
   renderPlaybackControls(); renderPreview();
 }
 function animationTick(time) {
-  if (state.playing && !document.hidden) {
-    const animation = currentAnimation();
+  const { animation, playing } = previewAnimation();
+  if (playing && !document.hidden) {
     if (!state.previewTime) state.previewTime = time;
     let changed = false;
     let duration = animation.frames[state.previewIndex % animation.frames.length].duration || 1000 / animation.fps;
@@ -2333,8 +2341,8 @@ function accountDialog() {
 function bindEvents() {
   bindFileDrop();
   const mathsDeps={state,$,icon,escapeHTML,mutate,snapshot,remember,renderAll,renderCanvas,renderPreview,renderTools,toast,openDialog,paintSprite,finishDrawing,
-    currentAnimation,currentFrame,currentLayer,selectedObject,selectedItems,transformItems,resizableObject,objectTarget,canEditPixels,canvasPixels,canvasPosition,normalizeSelection};
-  initToolExtras(mathsDeps);initObjectPose(mathsDeps);initAnimatePanel(mathsDeps);initEffectsPanel(mathsDeps);initPaletteTools(mathsDeps);
+    currentAnimation,currentFrame,currentLayer,selectedObject,selectedItems,transformItems,resizableObject,objectTarget,canEditPixels,canvasPixels,canvasPosition,normalizeSelection,selectObject,selectFrameAt,undo:()=>restore(state.undo,state.redo)};
+  initToolExtras(mathsDeps);initObjectPose(mathsDeps);initMotionModes(mathsDeps);initAnimatePanel(mathsDeps);initEffectsPanel(mathsDeps);initPaletteTools(mathsDeps);
   // Holding Shift previews the straight line a pencil or eraser click will draw.
   const trackShift=event=>{if(state.shiftHeld!==event.shiftKey){state.shiftHeld=event.shiftKey;if(state.cursor)renderCanvas();}};
   window.addEventListener('keydown',trackShift);window.addEventListener('keyup',trackShift);

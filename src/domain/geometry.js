@@ -259,3 +259,34 @@ export function grownInstanceShift(transform, before, after, left, top) {
   const a=partToCanvasOffset(transform,before,0,0), b=partToCanvasOffset(transform,after,left,top);
   return {x:a.x-b.x,y:a.y-b.y};
 }
+
+/** Skew then rotate a pivot-relative vector as rendering does (`inverse` undoes it). */
+function poseVector(instance, v, inverse = false) {
+  const [cos, sin] = turned(instanceAngle(instance)), skew = instance.skew;
+  let { x, y } = v;
+  if (inverse) {
+    [x, y] = [x * cos + y * sin, -x * sin + y * cos];
+    if (skew) { y -= slope(skew.y) * x; x -= slope(skew.x) * y; }
+    return { x, y };
+  }
+  if (skew) { x += slope(skew.x) * y; y += slope(skew.y) * x; }
+  return { x: x * cos - y * sin, y: x * sin + y * cos };
+}
+/** Box-relative pivot pixel under canvas point `at`, for the instance as it is shown (rotation and skew undone). */
+export function pivotUnder(instance, part, at) {
+  const c = instancePivot(instance, part), local = poseVector(instance, { x: at.x - c.x, y: at.y - c.y }, true);
+  const clamp = v => Math.max(-128, Math.min(256, Math.floor(v)));
+  return { x: clamp(c.x - instance.x + local.x), y: clamp(c.y - instance.y + local.y) };
+}
+/**
+ * Copy of `instance` with `pivot` set (null: the centre), moved so its artwork stays put: changing the point a
+ * transform turns around shifts the art by (M − I)·Δ, which the position undoes to the nearest whole pixel.
+ */
+export function withPivot(instance, part, pivot) {
+  const next = { ...instance };
+  if (pivot) next.pivot = { x: pivot.x, y: pivot.y }; else delete next.pivot;
+  if (!instance.angle && !instance.skew) return next;
+  const a = instancePivot(instance, part), b = instancePivot(next, part), delta = { x: b.x - a.x, y: b.y - a.y }, moved = poseVector(instance, delta);
+  next.x += Math.round(moved.x - delta.x); next.y += Math.round(moved.y - delta.y);
+  return next;
+}

@@ -4,7 +4,7 @@
  * in the Edit scope; sliders preview live and commit one undo step on release.
  */
 import { setObjectEffects } from '../domain/objects.js';
-import { instancePivot, transformedSize } from '../domain/geometry.js';
+import { instancePivot, pivotUnder, withPivot } from '../domain/geometry.js';
 
 let d, live = null, pivotDrag = null;
 const DEFORM_DEFAULTS = { wave: { axis: 'x', amplitude: 2, wavelength: 8, phase: 0 }, bulge: { strength: 50 }, pinch: { strength: 50 }, twist: { angle: 90 } };
@@ -136,27 +136,6 @@ export function renderPivotMarker() {
   marker.style.left = `${p.x * s}px`; marker.style.top = `${p.y * s}px`;
 }
 
-const rad = deg => deg * Math.PI / 180;
-const slope = deg => !deg ? 0 : Math.abs(deg) === 45 ? Math.sign(deg) : Math.tan(rad(deg));
-/** Skew then rotate a vector about the pivot, as geometry.instanceBox does. */
-function forward(op, v) {
-  let { x, y } = v;
-  if (op.skew) { x += slope(op.skew.x) * y; y += slope(op.skew.y) * x; }
-  const a = rad(op.angle || 0), c = Math.cos(a), s = Math.sin(a);
-  return { x: x * c - y * s, y: x * s + y * c };
-}
-function inverse(op, v) {
-  const a = rad(op.angle || 0), c = Math.cos(a), s = Math.sin(a);
-  let x = v.x * c + v.y * s, y = -v.x * s + v.y * c;
-  if (op.skew) { y -= slope(op.skew.y) * x; x -= slope(op.skew.x) * y; }
-  return { x, y };
-}
-/** Box-relative pivot under canvas point `at`, for the artwork as it is shown now. */
-function pivotUnder(op, part, at) {
-  const c = instancePivot(op, part), local = inverse(op, { x: at.x - c.x, y: at.y - c.y });
-  const clamp = v => Math.max(-128, Math.min(256, Math.floor(v)));
-  return { x: clamp(c.x - op.x + local.x), y: clamp(c.y - op.y + local.y) };
-}
 /**
  * Set (or reset with null) the pivot and move each instance so its artwork stays where it is: changing the point a
  * transform turns around shifts the art by (I − M)·Δ, which the position undoes (to the nearest whole pixel).
@@ -171,9 +150,8 @@ function pivotProject(project, pose, pivot) {
     for (const cel of frame.cels) for (const op of cel.source?.ops || []) {
       if (op.type !== 'use' || !keys.has(`${cel.layerId}:${op.id}`) || (!op.angle && !op.skew)) continue;
       const old = before.frames[index].cels.find(c => c.layerId === cel.layerId).source.ops.find(o => o.type === 'use' && o.id === op.id);
-      const part = next.parts.find(p => p.id === op.partId);
-      const a = instancePivot(old, part), b = instancePivot(op, part), delta = { x: b.x - a.x, y: b.y - a.y }, moved = forward(op, delta);
-      op.x += Math.round(moved.x - delta.x); op.y += Math.round(moved.y - delta.y);
+      const moved = withPivot(old, next.parts.find(p => p.id === op.partId), op.pivot);
+      op.x = moved.x; op.y = moved.y;
     }
   });
   return next;

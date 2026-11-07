@@ -84,6 +84,62 @@
 
 .palette-actions #shading-ramp, .palette-actions #colour-cycle { white-space: nowrap; }
 
+/* Motion modes: floating bar over the canvas (does not shift it), launch rows, wave preview. */
+.motion-bar { position: absolute; z-index: 5; bottom: 10px; left: 50%; transform: translateX(-50%); display: grid; gap: 6px; width: max-content; max-width: calc(100% - 16px); padding: 8px 8px 8px 12px; border: 1px solid #d3dfc9; border-radius: 12px; background: #fffefbf5; box-shadow: 0 8px 24px #36482c29; color: #52664d; font-size: 12px; backdrop-filter: blur(6px); }
+.motion-bar[hidden] { display: none; }
+.motion-bar.docked { top: 10px; bottom: auto; left: 10px; transform: none; display: flex; flex-direction: column; align-items: stretch; gap: 8px; width: 256px; max-height: calc(100% - 20px); overflow: auto; padding: 12px; }
+.motion-bar.docked .motion-head { display: contents; }
+.motion-bar.docked .motion-hint { flex: none; line-height: 1.45; }
+.motion-bar.docked .motion-steps { flex-direction: column; align-items: flex-start; }
+.motion-bar.docked .motion-controls { flex-direction: column; align-items: flex-start; gap: 10px; padding-top: 10px; }
+.motion-bar.docked .motion-actions { order: 9; margin: 2px 0 0; padding-top: 10px; border-top: 1px solid #e3eadc; }
+.motion-bar.docked .motion-actions .button.small { flex: 1 1 0; justify-content: center; }
+.motion-bar.docked .motion-info { order: 8; line-height: 1.4; }
+.motion-bar:not(.docked) .motion-label { display: none; }
+.motion-bar:not(.docked) .motion-chip:has(.motion-curve) { padding: 0 6px; }
+.motion-head, .motion-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.motion-controls { padding-top: 6px; border-top: 1px solid #e3eadc; }
+.motion-title { display: inline-flex; align-items: center; gap: 6px; color: var(--ink); font-size: 12px; white-space: nowrap; }
+.motion-title svg { width: 16px; height: 16px; fill: none; stroke: var(--green); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.motion-hint { flex: 1 1 160px; min-width: 0; }
+.motion-hint b { color: var(--ink); font-weight: 600; }
+.motion-actions { display: inline-flex; gap: 6px; margin-left: auto; }
+.motion-bar .button.small { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.motion-bar .button.small svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.motion-bar .flip-x svg { transform: scaleX(-1); }
+.motion-bar kbd { padding: 0 4px; border: 1px solid #0002; border-radius: 4px; font: 600 9px/14px inherit; opacity: .7; }
+.motion-steps { display: flex; gap: 4px; margin: 0; padding: 0; list-style: none; counter-reset: step; }
+.motion-steps li { counter-increment: step; display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px 2px 3px; border-radius: 999px; background: #f1f5ec; color: #8a9680; font-size: 11px; white-space: nowrap; }
+.motion-steps li::before { content: counter(step); display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: #dfe7d6; color: #52664d; font-size: 10px; font-weight: 700; }
+.motion-steps li.now { background: #e3efe0; color: var(--ink); font-weight: 600; }
+.motion-steps li.now::before { background: var(--green); color: #fff; }
+.motion-steps li.done::before { content: "✓"; background: #b9d3b0; }
+.motion-chips { display: inline-flex; flex-wrap: wrap; gap: 3px; }
+.motion-chip { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 9px; border: 1px solid #dce4d5; border-radius: 999px; background: #fff; color: #52664d; font: inherit; font-size: 11px; cursor: pointer; white-space: nowrap; }
+.motion-chip:hover:not(.active):not(:disabled) { background: #f3f6ee; }
+.motion-chip:focus-visible, .motion-stepper button:focus-visible { outline: 2px solid var(--green); outline-offset: 1px; }
+.motion-chip.active { border-color: var(--green); background: var(--green); color: #fff; }
+.motion-chip:disabled { opacity: .4; cursor: default; }
+.motion-toggle i { width: 10px; height: 10px; border: 1.5px solid currentColor; border-radius: 3px; }
+.motion-toggle.active i { background: #fff; box-shadow: inset 0 0 0 2px var(--green); }
+.motion-curve { width: 18px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.motion-field { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.motion-field input[type="range"] { width: 90px; accent-color: var(--green); }
+.motion-field output { min-width: 22px; color: var(--ink); font-weight: 600; text-align: center; }
+.motion-stepper { display: inline-flex; align-items: center; border: 1px solid #dce4d5; border-radius: 8px; background: #fff; }
+.motion-stepper button { width: 24px; height: 24px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: #52664d; font: 600 14px/1 inherit; cursor: pointer; }
+.motion-stepper button:hover:not(:disabled) { background: #f3f6ee; }
+.motion-stepper button:disabled { opacity: .35; cursor: default; }
+.motion-frames { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.motion-info { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; color: #65735e; font-size: 11px; }
+.motion-info[hidden] { display: none; }
+.motion-info.is-error { color: #a3542f; font-weight: 550; }
+.workbench.motion-active #resize-handles, .workbench.motion-active #pivot-marker, .workbench.motion-active .tile-status, .workbench.motion-active #selection-actions { display: none !important; }
+.workbench.motion-active .tool-grid { opacity: .45; pointer-events: none; }
+.object-action.active { background: #e3efe0; box-shadow: inset 3px 0 0 var(--green); }
+.object-action.active svg { stroke: var(--green); }
+.wave-preview { display: block; width: 128px; height: 128px; margin: 10px auto; border: 1px solid #dce4d5; border-radius: 8px; image-rendering: pixelated; }
+
 @media (max-width: 760px) {
   .seg-option { width: 40px; height: 36px; }
   .gradient-options, .object-pose { grid-column: 1 / -1; }
@@ -93,6 +149,8 @@
   .tile-status { bottom: 6px; font-size: 12px; }
   .animate-section, .effects-section { grid-column: 1 / -1; }
   .maths-preview { gap: 8px; }
+  .motion-bar { bottom: 6px; font-size: 13px; }
+  .motion-chip, .motion-stepper button { height: 34px; min-width: 34px; }
 }
 #pixel-canvas.picking-point { cursor: crosshair; outline: 2px dashed #ff2d87; outline-offset: 2px; }
 .maths-form .form-grid { margin-top: 12px; }

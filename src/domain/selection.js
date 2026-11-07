@@ -97,3 +97,24 @@ export function outlinePixels(pixels, width, height, color, thickness = 1, diago
   }
   return result;
 }
+
+/** Bounding rectangle of canvas pixel indices (a wand mask). */
+export function maskBounds(mask, canvasW) {
+  if (!mask?.length) return null;
+  let minX = Infinity, minY = Infinity, maxX = -1, maxY = -1;
+  for (const index of mask) {
+    const x = index % canvasW, y = (index - x) / canvasW;
+    minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+  }
+  return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
+}
+
+/** Move only the masked pixels; the gap they leave becomes transparent. */
+export function moveMaskedPixels(pixels, canvasW, canvasH, mask, dx, dy) {
+  readPixels(pixels, canvasW, canvasH);
+  ({ dx, dy } = clampSelectionOffset(maskBounds(mask, canvasW), dx, dy, canvasW, canvasH));
+  const result = pixels.slice(), moved = mask.map(index => index + dy * canvasW + dx);
+  for (const index of mask) result[index] = -1;
+  mask.forEach((index, i) => { result[moved[i]] = pixels[index]; });
+  return { pixels: result, mask: moved, selection: maskBounds(moved, canvasW), dx, dy };
+}

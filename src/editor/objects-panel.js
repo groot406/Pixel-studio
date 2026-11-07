@@ -78,7 +78,7 @@ export function renderObjectsPanel({project,animation,frame,selected,scope,colla
   });
   const openMenu=(item,event)=>{
     closeMenu();
-    const instance=item.node?.instance, editable=!item.locked;
+    const instance=item.node?.instance, pixels=item.node?.type==='pixels', editable=!item.locked;
     const entries=[
       instance && ['edit','Edit on canvas','pencil',editable],
       ['copy','Copy','copy',true],
@@ -92,6 +92,8 @@ export function renderObjectsPanel({project,animation,frame,selected,scope,colla
       instance && ['move-group','Move to group…','layers',editable],
       instance && ['independent','Make independent','spark',editable],
       instance && ['isolated','Open isolated editor','fit',true],
+      pixels && ['convert','Convert to object','object-new',editable],
+      pixels && ['split','Split into objects…','split',editable],
       null,
       ['visibility',item.node?.instance?.visible===false || !project.layers.find(l=>l.id===item.layerId).visible?'Show':'Hide','eye',true],
       ['lock',item.locked?'Unlock':'Lock',item.locked?'unlock':'lock',true],

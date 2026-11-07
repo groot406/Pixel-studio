@@ -181,3 +181,85 @@ export function replaceColor(pixels, width, height, source, target, rect = null)
   }
   return result;
 }
+
+const hexRgb = hex => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
+const luminance = ([r, g, b]) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
+
+/**
+ * The palette color one shading step darker (direction -1) or lighter (+1): the closest color, by RGB
+ * distance, among those noticeably darker or lighter. Returns the same index when no step exists.
+ */
+export function shadeIndex(palette, index, direction) {
+  if (!Array.isArray(palette) || index < 0 || index >= palette.length) return index;
+  if (direction !== -1 && direction !== 1) throw new Error('Shade direction must be -1 (darker) or 1 (lighter).');
+  const source = hexRgb(palette[index]), light = luminance(source);
+  let best = index, bestDistance = Infinity;
+  palette.forEach((hex, candidate) => {
+    const rgb = hexRgb(hex), step = luminance(rgb) - light;
+    if (candidate === index || step * direction < 8) return;
+    const distance = rgb.reduce((sum, value, i) => sum + (value - source[i]) ** 2, 0);
+    if (distance < bestDistance) { best = candidate; bestDistance = distance; }
+  });
+  return best;
+}
+
+/** Checkerboard dither mask in canvas coordinates, so neighbouring strokes stay aligned. */
+export const ditherCell = (x, y) => ((x + y) & 1) === 0;
+
+/**
+ * Pixel-perfect stroke step: append `point` to a 1px path. When the last three pixels form an
+ * L-shaped corner, the middle pixel is dropped and returned so the caller can restore it.
+ */
+export function pixelPerfectStep(path, point) {
+  const last = path.at(-1);
+  if (last && last.x === point.x && last.y === point.y) return null;
+  path.push({ x: point.x, y: point.y });
+  if (path.length < 3) return null;
+  const [a, b, c] = path.slice(-3);
+  const corner = Math.abs(a.x - c.x) === 1 && Math.abs(a.y - c.y) === 1 && (b.x === a.x || b.y === a.y) && (b.x === c.x || b.y === c.y);
+  if (!corner) return null;
+  path.splice(path.length - 2, 1);
+  return b;
+}
+
+/**
+ * Magic-wand region from (x, y). `shape` selects every connected opaque pixel (8-connected);
+ * `color` selects the connected pixels of exactly the clicked color (4-connected).
+ * Returns {indices, rect} or null when nothing selectable was clicked.
+ */
+export function connectedRegion(pixels, width, height, x, y, mode = 'shape') {
+  readPixels(pixels, width, height);
+  if (!['shape', 'color'].includes(mode)) throw new Error('Wand mode must be shape or color.');
+  if (x < 0 || y < 0 || x >= width || y >= height) return null;
+  const start = y * width + x, target = pixels[start];
+  if (target < 0) return null;
+  const match = mode === 'shape' ? v => v >= 0 : v => v === target;
+  const steps = mode === 'shape' ? [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]] : [[0, -1], [-1, 0], [1, 0], [0, 1]];
+  const seen = new Uint8Array(width * height), indices = [], stack = [start];
+  seen[start] = 1;
+  let minX = x, minY = y, maxX = x, maxY = y;
+  while (stack.length) {
+    const index = stack.pop(), px = index % width, py = (index - px) / width;
+    indices.push(index);
+    minX = Math.min(minX, px); maxX = Math.max(maxX, px); minY = Math.min(minY, py); maxY = Math.max(maxY, py);
+    for (const [dx, dy] of steps) {
+      const nx = px + dx, ny = py + dy, next = ny * width + nx;
+      if (nx < 0 || ny < 0 || nx >= width || ny >= height || seen[next] || !match(pixels[next])) continue;
+      seen[next] = 1; stack.push(next);
+    }
+  }
+  return { indices: indices.sort((a, b) => a - b), rect: { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 } };
+}
+
+/** Every separate shape (8-connected opaque island), largest first. */
+export function findIslands(pixels, width, height) {
+  readPixels(pixels, width, height);
+  const taken = new Uint8Array(width * height), islands = [];
+  for (let i = 0; i < pixels.length; i++) {
+    if (pixels[i] < 0 || taken[i]) continue;
+    const island = connectedRegion(pixels, width, height, i % width, Math.floor(i / width), 'shape');
+    for (const index of island.indices) taken[index] = 1;
+    islands.push(island);
+  }
+  return islands.sort((a, b) => b.indices.length - a.indices.length);
+}

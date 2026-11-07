@@ -11,8 +11,9 @@ import { MAX_SIZE, MAX_TOTAL_PIXELS, MAX_COLORS, MAX_LAYERS, uid, getAnimationLa
 import { inspectSheet, sliceSpritesheet, createSheetMetadata, validateSheetMetadata } from '../formats/spritesheet.js';
 import { encodePixelProject, decodePixelProject } from '../formats/pxs.js';
 import { encodeAIProject, decodeAIProject, AI_FORMAT_GUIDE } from '../formats/pxa.js';
-import { selectionBounds, clampSelectionOffset, moveSelectedPixels, outlinePixels } from '../domain/selection.js';
-import { brushPoints, snapLineEnd, transformPixels, copyPixels, pastePixels, replaceColor } from '../domain/toolbox.js';
+import { selectionBounds, clampSelectionOffset, moveSelectedPixels, outlinePixels, moveMaskedPixels, maskBounds } from '../domain/selection.js';
+import { brushPoints, snapLineEnd, transformPixels, copyPixels, pastePixels, replaceColor, connectedRegion, shadeIndex, ditherCell, pixelPerfectStep } from '../domain/toolbox.js';
+import { createObjectFromPixels, splitIntoObjects, pixelIslands } from '../domain/object-create.js';
 import { openProjectStore } from '../storage/workspace.js';
 import { openPromptBuilder } from '../features/ai/prompt-dialog.js';
 import { openAIEdit } from '../features/ai/edit-dialog.js';
@@ -22,7 +23,7 @@ const icon = (name) => `<svg aria-hidden="true"><use href="#i-${name}"/></svg>`;
 const escapeHTML = (value) => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const STORAGE_KEY = 'pixel-studio.project.v1';
-const TOOL_NAMES = {pencil:'Pencil',eraser:'Eraser',line:'Line',fill:'Flood fill',replace:'Replace color',eyedropper:'Eyedropper',rectangle:'Rectangle',ellipse:'Ellipse',object:'Select / move objects',select:'Select / move pixels'};
+const TOOL_NAMES = {pencil:'Pencil',eraser:'Eraser',line:'Line',fill:'Flood fill',replace:'Replace color',eyedropper:'Eyedropper',rectangle:'Rectangle',ellipse:'Ellipse',object:'Select / move objects',select:'Select / move pixels',wand:'Magic wand',dither:'Dither brush',shade:'Shade'};
 const TOOL_HINTS = {
   pencil:'Draw on the active pixel object. Hold Alt to pick a color.',
   eraser:'Erase on the active pixel object. Right-click also erases.',
@@ -33,17 +34,22 @@ const TOOL_HINTS = {
   rectangle:'Drag a rectangle. Hold Shift for a perfect square.',
   ellipse:'Drag an ellipse. Hold Shift for a perfect circle.',
   object:'Click to select a part. Drag to move; double-click to edit its artwork in place. Arrow keys nudge.',
-  select:'Drag to select. Drag inside to move; arrow keys nudge.',
+  select:'Drag to select. Drag inside to move; arrow keys nudge. Make object turns the selection into a movable object.',
+  wand:'Click a shape to select it. Shift-click adds more. Then press Make object (Ctrl/⌘ G).',
+  dither:'Paints a checkerboard pattern with the current color. Great for gradients and texture.',
+  shade:'Click or drag to darken pixels one palette step. Right-click lightens.',
 };
-const BRUSH_TOOLS = ['pencil','eraser','line'];
+const BRUSH_TOOLS = ['pencil','eraser','line','dither','shade'];
 const SYMMETRY_TOOLS = [...BRUSH_TOOLS,'rectangle','ellipse'];
+const FREEHAND_TOOLS = ['pencil','eraser','dither','shade'];
+const SELECT_TOOLS = ['select','wand'];
 const state = {
   project: blankProject(), animationId: null, frameId: null, layerId: null,
   tool: 'pencil', color: 0, scale: 12, fit: true, grid: true, onion: false,
   filled: false, playing: true, previewIndex: 0, previewTime: 0, previewBackground: 0,
   inPlaceEdit:null, objectSelection:null, objectScope:'animation', collapsedGroups:new Set(), objectDrag:null,
   cursor: null, drawing: null, selection: null, lastPaint: null, shiftHeld: false, swap: false, swapFirst: null,
-  brushSize: 1, brushShape: 'square', symmetry: 'none', transformScope: 'frame', clipboard: null, objectClipboard: null, lastClipboard: 'pixels',
+  brushSize: 1, brushShape: 'square', symmetry: 'none', pixelPerfect: false, wandMode: 'shape', transformScope: 'frame', clipboard: null, objectClipboard: null, lastClipboard: 'pixels',
   undo: [], redo: [], samples: [], sampleData: new Map(), saveTimer: null, storageAvailable: true, importSkipEmpty: true,
   documents: new Map(), openIds: [], documentId: null, panels: {tools:false,details:false}, panelSections: {}, sessionSaveError: false,
 };
@@ -372,14 +378,15 @@ function renderCanvas() {
     context.stroke();context.setLineDash([]);
   }
   const selectionRect=state.inPlaceEdit?(state.inPlaceEdit.session.selection && inPlaceCanvasRect(state.inPlaceEdit.session,state.inPlaceEdit.session.selection)):state.selection?.rect;
-  if (selectionRect) {
+  if (!state.inPlaceEdit && state.selection?.mask) drawMaskOutline(context,state.selection.mask,width);
+  else if (selectionRect) {
     const rect=selectionRect, x=rect.x*state.scale, y=rect.y*state.scale, w=rect.width*state.scale, h=rect.height*state.scale;
     context.lineWidth=1.5;
     context.strokeStyle='#ffffff'; context.setLineDash([]); context.strokeRect(x+0.75,y+0.75,w-1.5,h-1.5);
     context.strokeStyle='#285b47'; context.setLineDash([5,4]); context.strokeRect(x+0.75,y+0.75,w-1.5,h-1.5); context.setLineDash([]);
   }
   renderObjectHighlight();
-  if (state.cursor && !['select','object'].includes(state.tool)) {
+  if (state.cursor && !['select','object','wand'].includes(state.tool)) {
     const tool=state.drawing?.tool || state.tool, sized=BRUSH_TOOLS.includes(tool);
     const from=shiftLineStart(tool);
     const points=brushPoints(from?linePoints(from.x,from.y,state.cursor.x,state.cursor.y):[state.cursor],sized?state.brushSize:1,sized?state.brushShape:'square',width,height,SYMMETRY_TOOLS.includes(tool)?state.symmetry:'none');
@@ -399,6 +406,22 @@ function renderCanvas() {
   $('zoom-out').disabled = state.scale <= 1;
   $('zoom-in').disabled = state.scale >= maxZoom();
   $('resize-canvas').textContent = `${width} × ${height} ↗`;
+}
+/** Tint the wand selection and trace its edge with a white-and-green dashed outline. */
+function drawMaskOutline(context,mask,width) {
+  const s=state.scale, set=new Set(mask);
+  context.fillStyle='#3d8a6a33';
+  context.beginPath();
+  for(const index of mask) {
+    const x=index%width, y=(index-x)/width, px=x*s, py=y*s;
+    context.fillRect(px,py,s,s);
+    if(x===0 || !set.has(index-1)){context.moveTo(px,py);context.lineTo(px,py+s);}
+    if(x===width-1 || !set.has(index+1)){context.moveTo(px+s,py);context.lineTo(px+s,py+s);}
+    if(!set.has(index-width)){context.moveTo(px,py);context.lineTo(px+s,py);}
+    if(!set.has(index+width)){context.moveTo(px,py+s);context.lineTo(px+s,py+s);}
+  }
+  context.lineWidth=1.5;context.strokeStyle='#ffffff';context.setLineDash([]);context.stroke();
+  context.strokeStyle='#285b47';context.setLineDash([4,3]);context.stroke();context.setLineDash([]);
 }
 /** Bright, animated outline around the selected object; quieter while painting with other tools. */
 function renderObjectHighlight() {
@@ -422,7 +445,7 @@ function renderObjectHighlight() {
 }
 /** Start of a Shift+click straight line: where the last pencil or eraser stroke ended. */
 function shiftLineStart(tool=state.tool) {
-  return state.shiftHeld && !state.drawing && ['pencil','eraser'].includes(tool) && state.lastPaint?.documentId===state.documentId ? state.lastPaint : null;
+  return state.shiftHeld && !state.drawing && FREEHAND_TOOLS.includes(tool) && state.lastPaint?.documentId===state.documentId ? state.lastPaint : null;
 }
 function renderTools() {
   document.querySelectorAll('[data-tool]').forEach(button => {
@@ -432,10 +455,14 @@ function renderTools() {
   });
   const sized=BRUSH_TOOLS.includes(state.tool), shaped=['rectangle','ellipse'].includes(state.tool);
   $('active-tool-name').textContent=TOOL_NAMES[state.tool];
-  $('tool-hint').textContent=state.inPlaceEdit?(state.tool==='select'?'Select pixels inside the object. Drag the selection to move it; Ctrl/⌘ C, X, V and Delete work on the draft.':'Draw inside or beyond the outline: painting past an edge extends the object. Shift-click draws a straight line. Esc cancels.'):TOOL_HINTS[state.tool];
+  $('tool-hint').textContent=state.inPlaceEdit?(state.tool==='shade'?TOOL_HINTS.shade:state.tool==='select'?'Select pixels inside the object. Drag the selection to move it; Ctrl/⌘ C, X, V and Delete work on the draft.':'Draw inside or beyond the outline: painting past an edge extends the object. Shift-click draws a straight line. Esc cancels.'):TOOL_HINTS[state.tool];
   $('brush-options').hidden=!sized;
   $('filled-row').hidden=!shaped;
   $('symmetry-options').hidden=!SYMMETRY_TOOLS.includes(state.tool);
+  $('pixel-perfect-row').hidden=state.tool!=='pencil' || Boolean(state.inPlaceEdit);
+  $('pixel-perfect').checked=state.pixelPerfect;
+  $('wand-options').hidden=state.tool!=='wand';
+  $('wand-mode').value=state.wandMode;
   $('brush-size').value=String(state.brushSize);
   $('brush-shape').value=state.brushShape;
   $('symmetry-mode').value=state.symmetry;
@@ -447,7 +474,7 @@ function renderTools() {
   }
   $('undo').disabled = !(state.inPlaceEdit?state.inPlaceEdit.session.undo:state.undo).length;
   $('redo').disabled = !(state.inPlaceEdit?state.inPlaceEdit.session.redo:state.redo).length;
-  $('pixel-canvas').style.cursor = state.tool === 'eyedropper' ? 'copy' : currentLayer().locked || !currentLayer().visible ? 'not-allowed' : state.tool==='select' && (state.inPlaceEdit?state.inPlaceEdit.session.selection:state.selection) ? 'grab' : 'crosshair';
+  $('pixel-canvas').style.cursor = state.tool === 'eyedropper' ? 'copy' : currentLayer().locked || !currentLayer().visible ? 'not-allowed' : state.tool==='select' && (state.inPlaceEdit?state.inPlaceEdit.session.selection:state.selection) ? 'grab' : state.tool==='wand' ? 'cell' : 'crosshair';
   renderTransformControls();
   renderInPlaceControls();
 }
@@ -589,7 +616,7 @@ function beginCanvasPartEdit(item,partId) {
     for(const element of document.querySelectorAll('.app-header,#project-tabs,#new-project-tab,#open-saved-projects,#details-panel,.timeline,.transform-section,.account-section,.left-bottom')) {
       edit.inert.set(element,element.inert);element.inert=true;
     }
-    for(const element of document.querySelectorAll('[data-tool="object"],#magic-outline,#resize-canvas,#toggle-onion,#color-picker,#hex-color,#add-color,#swap-colors')) {
+    for(const element of document.querySelectorAll('[data-tool="object"],[data-tool="wand"],#make-object,#magic-outline,#resize-canvas,#toggle-onion,#color-picker,#hex-color,#add-color,#swap-colors')) {
       edit.disabled.set(element,element.disabled);element.disabled=true;
     }
     renderAll();renderSaveStatus();requestAnimationFrame(()=>{fitCanvas();$('pixel-canvas').focus({preventScroll:true});});
@@ -652,7 +679,7 @@ function canvasPartKey(event,key) {
   if((event.ctrlKey || event.metaKey) && key==='enter'){event.preventDefault();endCanvasPartEdit(true);return;}
   if(key==='escape'){event.preventDefault();endCanvasPartEdit(false);return;}
   if(event.ctrlKey || event.metaKey){event.preventDefault();return;}
-  const tool={b:'pencil',e:'eraser',l:'line',f:'fill',u:'replace',i:'eyedropper',r:'rectangle',c:'ellipse',s:'select'}[key];
+  const tool={b:'pencil',e:'eraser',l:'line',f:'fill',u:'replace',i:'eyedropper',r:'rectangle',c:'ellipse',s:'select',t:'dither',h:'shade'}[key];
   if(tool){event.preventDefault();state.tool=tool;renderTools();renderSelection();renderCanvas();return;}
   if(key==='g'){$('toggle-grid').click();return;}
   const move={arrowleft:[-1,0],arrowright:[1,0],arrowup:[0,-1],arrowdown:[0,1]}[key];
@@ -733,6 +760,8 @@ function objectAction(action,item) {
   if(action==='paste' || action==='paste-independent'){pasteObjectItem({independent:action==='paste-independent'});return;}
   if(action==='duplicate'){duplicateObjectItem(item);return;}
   if(action==='copy-to'){copyToAnimationDialog(item);return;}
+  if(action==='convert'){convertToObject(item);return;}
+  if(action==='split'){splitObjectsDialog(item);return;}
   const target=objectTarget(item.layerId), layer=state.project.layers.find(l=>l.id===item.layerId);
   const node=celObjects(currentFrame().cels.find(c=>c.layerId===item.layerId)).find(n=>n.key===item.key);
   try {
@@ -755,6 +784,73 @@ function objectAction(action,item) {
       else if(action==='independent')state.project=forkObject(state.project,target,item.key,state.objectScope);
     });
   } catch(error) {toast(error.message);}
+}
+/** Turn the pixel selection (rectangle or wand mask) into a movable, reusable object. */
+function makeObjectDialog() {
+  finishDrawing();
+  const selection=state.selection;
+  if(state.inPlaceEdit)return;
+  if(!selection){toast('Select pixels first: drag with Select (S) or click a shape with the Magic wand (W).');return;}
+  if(!canEditPixels()){toast('Show and unlock this object before turning its pixels into an object.');return;}
+  const layer=currentLayer(), frames=currentAnimation().frames.length, grouped=layer.group!==false;
+  openDialog('Make object',`<form id="make-object-form"><p class="modal-body-text">The selected pixels become a movable object you can reuse, copy to other scenes and edit everywhere at once.</p><label class="field"><span class="field-label">Name</span><input id="make-object-name" value="${escapeHTML(uniqueLayerName('Object'))}" maxlength="80" required></label><label class="field"><span class="field-label">Frames</span><select id="make-object-scope"><option value="frame">This frame</option><option value="animation"${frames>1?'':' disabled'}>Every frame of “${escapeHTML(currentAnimation().name)}” (${frames})</option></select></label><p class="helper-text">${grouped?`The object stays in the group “${escapeHTML(layer.name)}”.`:'The object gets its own row above the pixels.'} Every-frame objects use the same selection area in each frame; identical frames share one part.</p><div class="modal-actions"><button type="button" id="make-object-cancel" class="button">Cancel</button><button type="submit" class="button primary">${icon('object-new')} Make object</button></div></form>`,'OBJECTS');
+  $('make-object-cancel').onclick=()=>$('modal').close();
+  const input=$('make-object-name');input.select();
+  $('make-object-form').onsubmit=event=>{
+    event.preventDefault();
+    const name=input.value.trim(), scope=$('make-object-scope').value;
+    if(!name)return;
+    try {
+      let result;
+      mutate(()=>{
+        result=createObjectFromPixels(state.project,objectTarget(selection.layerId),{rect:selection.rect,mask:selection.mask,name,scope});
+        state.project=result.project;state.layerId=result.layerId;state.objectSelection={layerId:result.layerId,key:result.key};
+        state.selection=null;state.transformScope='frame';state.tool='object';
+      });
+      $('modal').close();
+      toast(`“${name}” is now an object${result.frames>1?` in ${result.frames} frames`:''}. Drag to move it; double-click to edit.`);
+    } catch(error){toast(error.message);}
+  };
+}
+/** Convert a whole pixel object into a smart object (part instance) in the current scope. */
+function convertToObject(item) {
+  const layer=state.project.layers.find(l=>l.id===item.layerId);
+  const name=layer.group===false?layer.name:uniqueLayerName('Object');
+  try {
+    let result;
+    mutate(()=>{
+      const target=objectTarget(item.layerId), cel=currentFrame().cels.find(c=>c.layerId===item.layerId), node=celObjects(cel).find(n=>n.key===item.key);
+      // Grouped pixels can sit under instances, so only that node's own pixels are converted.
+      const mask=cel.source?pixelIslands(state.project,target,node.key).flatMap(island=>island.indices):undefined;
+      result=createObjectFromPixels(state.project,target,{mask,name,scope:state.objectScope==='animation' && !cel.source?'animation':'frame'});
+      state.project=result.project;state.layerId=result.layerId;state.objectSelection={layerId:result.layerId,key:result.key};state.tool='object';
+      // When the original pixel row was fully converted it is gone, so the object can take its name.
+      if(layer.group===false && !state.project.layers.some(l=>l.id===item.layerId))state.project.layers.find(l=>l.id===result.layerId).name=name;
+    });
+    toast(`“${name}” is now a reusable object${result.frames>1?` in ${result.frames} frames`:''}.`);
+  } catch(error){toast(error.message);}
+}
+function splitObjectsDialog(item) {
+  let islands;
+  try{islands=pixelIslands(state.project,objectTarget(item.layerId),item.key);}catch(error){toast(error.message);return;}
+  if(!islands.length){toast('There are no shapes to split here.');return;}
+  const layer=state.project.layers.find(l=>l.id===item.layerId), counts=islands.map(i=>i.indices.length);
+  openDialog('Split into objects',`<form id="split-form"><p class="modal-body-text">Found <strong id="split-count">${islands.length}</strong> separate shape${islands.length===1?'':'s'} in this frame. Each becomes its own movable object${layer.group===false?' inside a new group':` in “${escapeHTML(layer.name)}”`}.</p><div class="form-grid"><label class="field"><span class="field-label">Name</span><input id="split-name" value="Shape" maxlength="70" required></label><label class="field"><span class="field-label">Ignore shapes under</span><select id="split-min"><option value="1">Keep all</option><option value="2">2 pixels</option><option value="4">4 pixels</option><option value="9">9 pixels</option><option value="16">16 pixels</option></select></label></div><p class="helper-text">Diagonal neighbours count as one shape. Ignored specks stay as pixels.</p><div class="modal-actions"><button type="button" id="split-cancel" class="button">Cancel</button><button type="submit" class="button primary">${icon('split')} Split</button></div></form>`,'OBJECTS');
+  $('split-cancel').onclick=()=>$('modal').close();
+  $('split-min').onchange=()=>{$('split-count').textContent=counts.filter(n=>n>=Number($('split-min').value)).length;};
+  $('split-form').onsubmit=event=>{
+    event.preventDefault();
+    const name=$('split-name').value.trim()||'Shape';
+    try {
+      let result;
+      mutate(()=>{
+        result=splitIntoObjects(state.project,objectTarget(item.layerId),item.key,{name,groupName:uniqueLayerName(`${layer.name} shapes`),minPixels:Number($('split-min').value)});
+        state.project=result.project;state.layerId=result.layerId;state.objectSelection={layerId:result.layerId,key:result.keys[0]};state.tool='object';
+        state.collapsedGroups.delete(result.layerId);
+      });
+      $('modal').close();toast(`Split into ${result.keys.length} object${result.keys.length===1?'':'s'}. Undo is available.`);
+    } catch(error){toast(error.message);}
+  };
 }
 function addObject(group=false) {
   try {mutate(()=>{const result=addObjectContainer(state.project,state.layerId,uniqueLayerName(group?'Group':'Pixels'),group);state.project=result.project;state.layerId=result.layerId;state.objectSelection=null;state.tool=group?'object':'pencil';});}
@@ -829,7 +925,8 @@ function setZoom(scale) {
 }
 
 function renderSelection() {
-  $('selection-actions').hidden=state.tool!=='select';
+  $('selection-actions').hidden=!SELECT_TOOLS.includes(state.tool);
+  $('make-object').hidden=Boolean(state.inPlaceEdit);
   if(state.inPlaceEdit) {
     const rect=state.inPlaceEdit.session.selection;
     $('selection-info').textContent=rect?`${rect.width} × ${rect.height} pixels · ${state.inPlaceEdit.session.partId}`:'Drag a rectangle to select pixels in this object.';
@@ -838,7 +935,8 @@ function renderSelection() {
     renderTransformControls();return;
   }
   const selection=state.selection;
-  $('selection-info').textContent=selection ? `${selection.rect.width} × ${selection.rect.height} pixels · ${currentLayer().name}` : 'Drag a rectangle to select pixels on this layer.';
+  $('selection-info').textContent=selection ? (selection.mask?`${selection.mask.length} pixel${selection.mask.length===1?'':'s'} · ${currentLayer().name}`:`${selection.rect.width} × ${selection.rect.height} pixels · ${currentLayer().name}`) : state.tool==='wand'?'Click a shape to select it. Shift-click adds more.':'Drag a rectangle to select pixels on this layer.';
+  $('make-object').disabled=!selection || !canEditPixels();
   $('clear-selection').disabled=!selection || !canEditPixels();
   $('deselect-selection').disabled=!selection;
   $('copy-selection').disabled=!selection;
@@ -882,7 +980,8 @@ function copySelectionPixels(cut=false) {
   }
   if (!state.selection || (cut && !canEditPixels())) return;
   state.lastClipboard='pixels';
-  state.clipboard={...copyPixels(currentPixels(),state.project.width,state.project.height,state.selection.rect),palette:[...state.project.palette],x:state.selection.rect.x,y:state.selection.rect.y};
+  const copied=copyPixels(maskedPixels(currentPixels()),state.project.width,state.project.height,state.selection.rect);
+  state.clipboard={...copied,palette:[...state.project.palette],x:state.selection.rect.x,y:state.selection.rect.y};
   if(cut) clearSelectionPixels();
   renderSelection();toast(cut?'Selection cut. Paste it into any frame, layer, or project.':'Selection copied. Paste it into any frame, layer, or project.');
 }
@@ -943,26 +1042,38 @@ function transformArtwork(operation) {
     const changes=frames.map(frame=>({frame,result:transformPixels(getLayerPixels(frame,state.layerId),state.project.width,state.project.height,rect,operation)}));
     mutate(()=>{
       for(const {frame,result} of changes)frame.cels.find(cel=>cel.layerId===state.layerId).pixels=result.pixels;
-      if(scope==='selection')state.selection.rect=changes[0].result.selection;
+      if(scope==='selection'){state.selection.rect=changes[0].result.selection;delete state.selection.mask;}
     });
     toast(`Transformed ${frames.length} frame${frames.length===1?'':'s'} on “${currentLayer().name}”. Undo is available.`);
   } catch(error){toast(error.message);}
 }
+/** Pixels outside a wand selection become transparent; rectangle selections keep everything. */
+function maskedPixels(pixels) {
+  const mask=state.selection?.mask;
+  if(!mask)return pixels;
+  const result=Array(pixels.length).fill(-1);
+  for(const index of mask)result[index]=pixels[index];
+  return result;
+}
 function selectionContains(point) {
+  if(state.selection?.mask)return state.selection.mask.includes(point.y*state.project.width+point.x);
   const rect=state.selection?.rect;
   return rect && point.x>=rect.x && point.x<rect.x+rect.width && point.y>=rect.y && point.y<rect.y+rect.height;
 }
 function beginSelection(event,point,cel) {
   const previousSelection=state.selection?clone(state.selection):null;
   const moving=selectionContains(point);
-  state.drawing={pointerId:event.pointerId,tool:'select',kind:moving?'move':'marquee',origin:point,last:point,before:snapshot(),cel,base:[...cel.pixels],rect:moving?{...state.selection.rect}:null,previousSelection};
+  state.drawing={pointerId:event.pointerId,tool:'select',kind:moving?'move':'marquee',origin:point,last:point,before:snapshot(),cel,base:[...cel.pixels],rect:moving?{...state.selection.rect}:null,mask:moving?state.selection.mask:null,previousSelection};
   if (!moving) state.selection={rect:selectionBounds(point.x,point.y,point.x,point.y,state.project.width,state.project.height),frameId:state.frameId,layerId:state.layerId,canvasWidth:state.project.width,canvasHeight:state.project.height};
   state.transformScope='selection';
   renderSelection(); renderCanvas();
 }
 function updateSelection(point) {
   const drawing=state.drawing;
-  if (drawing.kind==='move') {
+  if (drawing.kind==='move' && drawing.mask) {
+    const result=moveMaskedPixels(drawing.base,state.project.width,state.project.height,drawing.mask,point.x-drawing.origin.x,point.y-drawing.origin.y);
+    drawing.cel.pixels=result.pixels; state.selection.rect=result.selection; state.selection.mask=result.mask;
+  } else if (drawing.kind==='move') {
     const result=moveSelectedPixels(drawing.base,state.project.width,state.project.height,drawing.rect,point.x-drawing.origin.x,point.y-drawing.origin.y);
     drawing.cel.pixels=result.pixels; state.selection.rect=result.selection;
   } else {
@@ -975,9 +1086,11 @@ function nudgeSelection(dx,dy) {
   const offset=clampSelectionOffset(state.selection.rect,dx,dy,state.project.width,state.project.height);
   if (!offset.dx && !offset.dy) return;
   mutate(()=>{
-    const result=moveSelectedPixels(currentPixels(),state.project.width,state.project.height,state.selection.rect,offset.dx,offset.dy);
+    const mask=state.selection.mask;
+    const result=mask?moveMaskedPixels(currentPixels(),state.project.width,state.project.height,mask,offset.dx,offset.dy):moveSelectedPixels(currentPixels(),state.project.width,state.project.height,state.selection.rect,offset.dx,offset.dy);
     currentFrame().cels.find(cel=>cel.layerId===state.layerId).pixels=result.pixels;
     state.selection.rect=result.selection;
+    if(mask)state.selection.mask=result.mask;
   });
 }
 function clearSelectionPixels() {
@@ -985,6 +1098,7 @@ function clearSelectionPixels() {
   if (!state.selection || !canEditPixels()) return;
   mutate(()=>{
     const rect=state.selection.rect,pixels=currentPixels();
+    if(state.selection.mask){for(const index of state.selection.mask)pixels[index]=-1;return;}
     for(let y=rect.y;y<rect.y+rect.height;y++) for(let x=rect.x;x<rect.x+rect.width;x++) pixels[y*state.project.width+x]=-1;
   });
 }
@@ -1025,8 +1139,45 @@ function inside(point) { return point.x >= 0 && point.x < state.project.width &&
 function drawPoints(points, color) {
   const pixels = state.drawing?.cel.pixels || currentPixels();
   const tool=state.drawing?.tool || state.tool,sized=BRUSH_TOOLS.includes(tool);
-  const footprint=brushPoints(points,sized?state.brushSize:1,sized?state.brushShape:'square',state.project.width,state.project.height,SYMMETRY_TOOLS.includes(tool)?state.symmetry:'none');
+  let footprint=brushPoints(points,sized?state.brushSize:1,sized?state.brushShape:'square',state.project.width,state.project.height,SYMMETRY_TOOLS.includes(tool)?state.symmetry:'none');
+  if(tool==='shade') {
+    // Each pixel shifts one palette step per stroke, however often the brush passes over it.
+    const touched=state.drawing?.touched || new Set();
+    for(const point of footprint) {
+      const index=point.y*state.project.width+point.x;
+      if(touched.has(index))continue;
+      touched.add(index);
+      if(pixels[index]>=0)pixels[index]=shadeIndex(state.project.palette,pixels[index],state.drawing?.shade || -1);
+    }
+    return;
+  }
+  if(tool==='dither')footprint=footprint.filter(point=>ditherCell(point.x,point.y));
   for (const point of footprint) pixels[point.y * state.project.width + point.x] = color;
+}
+/** Freehand pencil step; pixel-perfect mode removes the doubled pixel at each stair-step corner. */
+function drawFreehand(drawing,from,to) {
+  const pixelPerfect=drawing.tool==='pencil' && state.pixelPerfect && state.brushSize===1 && state.symmetry==='none';
+  if(!pixelPerfect){drawPoints(linePoints(from.x,from.y,to.x,to.y),drawing.color);return;}
+  for(const point of linePoints(from.x,from.y,to.x,to.y)) {
+    const removed=pixelPerfectStep(drawing.path,point);
+    drawing.cel.pixels[point.y*state.project.width+point.x]=drawing.color;
+    if(removed){const index=removed.y*state.project.width+removed.x;drawing.cel.pixels[index]=drawing.base[index];}
+  }
+}
+/** Magic wand: select the clicked shape or color region; Shift adds to the current selection. */
+function wandSelect(point,cel,add) {
+  const width=state.project.width, region=connectedRegion(cel.pixels,width,state.project.height,point.x,point.y,state.wandMode);
+  const previous=add && state.selection?.layerId===state.layerId && state.selection.frameId===state.frameId ? (state.selection.mask || rectIndices(state.selection.rect)) : [];
+  if(!region){if(!add){state.selection=null;}renderSelection();renderCanvas();if(!add)toast('Click artwork to select a shape. That pixel is transparent.');return;}
+  const mask=[...new Set([...previous,...region.indices])].sort((a,b)=>a-b);
+  state.selection={rect:maskBounds(mask,width),mask,frameId:state.frameId,layerId:state.layerId,canvasWidth:width,canvasHeight:state.project.height};
+  state.transformScope='selection';
+  renderSelection();renderTransformControls();renderCanvas();
+}
+function rectIndices(rect) {
+  const indices=[];
+  for(let y=rect.y;y<rect.y+rect.height;y++) for(let x=rect.x;x<rect.x+rect.width;x++) indices.push(y*state.project.width+x);
+  return indices;
 }
 function beginObjectMove(event,point,hit) {
   if(!hit){state.objectSelection=null;renderAll();return;}
@@ -1055,7 +1206,8 @@ function pointerDown(event) {
   event.preventDefault();
   $('pixel-canvas').focus({preventScroll:true});
   $('pixel-canvas').setPointerCapture(event.pointerId);
-  const tool = event.altKey ? 'eyedropper' : event.button === 2 ? 'eraser' : state.tool;
+  const tool = event.altKey ? 'eyedropper' : event.button === 2 && state.tool!=='shade' ? 'eraser' : state.tool;
+  const shade = event.button === 2 ? 1 : -1;
   state.cursor = point;
   if (tool === 'eyedropper') {
     state.color = canvasPixels()[point.y * state.project.width + point.x];
@@ -1066,7 +1218,7 @@ function pointerDown(event) {
   if(state.inPlaceEdit) {
     try {
       const from=event.shiftKey?shiftLineStart(tool):null;
-      const stroke=tool==='select'?beginInPlaceSelection(state.inPlaceEdit.session,point):beginInPlaceStroke(state.inPlaceEdit.session,point,{tool,from,color:tool==='eraser'?-1:state.color,brushSize:state.brushSize,brushShape:state.brushShape,symmetry:state.symmetry,filled:state.filled});
+      const stroke=tool==='select'?beginInPlaceSelection(state.inPlaceEdit.session,point):beginInPlaceStroke(state.inPlaceEdit.session,point,{tool,from,shade,color:tool==='eraser'?-1:tool==='shade'?0:state.color,brushSize:state.brushSize,brushShape:state.brushShape,symmetry:state.symmetry,filled:state.filled});
       if(stroke){state.inPlaceEdit.error=null;state.drawing={...stroke,tool,pointerId:event.pointerId,kind:tool==='select'?'part-select':'part-edit'};}
       else if($('pixel-canvas').hasPointerCapture(event.pointerId))$('pixel-canvas').releasePointerCapture(event.pointerId);
     } catch(error) {state.inPlaceEdit.error=error.message;if($('pixel-canvas').hasPointerCapture(event.pointerId))$('pixel-canvas').releasePointerCapture(event.pointerId);}
@@ -1074,7 +1226,7 @@ function pointerDown(event) {
   }
   const hit=hitTestObject(state.project,currentAnimation(),currentFrame(),point.x,point.y);
   const selected=selectedObject(), selectedNode=celObjects(currentFrame().cels.find(c=>c.layerId===selected.layerId)).find(n=>n.key===selected.key);
-  if(tool==='object' || (hit?.type==='instance' && !['select','eyedropper','eraser'].includes(tool) && ((!state.objectSelection && hit.layerId===currentLayer().id) || selectedNode?.instance))) {
+  if(tool==='object' || (hit?.type==='instance' && !['select','wand','eyedropper','eraser'].includes(tool) && ((!state.objectSelection && hit.layerId===currentLayer().id) || selectedNode?.instance))) {
     if($('pixel-canvas').hasPointerCapture(event.pointerId))$('pixel-canvas').releasePointerCapture(event.pointerId);
     beginObjectMove(event,point,hit);return;
   }
@@ -1087,7 +1239,8 @@ function pointerDown(event) {
   }
   const cel = currentFrame().cels.find(cel => cel.layerId === layer.id);
   if (tool==='select') { beginSelection(event,point,cel); return; }
-  state.drawing = {pointerId:event.pointerId,tool,origin:point,last:point,before:snapshot(),cel,base:[...cel.pixels],color:tool === 'eraser' ? -1 : state.color};
+  if (tool==='wand') { if($('pixel-canvas').hasPointerCapture(event.pointerId))$('pixel-canvas').releasePointerCapture(event.pointerId); wandSelect(point,cel,event.shiftKey); return; }
+  state.drawing = {pointerId:event.pointerId,tool,origin:point,last:point,before:snapshot(),cel,base:[...cel.pixels],color:tool === 'eraser' ? -1 : state.color,shade,touched:new Set(),path:[{...point}]};
   if (tool === 'fill') floodFill(cel.pixels, point.x, point.y, state.drawing.color, state.project.width, state.project.height);
   else if(tool==='replace') cel.pixels=replaceColor(cel.pixels,state.project.width,state.project.height,cel.pixels[point.y*state.project.width+point.x],state.drawing.color);
   else {
@@ -1114,8 +1267,8 @@ function pointerMove(event) {
       catch(error){$('cursor-position').textContent=error.message;}
     } else if (drawing.tool==='select') {
       updateSelection(point);
-    } else if (drawing.tool === 'pencil' || drawing.tool === 'eraser') {
-      drawPoints(linePoints(drawing.last.x, drawing.last.y, point.x, point.y), drawing.color);
+    } else if (FREEHAND_TOOLS.includes(drawing.tool)) {
+      drawFreehand(drawing, drawing.last, point);
     } else if(drawing.tool==='line') {
       drawing.cel.pixels=[...drawing.base];
       const end=event.shiftKey?snapLineEnd(drawing.origin,point):point;
@@ -1148,7 +1301,7 @@ function finishDrawing(cancel = false) {
   const drawing = state.drawing;
   if (!drawing) return false;
   state.drawing = null;
-  if(!cancel && ['pencil','eraser'].includes(drawing.tool))state.lastPaint={...drawing.last,documentId:state.documentId};
+  if(!cancel && FREEHAND_TOOLS.includes(drawing.tool))state.lastPaint={...drawing.last,documentId:state.documentId};
   if(drawing.kind==='part-select' || drawing.kind==='part-edit') {
     (drawing.kind==='part-select'?finishInPlaceSelection:finishInPlaceStroke)(state.inPlaceEdit.session,drawing,cancel);
     if($('pixel-canvas').hasPointerCapture(drawing.pointerId))$('pixel-canvas').releasePointerCapture(drawing.pointerId);
@@ -1805,7 +1958,7 @@ function samplesDialog() {
   render();
 }
 function helpDialog() {
-  const shortcuts = [['V','Select / move objects'],['B','Pencil'],['E','Eraser'],['L','Straight line'],['F','Flood fill'],['U','Replace color'],['I / Alt','Pick a color'],['R','Square / rectangle'],['C','Circle / ellipse'],['S','Select / move pixels'],['[ / ]','Smaller / larger brush'],['⌘ / Ctrl + A','Select all pixels'],['⌘ / Ctrl + C / X / V','Copy / cut / paste pixels, or the selected object'],['⌘ / Ctrl + ⇧ + V','Paste object as an independent copy'],['⌘ / Ctrl + D','Duplicate selected object'],['⇧ + click','Straight pencil / eraser line from the last stroke'],['Arrows / ⇧ + arrows','Nudge selection by 1 / 8 pixels'],['Delete','Clear selected pixels'],['Enter / Esc','Deselect pixels'],['Shift + drag','Square, circle, or 45° line'],['Drag object rows','Reorder, or drop into a group'],['Right-click object row','Object menu'],['G','Toggle grid'],['O','Onion skin'],['Space','Play / pause preview'],['D','Duplicate frame'],['← / →','Previous / next frame'],['+ / −','Zoom in / out'],['0','Fit canvas'],['⌘ / Ctrl + Z','Undo'],['⌘ / Ctrl + ⇧ + Z','Redo'],['⌘ / Ctrl + S','Export pixel data']];
+  const shortcuts = [['V','Select / move objects'],['B','Pencil'],['E','Eraser'],['L','Straight line'],['F','Flood fill'],['U','Replace color'],['I / Alt','Pick a color'],['R','Square / rectangle'],['C','Circle / ellipse'],['S','Select / move pixels'],['W','Magic wand · ⇧ adds'],['T','Dither brush'],['H','Shade · right-click lightens'],['⌘ / Ctrl + G','Make object from selection'],['[ / ]','Smaller / larger brush'],['⌘ / Ctrl + A','Select all pixels'],['⌘ / Ctrl + C / X / V','Copy / cut / paste pixels, or the selected object'],['⌘ / Ctrl + ⇧ + V','Paste object as an independent copy'],['⌘ / Ctrl + D','Duplicate selected object'],['⇧ + click','Straight pencil / eraser line from the last stroke'],['Arrows / ⇧ + arrows','Nudge selection by 1 / 8 pixels'],['Delete','Clear selected pixels'],['Enter / Esc','Deselect pixels'],['Shift + drag','Square, circle, or 45° line'],['Drag object rows','Reorder, or drop into a group'],['Right-click object row','Object menu'],['G','Toggle grid'],['O','Onion skin'],['Space','Play / pause preview'],['D','Duplicate frame'],['← / →','Previous / next frame'],['+ / −','Zoom in / out'],['0','Fit canvas'],['⌘ / Ctrl + Z','Undo'],['⌘ / Ctrl + ⇧ + Z','Redo'],['⌘ / Ctrl + S','Export pixel data']];
   openDialog('Small canvas. Handy shortcuts.', `<p class="modal-body-text">Draw with a mouse, pen, or finger. Right-click to erase. Brush size and symmetry live below the tools; flip and rotate actions live in Transform. Use the palette picker to recolor a slot in every frame, or Swap to exchange two colors. AI prompt creates a complete generation brief with the pixel format and an ordered animation plan, even from an empty project.</p><div class="shortcut-grid">${shortcuts.map(([key,action])=>`<span>${action}</span><kbd>${key}</kbd>`).join('')}</div><div class="notice">Each project tab has its own artwork and Undo history. New projects and imports open in new tabs. Close a tab and reopen it from Saved projects; projects autosave on this device. Collapse individual panel headings, or hide either sidebar with the buttons above the canvas.</div><p class="helper-text">Tools edit the active pixel object. Transform can affect one frame or the active pixel object across an animation or project. Mirror animation copies each frame’s placements while retaining shared part definitions. Set individual frame holds in milliseconds below the timeline. Choose Object (V) to select and move part instances; double-click one to edit its shared artwork in every appearance. Object edits default to the current animation. Groups are optional; use Ungroup to expose their objects. Export PXA 2 for editable objects and timings; PNGs combine visible artwork.</p>`, 'QUICK GUIDE');
 }
 function accountDialog() {
@@ -1843,7 +1996,7 @@ function bindEvents() {
   document.querySelectorAll('[data-tool]').forEach(button => button.addEventListener('click', () => {
     finishDrawing();
     state.tool = button.dataset.tool;
-    if (state.tool!=='select') state.selection=null;
+    if (!SELECT_TOOLS.includes(state.tool)) state.selection=null;
     state.swap = false;
     renderTools(); renderPalette(); renderSelection(); renderCanvas();
   }));
@@ -1856,6 +2009,9 @@ function bindEvents() {
   $('rotate-left').onclick=()=>transformArtwork('rotate-ccw');
   $('rotate-right').onclick=()=>transformArtwork('rotate-cw');
   $('select-all').onclick=selectAllPixels;
+  $('make-object').onclick=makeObjectDialog;
+  $('pixel-perfect').onchange=event=>{state.pixelPerfect=event.target.checked;renderTools();};
+  $('wand-mode').onchange=event=>{state.wandMode=event.target.value;renderTools();};
   $('copy-selection').onclick=()=>copySelectionPixels();
   $('cut-selection').onclick=()=>copySelectionPixels(true);
   $('paste-selection').onclick=pasteClipboardPixels;
@@ -1978,6 +2134,7 @@ function bindEvents() {
     if ((event.ctrlKey || event.metaKey) && key === 'y') { event.preventDefault(); restore(state.redo,state.undo); return; }
     if ((event.ctrlKey || event.metaKey) && key === 's') { event.preventDefault(); exportData(); return; }
     if ((event.ctrlKey || event.metaKey) && key === 'a') {event.preventDefault();selectAllPixels();return;}
+    if ((event.ctrlKey || event.metaKey) && key === 'g') {event.preventDefault();makeObjectDialog();return;}
     if ((event.ctrlKey || event.metaKey) && key === 'c' && state.selection) {event.preventDefault();copySelectionPixels();return;}
     if ((event.ctrlKey || event.metaKey) && key === 'x' && state.selection) {event.preventDefault();copySelectionPixels(true);return;}
     // Without a pixel selection, copy commands act on the selected object.
@@ -1994,15 +2151,15 @@ function bindEvents() {
       if(key==='enter' && node?.instance){event.preventDefault();editSharedObject(item);return;}
       if((key==='delete' || key==='backspace') && node?.instance){event.preventDefault();objectAction('delete',{...item,node});return;}
     }
-    if (state.tool==='select' && state.selection) {
+    if (SELECT_TOOLS.includes(state.tool) && state.selection) {
       const nudge={arrowleft:[-1,0],arrowright:[1,0],arrowup:[0,-1],arrowdown:[0,1]}[key];
       if (nudge) { event.preventDefault(); const step=event.shiftKey?8:1; nudgeSelection(nudge[0]*step,nudge[1]*step); return; }
       if (key==='delete' || key==='backspace') { event.preventDefault(); clearSelectionPixels(); return; }
       if (key==='escape' || key==='enter') { event.preventDefault(); deselectPixels(); return; }
     }
     if (key==='escape' && state.objectSelection && !state.inPlaceEdit) { event.preventDefault(); state.objectSelection=null; renderAll(); return; }
-    const tool = {v:'object',b:'pencil',e:'eraser',l:'line',f:'fill',u:'replace',i:'eyedropper',r:'rectangle',c:'ellipse',s:'select'}[key];
-    if (tool) { state.tool = tool; if(tool!=='select')state.selection=null; renderTools(); renderSelection(); renderCanvas(); return; }
+    const tool = {v:'object',b:'pencil',e:'eraser',l:'line',f:'fill',u:'replace',i:'eyedropper',r:'rectangle',c:'ellipse',s:'select',w:'wand',t:'dither',h:'shade'}[key];
+    if (tool) { state.tool = tool; if(!SELECT_TOOLS.includes(tool))state.selection=null; renderTools(); renderSelection(); renderCanvas(); return; }
     if (key === 'g') $('toggle-grid').click();
     else if((key==='[' || key===']') && BRUSH_TOOLS.includes(state.tool)){event.preventDefault();state.brushSize=Math.max(1,Math.min(8,state.brushSize+(key===']'?1:-1)));renderTools();renderCanvas();}
     else if (key === 'o') $('toggle-onion').click();

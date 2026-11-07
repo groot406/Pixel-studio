@@ -12,6 +12,8 @@ Working with objects:
 - While editing an object on the canvas, paint outside its outline to grow its canvas. The **Select** tool works inside the object: select, move, copy, paste and delete pixels in the draft.
 - **Shift+click** with the pencil or eraser draws a straight line from the last point.
 - **Drop** .pxa, .pxs or .pixel.json files on the canvas to open them in a new tab; dropped PNGs import.
+- **Make object (Ctrl/⌘+G):** select pixels with Select or the **Magic wand** (W, shape or same-color mode; Shift adds, Alt subtracts), then click **Make object** to turn them into a reusable object in this frame or every frame of the animation. Right-click a pixel layer for **Convert to object** or **Split into objects…**, which turns each separate shape into its own object inside a group.
+- **Extra tools:** **Dither** (T) paints a checkerboard and **Shade** (H) darkens one palette step per pixel (right-click lightens). Turn on **Pixel-perfect** for pencil strokes without L-shaped corners. Both tools also work while editing an object on the canvas.
 
 Native saves and PXA 2 retain object names, instance settings, groups and shared artwork. PXA 1/PXS are raster copies that bake object structure. Custom animation/frame orders use PXA `ORDER`/`FRAMEORDER` or versioned PXS payloads. Existing files still import with their original appearance and timing. Use the combined **Outline artwork** action for one outer silhouette; baked-in outlines inside existing parts stay editable in the shared editor's full-sprite context.
 

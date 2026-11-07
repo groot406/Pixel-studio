@@ -61,6 +61,11 @@
     <symbol id="i-fit" viewBox="0 0 24 24"><path d="M9 3H3v6M15 3h6v6M3 15v6h6M21 15v6h-6"/></symbol>
     <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8" cy="8" r="1"/><path d="m3 17 6-6 4 4 3-3 5 5"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-wand" viewBox="0 0 24 24"><path d="m3 21 12-12M13 7l4 4"/><path d="M17 2v3M17 13v3M21 9h-3M13 3l1.5 1.5M20.5 4.5 19 6M20.5 13.5 19 12"/></symbol>
+    <symbol id="i-dither" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h6V3M9 15h6V9h6M3 21v-6h6v6M15 21v-6h6" fill="currentColor" fill-opacity=".35"/></symbol>
+    <symbol id="i-shade" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18Z" fill="currentColor"/></symbol>
+    <symbol id="i-object-new" viewBox="0 0 24 24"><rect x="3" y="3" width="12" height="12" rx="1" stroke-dasharray="2.5 2"/><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M15 12v6M12 15h6"/></symbol>
+    <symbol id="i-split" viewBox="0 0 24 24"><rect x="2" y="4" width="8" height="8" rx="1"/><rect x="14" y="12" width="8" height="8" rx="1"/><path d="M12 2v20" stroke-dasharray="2 2.5"/></symbol>
     <symbol id="i-spark" viewBox="0 0 24 24"><path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5Z"/></symbol>
   </defs></svg>
 
@@ -93,6 +98,9 @@
           <button data-tool="rectangle" class="tool" title="Square / rectangle (R)" aria-keyshortcuts="R" aria-pressed="false"><svg aria-hidden="true"><use href="#i-square"/></svg><span>Rectangle</span><kbd>R</kbd></button>
           <button data-tool="ellipse" class="tool" title="Circle / ellipse (C)" aria-keyshortcuts="C" aria-pressed="false"><svg aria-hidden="true"><use href="#i-circle"/></svg><span>Ellipse</span><kbd>C</kbd></button>
           <button data-tool="select" class="tool" title="Select / move pixels (S)" aria-keyshortcuts="S" aria-pressed="false"><svg aria-hidden="true"><use href="#i-select"/></svg><span>Select</span><kbd>S</kbd></button>
+          <button data-tool="wand" class="tool" title="Magic wand: select a shape or color (W)" aria-keyshortcuts="W" aria-pressed="false"><svg aria-hidden="true"><use href="#i-wand"/></svg><span>Wand</span><kbd>W</kbd></button>
+          <button data-tool="dither" class="tool" title="Dither brush: paints a checkerboard (T)" aria-keyshortcuts="T" aria-pressed="false"><svg aria-hidden="true"><use href="#i-dither"/></svg><span>Dither</span><kbd>T</kbd></button>
+          <button data-tool="shade" class="tool" title="Shade: darken, right-click to lighten (H)" aria-keyshortcuts="H" aria-pressed="false"><svg aria-hidden="true"><use href="#i-shade"/></svg><span>Shade</span><kbd>H</kbd></button>
         </div>
         <div class="tool-options" aria-label="Selected tool settings">
           <h3 id="active-tool-name">Pencil</h3>
@@ -100,6 +108,10 @@
           <div id="brush-options" class="tool-option-grid">
             <label class="tool-option"><span>Size</span><select id="brush-size" aria-label="Brush size"><option value="1">1 px</option><option value="2">2 px</option><option value="3">3 px</option><option value="4">4 px</option><option value="5">5 px</option><option value="6">6 px</option><option value="7">7 px</option><option value="8">8 px</option></select></label>
             <label class="tool-option"><span>Brush</span><select id="brush-shape" aria-label="Brush shape"><option value="square">Square</option><option value="round">Round</option></select></label>
+          </div>
+          <label class="check-row" id="pixel-perfect-row" hidden title="Removes the doubled corner pixels from freehand 1 px strokes"><input type="checkbox" id="pixel-perfect"><span>Pixel-perfect strokes</span></label>
+          <div id="wand-options" class="tool-option-grid" hidden>
+            <label class="tool-option"><span>Select</span><select id="wand-mode" aria-label="Magic wand mode"><option value="shape">Whole shape</option><option value="color">Same color</option></select></label>
           </div>
           <label class="check-row" id="filled-row" hidden><input type="checkbox" id="filled-shape"><span>Filled shape</span><span class="shape-hint">Shift for 1:1</span></label>
           <div id="symmetry-options"><label class="tool-option inline-option"><span>Mirror</span><select id="symmetry-mode" aria-label="Drawing symmetry"><option value="none">Off</option><option value="x">Left / right</option><option value="y">Top / bottom</option><option value="both">Both axes</option></select></label></div>
@@ -144,6 +156,7 @@
             <button id="cut-selection" class="icon-button" title="Cut selected pixels (Ctrl/⌘ X)" aria-label="Cut selected pixels"><svg aria-hidden="true"><use href="#i-cut"/></svg></button>
             <button id="paste-selection" class="icon-button" title="Paste pixels (Ctrl/⌘ V)" aria-label="Paste pixels"><svg aria-hidden="true"><use href="#i-paste"/></svg></button>
             <button id="clear-selection" class="icon-button" title="Delete selected pixels" aria-label="Delete selected pixels"><svg aria-hidden="true"><use href="#i-trash"/></svg></button>
+            <button id="make-object" class="button small primary make-object-button" title="Turn the selected pixels into a movable object (Ctrl/⌘ G)" aria-label="Make object from selection"><svg aria-hidden="true"><use href="#i-object-new"/></svg><span>Make object</span></button>
             <button id="deselect-selection" class="button small" title="Deselect" aria-label="Deselect"><svg aria-hidden="true"><use href="#i-check"/></svg><span>Done</span></button>
           </div>
           <span id="selection-move-help" class="sr-only">Drag inside to move · arrows to nudge · Esc to deselect</span>

@@ -3,11 +3,11 @@ import { validateProject, compositeFrame, floodFill, linePoints, rectanglePoints
 import { renderParts, renderSource, MAX_PARTS } from '../../domain/artwork.js';
 import { canvasToPartPoint, partToCanvasOffset, grownInstanceShift } from '../../domain/geometry.js';
 import { referencesToPart, forkInstance, paintSharedPart, growPart } from '../../domain/parts.js';
-import { brushPoints, snapLineEnd, replaceColor, copyPixels, pastePixels } from '../../domain/toolbox.js';
+import { brushPoints, snapLineEnd, replaceColor, copyPixels, pastePixels, shadeIndex, ditherCell } from '../../domain/toolbox.js';
 import { moveSelectedPixels } from '../../domain/selection.js';
 
-export const PART_EDIT_TOOLS=['pencil','eraser','line','rectangle','ellipse','fill','replace','eyedropper','select'];
-const BRUSH_TOOLS=['pencil','eraser','line'];
+export const PART_EDIT_TOOLS=['pencil','eraser','line','rectangle','ellipse','fill','replace','eyedropper','select','dither','shade'];
+const BRUSH_TOOLS=['pencil','eraser','line','dither','shade'];
 
 export function createInPlaceEdit(project,target,scope='shared') {
   const sourceProject=validateProject(project), layer=sourceProject.layers.find(l=>l.id===target.layerId);
@@ -90,7 +90,20 @@ function grow(session,locals) {
 
 function stamp(session,stroke,points) {
   const sized=BRUSH_TOOLS.includes(stroke.tool);
-  const footprint=brushPoints(points,sized?stroke.brushSize:1,sized?stroke.brushShape:'square',session.sourceProject.width,session.sourceProject.height,stroke.symmetry);
+  let footprint=brushPoints(points,sized?stroke.brushSize:1,sized?stroke.brushShape:'square',session.sourceProject.width,session.sourceProject.height,stroke.symmetry);
+  if(stroke.tool==='shade') {
+    // Each pixel shifts one palette step per stroke, however often the brush passes over it.
+    stroke.touched||=new Set();
+    for(const point of footprint) {
+      const local=inPlacePoint(session,point), key=`${point.x},${point.y}`;
+      if(!insidePart(session,local) || stroke.touched.has(key))continue;
+      stroke.touched.add(key);
+      const index=local.y*session.width+local.x, color=session.pixels[index];
+      if(color>=0)session.pixels[index]=shadeIndex(session.sourceProject.palette,color,stroke.shade || -1);
+    }
+    return;
+  }
+  if(stroke.tool==='dither')footprint=footprint.filter(point=>ditherCell(point.x,point.y));
   // Painting past the outline extends the part; erasing there has nothing to remove.
   if(stroke.color>=0)grow(session,footprint.map(point=>inPlacePoint(session,point)));
   for(const point of footprint) {
@@ -113,14 +126,14 @@ export function beginInPlaceStroke(session,point,options) {
   if(stroke.tool==='eraser')stroke.color=-1;
   if(stroke.tool==='fill')floodFill(session.pixels,local.x,local.y,stroke.color,session.width,session.height);
   else if(stroke.tool==='replace')session.pixels=replaceColor(session.pixels,session.width,session.height,session.pixels[local.y*session.width+local.x],stroke.color);
-  else if(options.from && ['pencil','eraser'].includes(stroke.tool))stamp(session,stroke,linePoints(options.from.x,options.from.y,point.x,point.y));
+  else if(options.from && ['pencil','eraser','dither','shade'].includes(stroke.tool))stamp(session,stroke,linePoints(options.from.x,options.from.y,point.x,point.y));
   else stamp(session,stroke,[point]);
   session.revision++;
   return stroke;
 }
 
 export function moveInPlaceStroke(session,stroke,point,shift=false) {
-  if(stroke.tool==='pencil' || stroke.tool==='eraser')stamp(session,stroke,linePoints(stroke.last.x,stroke.last.y,point.x,point.y));
+  if(['pencil','eraser','dither','shade'].includes(stroke.tool))stamp(session,stroke,linePoints(stroke.last.x,stroke.last.y,point.x,point.y));
   else if(stroke.tool==='line') {
     apply(session,stroke.base);const end=shift?snapLineEnd(stroke.origin,point):point;
     stamp(session,stroke,linePoints(stroke.origin.x,stroke.origin.y,end.x,end.y));

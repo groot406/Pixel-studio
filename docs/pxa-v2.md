@@ -48,12 +48,16 @@ AT glint 7 4
 END
 ```
 
-Parts contain filled rectangles/ellipses, integer lines, and exact pixel spans. Parts do not contain other parts. Cels contain ordered drawing operations and instances. This keeps reference expansion finite and easy to inspect. Instance placement supports translation, horizontal/vertical flips and clockwise quarter turns (`N FX FY R90 R180 R270 R90FX R270FX`), with the transformed top-left at the placement coordinates. Two optional per-instance commands follow the `USE` line (or change an existing instance in a later cel):
+Parts contain filled rectangles/ellipses, integer lines, and exact pixel spans. Parts do not contain other parts. Cels contain ordered drawing operations and instances. This keeps reference expansion finite and easy to inspect. Instance placement supports translation, horizontal/vertical flips and clockwise quarter turns (`N FX FY R90 R180 R270 R90FX R270FX`), with the transformed top-left at the placement coordinates. Optional per-instance commands follow the `USE` line (or change an existing instance in a later cel). None of them changes the part; defaults are not stored or written:
 
 - `RESIZE instance-id width height` (1–128) draws the part at that size by nearest-neighbour sampling, measured before the flip/turn. Unequal scaling gives squash and stretch. The part's own size resets it.
-- `ROTATE instance-id degrees` (whole degrees, −360…360, stored as −179…180, positive is clockwise, 0 resets) turns the result about the centre of its unrotated box. Exact quarter turns belong in the lossless transform.
+- `ROTATE instance-id degrees` (whole degrees, −360…360, stored as −179…180, positive is clockwise, 0 resets) turns the result about its pivot. Exact quarter turns belong in the lossless transform.
+- `PIVOT instance-id x y` (integers −128…256) sets the pivot to the centre of pixel x y of the flipped/turned, unrotated box, relative to the `USE` position. `PIVOT instance-id CENTER` resets it to the exact box centre (the default).
+- `SKEW instance-id sx sy` (whole degrees, −60…60 each; `0 0` resets) shears about the pivot: x first moves by tan(sx)·(y − pivot y), then y by tan(sy)·(x − pivot x).
+- `DEFORM instance-id NONE | WAVE X|Y amplitude wavelength phase | BULGE strength | TWIST degrees` bends the box about its centre. `WAVE X` shifts each row y sideways by round(amplitude·sin(360°·y/wavelength + phase)); `WAVE Y` shifts columns vertically (amplitude 1–32, wavelength 2–256, phase 0–359; the box grows by the amplitude). `BULGE` (−100…100) samples radius r^(2^(strength/100)) inside the ellipse fitting the box: positive bulges, negative pinches. `TWIST` (−360…360) turns by degrees·(1 − r): fully at the centre, not at the edge. `NONE`, `BULGE 0` and `TWIST 0` reset. Stepping the wave phase across `FRAME FROM` frames animates flags, water and heat haze with one short line per frame.
+- `SAMPLE instance-id NEAREST|ROTSPRITE`. `NEAREST` (default) shows one part pixel per canvas pixel. `ROTSPRITE` upscales the part 8× with three Scale2x (EPX) passes, cached per part, and picks the sub-pixel at each destination pixel centre, so free angles, skew and deforms keep smoother pixel-art edges using only existing palette indices. Without a free angle, skew or deform it equals `NEAREST`. Its 8× image costs 64 rendering work units per part pixel, once per part.
 
-Composition order is resize, then flip/quarter turn, then free rotation. `AT`, `TURN`, `SWAP`, `RESIZE` and `ROTATE` keep the instance's other properties and draw order.
+Composition order is resize, then flip/quarter turn, then deform, then skew, then free rotation about the pivot; rendering inverse-maps each pixel centre through these steps in reverse. `AT`, `TURN`, `SWAP` and the commands above keep the instance's other properties and draw order; frame deltas after `FRAME FROM` write only the commands that changed.
 
 Part references are live: changing the definition updates its instances. `PART copy FROM original` creates an independent definition. Frame `FROM` copies an earlier composition, including across animations; it does not make later frame placements follow edits to an earlier frame. `AT` changes a placement rather than painting translated pixels over an old image.
 
@@ -134,4 +138,4 @@ The patch uses 47.4% fewer total text tokens than a full-frame edit and 34.4% fe
 
 Browser checks cover part movement, frame isolation, Undo/Redo, main-canvas painting, shared painting, local override precedence, save/reload and exact v1 export. AI generation is tested with deterministic responses and a fake subprocess; it does not consume model allowance.
 
-Nested parts, arbitrary-angle transforms, tweening, per-instance palette remapping and automatic semantic decomposition are outside this initial version. Existing artwork can remain raster or be explicitly extracted into parts.
+Nested parts, tweening, per-instance palette remapping and automatic semantic decomposition are outside this initial version. Existing artwork can remain raster or be explicitly extracted into parts.

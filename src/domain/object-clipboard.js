@@ -3,6 +3,7 @@ import { validateProject, insertProjectLayer, uid, nearestColor, MAX_COLORS, MAX
 import { cloneArtwork, sourceForCel, renderOperations, renderParts } from './artwork.js';
 import { celObjects, objectBounds, orderObjects } from './objects.js';
 import { nextPartId } from './parts.js';
+import { instancePose } from './geometry.js';
 
 export const OBJECT_CLIPBOARD_FORMAT = 'pixel-studio-object';
 
@@ -54,9 +55,9 @@ export function copyObject(project, target, key) {
     const op = node.instance, frames = {};
     for (const f of animation.frames) {
       const pose = celIn(f).source?.ops.find(o => o.type === 'use' && o.id === op.id && o.partId === op.partId);
-      if (pose) frames[f.id] = { x: pose.x, y: pose.y, transform: pose.transform, width: pose.width, height: pose.height, angle: pose.angle };
+      if (pose) frames[f.id] = { x: pose.x, y: pose.y, transform: pose.transform, ...instancePose(pose) };
     }
-    return { ...base, kind: 'instance', name: node.name, instance: { id: op.id, partId: op.partId, x: op.x, y: op.y, transform: op.transform, width: op.width, height: op.height, angle: op.angle }, frames, parts: usedParts([op]) };
+    return { ...base, kind: 'instance', name: node.name, instance: { id: op.id, partId: op.partId, x: op.x, y: op.y, transform: op.transform, ...instancePose(op) }, frames, parts: usedParts([op]) };
   }
   const ops = node.type === 'overrides' ? cel.source.overrides : cel.source.ops.slice(node.start, node.end);
   return { ...base, kind: 'container', name: nodes.length === 1 ? layer.name : node.name, group: false,
@@ -159,7 +160,7 @@ export function pasteObject(project, target, clipboard, { scope = 'animation', i
       const pose = perFrame ? clip.frames[f.id] || (fill ? clip.instance : null) : clip.instance;
       if (!pose) continue;
       let x = pose.x + offset, y = pose.y + offset;
-      const size = { width: pose.width, height: pose.height, angle: pose.angle };
+      const size = instancePose(pose);
       const bounds = objectBounds(p, { type: 'instance', instance: { partId: part.id, transform: pose.transform, x, y, ...size } });
       if (!perFrame && (bounds.x >= p.width || bounds.y >= p.height || bounds.x + bounds.width <= 0 || bounds.y + bounds.height <= 0)) { x -= bounds.x; y -= bounds.y; }
       poses.set(f, { x, y, transform: pose.transform, ...size });

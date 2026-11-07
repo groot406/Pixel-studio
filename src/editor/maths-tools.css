@@ -1,0 +1,99 @@
+/* Maths-powered tools: gradient & tile options, object pose, Animate and Effects panels, palette ramps. */
+
+/* Segmented icon control (gradient shape, light direction) in the style of the Edit switch. */
+.seg-control { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid #dce4d5; border-radius: 8px; background: #fff; }
+.seg-option { display: inline-grid; place-items: center; width: 30px; height: 26px; padding: 0; border: 1px solid transparent; border-radius: 6px; background: transparent; color: #65735e; cursor: pointer; }
+.seg-option svg { width: 16px; height: 16px; }
+.seg-option:hover:not(.active):not(:disabled) { background: #f3f6ee; }
+.seg-option:focus-visible { outline: 2px solid var(--green); outline-offset: 1px; }
+.seg-option.active { border-color: var(--green); background: var(--green); color: #fff; }
+.seg-option:disabled { opacity: .35; cursor: default; }
+
+/* Gradient tool options */
+.gradient-options { display: grid; gap: 8px; margin-bottom: 10px; }
+.gradient-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.gradient-label { flex: 0 0 48px; color: #52664d; font-size: 11px; font-weight: 550; }
+.gradient-stops { display: flex; flex: 1 1 auto; min-width: 0; height: 22px; overflow: hidden; border: 1px solid #d8e1d0; border-radius: 5px; }
+.gradient-stops i { flex: 1 1 0; min-width: 2px; background: var(--swatch); }
+.gradient-to { position: relative; flex: 0 0 auto; width: 30px; height: 24px; padding: 0; border: 1px solid #c9d4bd; border-radius: 5px; background: var(--swatch, #fff); cursor: pointer; }
+.gradient-to::after { content: ""; position: absolute; right: 2px; bottom: 2px; width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 4px solid #fff; filter: drop-shadow(0 0 1px #0008); }
+.gradient-to:focus-visible { outline: 2px solid var(--green); outline-offset: 1px; }
+.gradient-to-picker { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 4px; padding: 6px; border: 1px solid #dce4d5; border-radius: 7px; background: #fff; }
+.gradient-to-picker .swatch { height: 20px; }
+
+/* Tile mode: faded repeat around the canvas and a floating status chip. */
+.tile-ghost { position: absolute; z-index: 1; pointer-events: none; image-rendering: pixelated; }
+.workbench.tile-mode .canvas-wrap { outline-color: transparent; box-shadow: 0 0 0 1px #285b4766; }
+.tile-status { position: absolute; z-index: 4; bottom: 8px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; width: max-content; max-width: calc(100% - 16px); padding: 4px 4px 4px 10px; border: 1px solid #d3dfc9; border-radius: 10px; background: #fffefbf2; box-shadow: 0 6px 18px #36482c1f; color: #52664d; font-size: 11px; backdrop-filter: blur(6px); }
+.tile-status > svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; }
+.tile-status .seams-bad { color: #a3542f; font-weight: 600; }
+.tile-status .seams-ok { color: var(--green); font-weight: 600; }
+
+/* Pivot marker */
+.pivot-marker { position: absolute; z-index: 4; width: 22px; height: 22px; margin: -11px 0 0 -11px; border-radius: 50%; cursor: move; touch-action: none; }
+.pivot-marker::before, .pivot-marker::after { content: ""; position: absolute; background: #ff2d87; box-shadow: 0 0 0 1px #fff; }
+.pivot-marker::before { left: 10px; top: 0; width: 2px; height: 22px; }
+.pivot-marker::after { left: 0; top: 10px; width: 22px; height: 2px; }
+.pivot-marker > i { position: absolute; left: 6px; top: 6px; width: 10px; height: 10px; box-sizing: border-box; border: 2px solid #ff2d87; border-radius: 50%; background: #fff; z-index: 1; }
+.pivot-marker.dragging > i { background: #ff2d87; }
+
+/* Object pose (Transform panel) */
+.object-pose { display: grid; gap: 7px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line, #dce4d5); }
+.object-pose .object-action-heading { margin: 0; }
+.object-pose .object-action-heading span { margin-left: 4px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+.pose-row { display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; align-items: center; gap: 7px; color: #52664d; font-size: 11px; }
+.pose-label { font-weight: 550; }
+.pose-value { min-width: 0; overflow: hidden; color: #6c7865; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+.pose-row input[type="range"], .maths-form input[type="range"] { width: 100%; min-width: 0; margin: 0; accent-color: var(--green); }
+.pose-number { width: 52px; min-height: 28px; box-sizing: border-box; padding: 3px 5px; border: 1px solid #d8e1d0; border-radius: 5px; background: #fffefb; color: #37503c; font: inherit; font-size: 11px; font-variant-numeric: tabular-nums; }
+.pose-number:focus-visible { outline: 2px solid var(--green); outline-offset: 0; }
+.pose-deform > span { flex-basis: 46px; }
+.pose-params { display: grid; gap: 7px; }
+.pose-params:empty { display: none; }
+.pose-params select { min-height: 28px; padding: 3px 5px; border: 1px solid #d8e1d0; border-radius: 5px; background: #fffefb; color: #37503c; font: inherit; font-size: 11px; }
+.object-pose .pose-check { margin-top: 2px; font-size: 11px; color: #52664d; }
+
+/* Animate / Effects panels reuse .object-action rows. */
+.animate-section .object-action-list, .effects-section .object-action-list { margin-top: 2px; }
+.maths-reason { display: block; margin-top: 2px; color: #a3694e; font-size: 10px; line-height: 13px; }
+
+/* Dialogs */
+.maths-form .form-grid + .form-grid { margin-top: 13px; }
+.maths-form .field { margin: 12px 0 0; }
+.maths-form .form-grid .field { margin: 0; }
+.maths-form .field-row { display: grid; grid-template-columns: minmax(0, 1fr) 56px; align-items: center; gap: 8px; }
+.maths-form .field-row output { color: #52664d; font-size: 11px; font-variant-numeric: tabular-nums; text-align: right; }
+.maths-error { margin: 12px 0 0; color: #8b302b; font-size: 11px; line-height: 1.5; }
+.maths-error:empty { display: none; }
+.maths-info { margin: 10px 0 0; color: #627458; font-size: 11px; line-height: 1.55; }
+.maths-preview { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 0 0 4px; }
+.maths-preview figure { display: grid; gap: 5px; margin: 0; }
+.maths-preview figcaption { color: #8a9680; font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.maths-preview canvas, .easing-curve { width: 100%; height: auto; aspect-ratio: 1; border: 1px solid #dce4d5; border-radius: 7px; background: #f3f5ef; image-rendering: pixelated; }
+.easing-curve { display: block; aspect-ratio: auto; height: 96px; margin-top: 10px; image-rendering: auto; background: #fff; }
+.light-grid { display: grid; grid-template-columns: repeat(3, 28px); gap: 3px; padding: 3px; width: max-content; border: 1px solid #dce4d5; border-radius: 8px; background: #fff; }
+.light-grid .seg-option { width: 28px; height: 28px; font-size: 13px; line-height: 1; }
+.light-grid .light-centre { display: grid; place-items: center; color: #b4bfab; font-size: 14px; }
+.swatch-pick { display: flex; flex-wrap: wrap; gap: 4px; }
+.swatch-pick .swatch { width: 24px; height: 24px; flex: 0 0 24px; }
+.swatch-pick .swatch[aria-pressed="true"] { outline: 2px solid #536e43; outline-offset: 2px; }
+.ramp-strip { display: flex; height: 28px; overflow: hidden; border: 1px solid #d8e1d0; border-radius: 6px; }
+.ramp-strip i { flex: 1 1 0; background: var(--swatch); }
+.ramp-strip i.base { box-shadow: inset 0 0 0 2px #fff, inset 0 0 0 3px #253a2b; }
+.ramp-strip:empty::before { content: "Pick at least two colours"; padding: 6px 8px; color: #9aa48f; font-size: 11px; }
+
+.palette-actions #shading-ramp, .palette-actions #colour-cycle { white-space: nowrap; }
+
+@media (max-width: 760px) {
+  .seg-option { width: 40px; height: 36px; }
+  .gradient-options, .object-pose { grid-column: 1 / -1; }
+  .gradient-to { width: 40px; height: 36px; }
+  .gradient-to-picker .swatch { height: 32px; }
+  .pose-number { min-height: 36px; font-size: 16px; width: 64px; }
+  .tile-status { bottom: 6px; font-size: 12px; }
+  .animate-section, .effects-section { grid-column: 1 / -1; }
+  .maths-preview { gap: 8px; }
+}
+#pixel-canvas.picking-point { cursor: crosshair; outline: 2px dashed #ff2d87; outline-offset: 2px; }
+.maths-form .form-grid { margin-top: 12px; }
+.maths-form > .button.small { margin-top: 10px; }

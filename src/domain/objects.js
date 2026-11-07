@@ -1,7 +1,7 @@
 /** Object editing over the established cel format. Groups retain isolated erase/override semantics. */
 import { validateProject, getAnimationLayers, insertProjectLayer, removeProjectLayer, uid, MAX_LAYERS, MAX_TOTAL_PIXELS } from './project.js';
 import { cloneArtwork, sourceForCel, renderParts, hasLockedInstances } from './artwork.js';
-import { linePoints, ellipsePoints, canvasToPartPoint, instanceSize, instanceBox, transformedSize, swapsAxes, composeTransform } from './geometry.js';
+import { linePoints, ellipsePoints, instancePixel, instanceSize, instanceBox, transformedSize, swapsAxes, composeTransform, transformPoint } from './geometry.js';
 import { nextPartId } from './parts.js';
 
 export function celObjects(cel) {
@@ -120,15 +120,21 @@ export function placeObject(project,target,key,anchorKey,position,scope='animati
   return validateProject(p);
 }
 
+/** Optional per-instance effects; `null` in a change resets one to its default (centre pivot, no skew/deform, nearest). */
+export const EFFECT_KEYS=['pivot','skew','deform','sampling'];
+function applyEffects(op,changes) {
+  for(const key of EFFECT_KEYS) if(key in changes) { if(changes[key]===null || changes[key]===undefined) delete op[key]; else op[key]=cloneArtwork(changes[key]); }
+}
+
 export function updateObject(project,target,key,changes,scope='animation') {
   const {p,layer,frames}=context(project,target,scope);
   unlocked(layer);
-  for (const name of Object.keys(changes)) if (!['name','visible','locked','x','y','transform'].includes(name)) throw new Error('Unsupported object setting.');
+  for (const name of Object.keys(changes)) if (!['name','visible','locked','x','y','transform',...EFFECT_KEYS].includes(name)) throw new Error('Unsupported object setting.');
   for (const frame of frames) {
     const op=frame.cels.find(c=>c.layerId===layer.id).source?.ops.find(op=>op.type==='use' && op.id===key);
     if (!op) continue;
     if (Object.keys(changes).some(name=>name!=='locked')) unlocked(layer,{instance:op});
-    Object.assign(op,changes);
+    applyEffects(Object.assign(op,changes),changes);
   }
   return validateProject(p);
 }
@@ -226,9 +232,24 @@ export function turnObjects(project,target,items,turn,scope='animation') {
   return eachSelectedInstance(project,target,items,scope,(op,part)=>{
     const before=transformedSize(op,part), transform=composeTransform(op.transform,turn);
     if(swapsAxes(transform)!==swapsAxes(op.transform)){op.x+=Math.trunc((before.width-before.height)/2);op.y+=Math.trunc((before.height-before.width)/2);}
+    // The pivot follows its artwork pixel; flips mirror skew and twist, and quarter turns swap the skew axes.
+    if(op.pivot){const p=transformPoint(turn,before.width,before.height,op.pivot.x,op.pivot.y);op.pivot={x:Math.max(-128,Math.min(256,p.x)),y:Math.max(-128,Math.min(256,p.y))};}
     op.transform=transform;
-    if(op.angle && (turn==='FX' || turn==='FY'))op.angle=-op.angle;
+    if(turn==='FX' || turn==='FY') {
+      if(op.angle)op.angle=-op.angle;
+      if(op.skew)op.skew={x:-op.skew.x,y:-op.skew.y};
+      if(op.deform?.kind==='twist')op.deform={...op.deform,angle:-op.deform.angle};
+    } else if(op.skew && turn!=='R180')op.skew={x:-op.skew.y,y:-op.skew.x};
   });
+}
+
+/**
+ * Set or reset (`null`) pivot, skew, deform and sampling of each selected object in every frame of the scope, for
+ * example `{skew:{x:-15,y:0}, deform:{kind:'wave',axis:'x',amplitude:2,wavelength:8,phase:0}, sampling:'rotsprite'}`.
+ */
+export function setObjectEffects(project,target,items,changes,scope='animation') {
+  for(const name of Object.keys(changes)) if(!EFFECT_KEYS.includes(name)) throw new Error('Unsupported object effect.');
+  return eachSelectedInstance(project,target,items,scope,op=>applyEffects(op,changes));
 }
 
 /** Add `delta` whole degrees of free rotation to each selected object (about its centre), in every frame of the scope. */
@@ -373,9 +394,7 @@ export function objectBounds(project,node) {
 function operationPixel(op,x,y,images,width,height) {
   if(op.type==='use') {
     if(op.visible===false)return undefined;
-    const part=images.get(op.partId), local=canvasToPartPoint(op,part,{x,y});
-    if(local.x<0 || local.y<0 || local.x>=part.width || local.y>=part.height)return undefined;
-    const color=part.pixels[local.y*part.width+local.x];
+    const color=instancePixel(op,images.get(op.partId),{x,y});
     return color<0?undefined:color;
   }
   if(op.type==='span')return y===op.y && x>=op.x && x<op.x+op.values.length?op.values[x-op.x]:undefined;

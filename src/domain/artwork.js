@@ -1,6 +1,7 @@
 /** Retained pixel artwork. Source is authoritative; pixels are derived editing buffers. */
 import { MAX_SIZE, MAX_TOTAL_PIXELS } from './limits.js';
-import { linePoints, rectanglePoints, ellipsePoints, canvasToPartPoint, instanceBox, TRANSFORM_NAMES } from './geometry.js';
+import { linePoints, rectanglePoints, ellipsePoints, instancePixel, instanceBox, smoothSampling, TRANSFORM_NAMES, SAMPLING_MODES } from './geometry.js';
+import { ROTSPRITE_SCALE } from './rotsprite.js';
 
 export const MAX_PARTS = 256;
 export const MAX_OPERATIONS = 32768;
@@ -22,6 +23,41 @@ function spend(budget, work = 0) {
   budget.operations++;
   budget.work += work;
   if (budget.operations > MAX_OPERATIONS || budget.work > MAX_RENDER_WORK) throw new Error('Artwork exceeds the operation or expanded rendering budget.');
+}
+
+const absent = value => value === undefined || value === null;
+/** Normalised optional pivot/skew/deform/sampling of a `use` op; defaults (centre, no skew, no deform, nearest) are omitted. */
+export function instanceEffects(op) {
+  const out = {};
+  if (!absent(op.pivot)) {
+    if (!object(op.pivot)) throw new Error('Instance pivot needs x and y.');
+    out.pivot = { x: integer(op.pivot.x, -128, 256, 'Pivot x'), y: integer(op.pivot.y, -128, 256, 'Pivot y') };
+  }
+  if (!absent(op.skew)) {
+    if (!object(op.skew)) throw new Error('Instance skew needs x and y.');
+    const x = integer(op.skew.x, -60, 60, 'Skew x'), y = integer(op.skew.y, -60, 60, 'Skew y');
+    if (x || y) out.skew = { x, y };
+  }
+  if (!absent(op.deform)) {
+    const d = op.deform;
+    if (!object(d)) throw new Error('Invalid instance deform.');
+    if (d.kind === 'wave') {
+      if (!['x', 'y'].includes(d.axis)) throw new Error('Wave axis must be x or y.');
+      out.deform = { kind: 'wave', axis: d.axis, amplitude: integer(d.amplitude, 1, 32, 'Wave amplitude'), wavelength: integer(d.wavelength, 2, 256, 'Wave wavelength'),
+        phase: (integer(d.phase ?? 0, -360, 720, 'Wave phase') + 360) % 360 };
+    } else if (d.kind === 'bulge') {
+      const strength = integer(d.strength, -100, 100, 'Bulge strength');
+      if (strength) out.deform = { kind: 'bulge', strength };
+    } else if (d.kind === 'twist') {
+      const angle = integer(d.angle, -360, 360, 'Twist angle');
+      if (angle) out.deform = { kind: 'twist', angle };
+    } else throw new Error('Deform must be wave, bulge or twist.');
+  }
+  if (!absent(op.sampling)) {
+    if (!SAMPLING_MODES.includes(op.sampling)) throw new Error('Sampling must be nearest or rotsprite.');
+    if (op.sampling !== 'nearest') out.sampling = op.sampling;
+  }
+  return out;
 }
 
 /** Validate before rendering; parts cannot contain instances, so references never recurse. */
@@ -46,8 +82,12 @@ export function validateOperations(ops, width, height, paletteLength, parts, bud
       // Free rotation in whole degrees, normalised to -179…180; quarter turns belong in the lossless transform instead.
       const angle = op.angle === undefined ? 0 : ((integer(op.angle, -360, 360, 'Instance angle') + 539) % 360) - 179;
       if (angle) metadata.angle = angle;
-      const box = instanceBox({ ...op, transform: op.transform, ...metadata, width, height }, part);
+      Object.assign(metadata, instanceEffects(op));
+      const pose = { x: 0, y: 0, transform: op.transform, ...metadata, width, height };
+      const box = instanceBox(pose, part);
       spend(budget, box.width * box.height);
+      // The 8× RotSprite image costs 64 work units per part pixel, once per part.
+      if (smoothSampling(pose) && !(budget.smoothed ||= new Set()).has(partId)) { budget.smoothed.add(partId); budget.work += part.width * part.height * ROTSPRITE_SCALE ** 2; spend(budget); }
       for (const flag of ['visible','locked']) if (op[flag] !== undefined) {
         if (typeof op[flag] !== 'boolean') throw new Error(`Instance ${flag} must be boolean.`);
         metadata[flag] = op[flag];
@@ -116,9 +156,7 @@ export function renderOperations(ops, width, height, partImages = new Map()) {
       if (!part) throw new Error(`Unknown part ${op.partId}.`);
       const box = instanceBox(op, part);
       for (let y = Math.max(0, box.y); y < Math.min(height, box.y + box.height); y++) for (let x = Math.max(0, box.x); x < Math.min(width, box.x + box.width); x++) {
-        const local = canvasToPartPoint(op, part, { x, y });
-        if (local.x < 0 || local.y < 0 || local.x >= part.width || local.y >= part.height) continue;
-        const color = part.pixels[local.y * part.width + local.x];
+        const color = instancePixel(op, part, { x, y });
         if (color >= 0) pixels[y * width + x] = color;
       }
     } else {

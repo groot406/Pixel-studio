@@ -88,6 +88,31 @@ The samples include **Golden Key · reusable parts**. The prompt builder default
 
 See the [PXA 2 format, editor workflow, and benchmarks](docs/pxa-v2.md). The benchmarks verify pixel equivalence and report both improvements and regressions; file size alone is not a token count or an art-quality measurement.
 
+## Animation & maths tools
+
+Objects (placed parts) keep their artwork while you pose them, so these tools change poses or paint pixels without redrawing anything by hand. Tools that change several frames follow the **Edit** switch above the canvas (*All frames* / *This frame*).
+
+| # | Tool | Where in the UI |
+|---|------|-----------------|
+| 1 | **Tweening with easing** – eased position, size, rotation, skew and wave phase between two key frames (linear, ease, cubic, back, elastic, bounce); a curve preview shows the easing. | **Animate** panel → *Tween to frame…* |
+| 2 | **Auto squash & stretch** – stretch along the motion, squash on impact, keeping the area. | **Animate** → *Squash & stretch* (also a checkbox in the tween dialog) |
+| 3 | **Pivots and motion arcs** – rotation and skew turn about a pivot (joint); tweens follow a line, an arc or a bézier, optionally turning with the path. | **Transform** panel → *Object pose* → Pivot (drag the pink crosshair on the canvas with the Object/Transform tool; *Centre* resets); path options in the tween dialog |
+| 4 | **Spring follow-through** – an object follows a leader's angle or position with spring lag. | **Animate** → *Follow-through* |
+| 5 | **Two-bone IK** – upper and lower limb reach a target; set pivots on the joints first. | **Animate** → *IK limb* (*Pick target on canvas*) |
+| 6 | **Smear frames** – a motion-trail frame between the current and next frame. | **Animate** → *Smear frame* |
+| 7 | **RotSprite rotation** – clean free rotations, skews and deforms. | **Transform** → *Object pose* → *Smooth rotation (RotSprite)* |
+| 8 | **Skew** – horizontal/vertical shear about the pivot. | **Transform** → *Object pose* → Skew X / Skew Y |
+| 9 | **Wave, bulge, pinch and twist** – non-destructive deforms; wave phase can be animated. | **Transform** → *Object pose* → Deform; **Animate** → *Wave motion* (reports seamless loops) |
+| 10 | **Seamless tiles** – wrap-around drawing, faded 3×3 repeat, seam score. | Canvas toolbar → **Tile mode** toggle; the seam count and *Offset ½* appear in a badge on the canvas stage |
+| 11 | **Distance-field effects** – outline, selective outline, inner glow, rim light (8-way light picker), auto shade. | **Effects** panel (before/after preview in each dialog; a selection limits the effect) |
+| 12 | **Hue-shifted shading ramps** – an OKLCH ramp from the active colour. | **Color palette** → *Shading ramp* |
+| 13 | **Colour cycling** – rotate a ramp of palette colours across frames. | **Color palette** → *Colour cycle* |
+| 14 | **Ordered dithering** – Bayer dither between two colours. | **Effects** → *Dither* (and the Gradient tool's *Dither* style) |
+| 15 | **Pixel-perfect lines** – no L-shaped doubles, clean line slopes, clean up existing lines. | Pencil options → *Pixel-perfect strokes*; Line options → *Clean slopes*; **Effects** → *Clean up lines* |
+| 16 | **Gradient fills** – linear/radial/diamond/angle, bands or dithered, through a palette ramp. | Toolbox → **Gradient** (`N`): drag from → to; options choose shape, style, matrix, repeat, end colour and region (clicked area, selection or whole cel) |
+
+Effects that paint pixels write local edits on object cels, like the drawing tools, and skip cels holding locked objects.
+
 ## Source layout
 
 ```text
@@ -97,6 +122,7 @@ src/
   storage/        IndexedDB workspace and memory fallback
   features/ai/    Prompt creation, edit validation, patch engine, review dialog
   editor/app.js   Editor state, DOM wiring, rendering, history and save ordering
+  editor/*.js     Panels and tools wired from app.js (objects, parts, maths tools…)
 public/           Original HTML, styles, icons, format guide and samples
 local/            Loopback HTTP service and Codex app-server adapter
 scripts/          Build, source watching and syntax checks

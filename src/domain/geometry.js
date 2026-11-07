@@ -1,5 +1,6 @@
 /** Deterministic integer-grid geometry shared by tools and retained artwork. */
 import { SIZE, MAX_TOTAL_PIXELS, pixelCount } from './limits.js';
+import { rotspriteImage, ROTSPRITE_SCALE } from './rotsprite.js';
 
 function coordinates(...values) {
   if (!values.every(Number.isFinite)) return null;
@@ -124,7 +125,7 @@ function untransformPoint(transform, w, h, x, y) {
   return transformPoint(named([a, c, b, d]), swap ? h : w, swap ? w : h, x, y);
 }
 
-/** Free rotation in whole degrees, after size and transform, about the centre of the transformed box. */
+/** Free rotation in whole degrees, after size, transform, deform and skew, about the pivot (default: box centre). */
 export function instanceAngle(instance) { return instance.angle || 0; }
 const EPSILON = 1e-9;
 function turned(angle) {
@@ -132,40 +133,120 @@ function turned(angle) {
   const r = angle * Math.PI / 180, q = ((angle % 360) + 360) % 360;
   return q === 0 ? [1, 0] : q === 90 ? [0, 1] : q === 180 ? [-1, 0] : q === 270 ? [0, -1] : [Math.cos(r), Math.sin(r)];
 }
+/** tan of a whole-degree skew, exact at 0 and ±45°. */
+const slope = deg => !deg ? 0 : Math.abs(deg) === 45 ? Math.sign(deg) : Math.tan(deg * Math.PI / 180);
 /** Size of the transformed (unrotated) box on the canvas. */
 export function transformedSize(instance, part) {
   const size = instanceSize(instance, part);
   return swapsAxes(instance.transform) ? { width: size.height, height: size.width } : size;
 }
-/** Canvas pixel rectangle covered by an instance, including free rotation. */
+
+/** Per-instance pose properties beyond position and transform; all optional, absent means default. */
+export const POSE_KEYS = ['width', 'height', 'angle', 'pivot', 'skew', 'deform', 'sampling'];
+export const SAMPLING_MODES = ['nearest', 'rotsprite'];
+export const DEFORM_KINDS = ['wave', 'bulge', 'twist'];
+/** Deep copy of an instance's pose properties (absent ones omitted). */
+export function instancePose(instance) {
+  return Object.fromEntries(POSE_KEYS.filter(k => instance[k] !== undefined).map(k => [k, typeof instance[k] === 'object' ? { ...instance[k] } : instance[k]]));
+}
+/** Pivot within the transformed box (continuous): a set pivot pixel's centre, otherwise the exact box centre. */
+function pivotPoint(instance, box) {
+  return instance.pivot ? { x: instance.pivot.x + .5, y: instance.pivot.y + .5 } : { x: box.width / 2, y: box.height / 2 };
+}
+/** Canvas point that free rotation and skew turn about (pixel centre of a set pivot, otherwise the exact box centre). */
+export function instancePivot(instance, part) {
+  const p = pivotPoint(instance, transformedSize(instance, part));
+  return { x: instance.x + p.x, y: instance.y + p.y };
+}
+/** Whole-pixel shift of wave row/column `i`: round(amplitude·sin(2π·i/wavelength + phase)). */
+export function waveShift(deform, i) {
+  return Math.round(deform.amplitude * Math.sin(2 * Math.PI * i / deform.wavelength + deform.phase * Math.PI / 180));
+}
+/**
+ * Inverse deform in box space. Wave moves whole rows (axis x) or columns (axis y) by waveShift. Bulge and twist act
+ * inside the ellipse inscribed in the box, in coordinates normalised to the unit circle (r < 1), and leave the rest
+ * alone: bulge samples radius r^(2^(strength/100)) (positive magnifies the centre, negative pinches), twist turns by
+ * angle·(1−r) (full angle at the centre, none at the edge). Both are bijections of the ellipse, so the box never grows.
+ */
+function undeform(d, box, x, y) {
+  if (d.kind === 'wave') return d.axis === 'x' ? [x - waveShift(d, Math.floor(y + EPSILON)), y] : [x, y - waveShift(d, Math.floor(x + EPSILON))];
+  const hw = box.width / 2, hh = box.height / 2, nx = (x - hw) / hw, ny = (y - hh) / hh, r = Math.hypot(nx, ny);
+  if (!(r > 0) || r >= 1) return [x, y];
+  if (d.kind === 'bulge') { const f = r ** (2 ** (d.strength / 100) - 1); return [hw + nx * f * hw, hh + ny * f * hh]; }
+  const a = d.angle * (1 - r) * Math.PI / 180, cos = Math.cos(a), sin = Math.sin(a);
+  return [hw + (nx * cos + ny * sin) * hw, hh + (-nx * sin + ny * cos) * hh];
+}
+/** Continuous point (px,py) relative to the instance origin, mapped back through rotation, skew and deform to box space. */
+function boxPoint(instance, box, px, py) {
+  const angle = instanceAngle(instance), skew = instance.skew;
+  let x = px, y = py;
+  if (angle || skew) {
+    const c = pivotPoint(instance, box);
+    x -= c.x; y -= c.y;
+    if (angle) { const [cos, sin] = turned(angle); [x, y] = [x*cos + y*sin, -x*sin + y*cos]; }
+    if (skew) { y -= slope(skew.y) * x; x -= slope(skew.x) * y; }
+    x += c.x; y += c.y;
+  }
+  return instance.deform ? undeform(instance.deform, box, x, y) : [x, y];
+}
+/**
+ * Canvas pixel rectangle covered by an instance. Rotation and skew are affine about the pivot, so the transformed
+ * corners bound them; a wave widens the box by its amplitude first, bulge and twist stay inside it.
+ */
 export function instanceBox(instance, part) {
-  const { width, height } = transformedSize(instance, part), angle = instanceAngle(instance);
-  if (!angle) return { x: instance.x, y: instance.y, width, height };
-  const [cos, sin] = turned(angle), cx = instance.x + width / 2, cy = instance.y + height / 2;
-  const xs = [], ys = [];
-  for (const [dx, dy] of [[-width/2, -height/2], [width/2, -height/2], [width/2, height/2], [-width/2, height/2]]) {
-    xs.push(cx + dx*cos - dy*sin); ys.push(cy + dx*sin + dy*cos);
+  const { width, height } = transformedSize(instance, part), angle = instanceAngle(instance), skew = instance.skew, d = instance.deform;
+  const ax = d?.kind === 'wave' && d.axis === 'x' ? d.amplitude : 0, ay = d?.kind === 'wave' && d.axis === 'y' ? d.amplitude : 0;
+  if (!angle && !skew && !ax && !ay) return { x: instance.x, y: instance.y, width, height };
+  const [cos, sin] = turned(angle), c = pivotPoint(instance, { width, height }), ox = instance.x + c.x, oy = instance.y + c.y;
+  const tx = slope(skew?.x), ty = slope(skew?.y), xs = [], ys = [];
+  for (const [u, v] of [[-ax, -ay], [width + ax, -ay], [width + ax, height + ay], [-ax, height + ay]]) {
+    let dx = u - c.x, dy = v - c.y;
+    if (skew) { dx += tx*dy; dy += ty*dx; }
+    xs.push(ox + dx*cos - dy*sin); ys.push(oy + dx*sin + dy*cos);
   }
   const left = Math.floor(Math.min(...xs) + EPSILON), top = Math.floor(Math.min(...ys) + EPSILON);
   return { x: left, y: top, width: Math.ceil(Math.max(...xs) - EPSILON) - left, height: Math.ceil(Math.max(...ys) - EPSILON) - top };
 }
 
 /**
- * Map a canvas pixel into a placed part's untransformed pixel coordinates. Every step is affine or monotonic, so a
- * pixel past one edge of the box lands past the matching edge of the part (in-place editing grows parts that way).
- * Free angles turn the pixel centre back by -angle about the box centre (inverse-mapped nearest neighbour), so each
- * canvas pixel shows exactly one part pixel and the part itself never changes.
+ * Map a canvas pixel into a placed part's untransformed pixel coordinates. Forward order is resize → flip/turn →
+ * deform → skew → rotate about the pivot; this inverse-maps the pixel centre back in reverse (nearest neighbour), so
+ * each canvas pixel shows exactly one part pixel and the part itself never changes. Without deform every step is affine
+ * or monotonic, so a pixel past one edge of the box lands past the matching edge of the part (in-place editing grows
+ * parts that way).
  */
 export function canvasToPartPoint(instance, part, point) {
-  const size = instanceSize(instance, part), box = transformedSize(instance, part), angle = instanceAngle(instance);
+  const size = instanceSize(instance, part), box = transformedSize(instance, part);
   let x = point.x - instance.x, y = point.y - instance.y;
-  if (angle) {
-    const [cos, sin] = turned(angle), vx = x + .5 - box.width / 2, vy = y + .5 - box.height / 2;
-    x = Math.floor(vx*cos + vy*sin + box.width / 2 + EPSILON);
-    y = Math.floor(-vx*sin + vy*cos + box.height / 2 + EPSILON);
+  if (instance.angle || instance.skew || instance.deform) {
+    const [u, v] = boxPoint(instance, box, x + .5, y + .5);
+    x = Math.floor(u + EPSILON); y = Math.floor(v + EPSILON);
   }
   const local = untransformPoint(instance.transform, size.width, size.height, x, y);
   return { x: sampleIndex(local.x, size.width, part.width), y: sampleIndex(local.y, size.height, part.height) };
+}
+
+/** Whether RotSprite sampling changes this instance's output: only free (non-quarter) angles, skew and deform resample. */
+export function smoothSampling(instance) {
+  return instance.sampling === 'rotsprite' && Boolean((instance.angle && instance.angle % 90) || instance.skew || instance.deform);
+}
+/**
+ * Palette index (-1 transparent) a placed instance shows at canvas pixel `point`; `part` is a rendered part with pixels.
+ * Shared by rendering and hit-testing. RotSprite instances sample the cached 8× Scale2x³ image at the pixel centre.
+ */
+export function instancePixel(instance, part, point) {
+  if (!smoothSampling(instance)) {
+    const local = canvasToPartPoint(instance, part, point);
+    return local.x < 0 || local.y < 0 || local.x >= part.width || local.y >= part.height ? -1 : part.pixels[local.y * part.width + local.x];
+  }
+  const size = instanceSize(instance, part), box = transformedSize(instance, part);
+  const [u, v] = boxPoint(instance, box, point.x - instance.x + .5, point.y - instance.y + .5);
+  const [a, b, c, d] = matrix(instance.transform);
+  // Continuous inverse of the dihedral transform (transpose), measured to box edges rather than pixel indices.
+  const lx = a*u + c*v + (a < 0 ? size.width : 0) + (c < 0 ? size.width : 0), ly = b*u + d*v + (b < 0 ? size.height : 0) + (d < 0 ? size.height : 0);
+  const image = rotspriteImage(part);
+  const sx = Math.floor(lx * part.width / size.width * ROTSPRITE_SCALE + EPSILON), sy = Math.floor(ly * part.height / size.height * ROTSPRITE_SCALE + EPSILON);
+  return sx < 0 || sy < 0 || sx >= image.width || sy >= image.height ? -1 : image.pixels[sy * image.width + sx];
 }
 
 /** Canvas position of part pixel (x,y) relative to its instance origin, matching the renderer's transforms. */

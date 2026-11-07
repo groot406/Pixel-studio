@@ -94,15 +94,18 @@ export function flattenCel(project,target) {
 }
 
 /**
- * A free angle turns about the box centre, which moves when the box grows by d = shift + (new − old size)/2.
- * Moving the origin by shift − (I − R)·d keeps the old pixels in place; it is rounded to the nearest pixel.
+ * Free angles and skew act about the pivot. A set pivot follows its artwork pixel (it moves by −shift inside the box),
+ * so nothing moves. The default pivot is the box centre, which moves when the box grows by d = shift + (new − old size)/2;
+ * moving the origin by shift − (I − L)·d, with L = rotation·skew, keeps the old pixels in place (rounded to the pixel).
  */
-function keepRotatedCentre(op,shift,before,after) {
-  if(!op.angle)return;
-  const r=op.angle*Math.PI/180, cos=Math.cos(r), sin=Math.sin(r);
+function keepTurnedPivot(op,shift,before,after) {
+  if(op.pivot) { op.pivot={x:Math.max(-128,Math.min(256,op.pivot.x-shift.x)),y:Math.max(-128,Math.min(256,op.pivot.y-shift.y))}; return; }
+  if(!op.angle && !op.skew)return;
+  const r=(op.angle || 0)*Math.PI/180, cos=Math.cos(r), sin=Math.sin(r), tan=deg=>Math.tan((deg || 0)*Math.PI/180);
   const dx=shift.x+(after.width-before.width)/2, dy=shift.y+(after.height-before.height)/2;
-  shift.x=Math.round(shift.x-(dx-(dx*cos-dy*sin)));
-  shift.y=Math.round(shift.y-(dy-(dx*sin+dy*cos)));
+  const sx=dx+tan(op.skew?.x)*dy, sy=dy+tan(op.skew?.y)*sx;
+  shift.x=Math.round(shift.x-(dx-(sx*cos-sy*sin)));
+  shift.y=Math.round(shift.y-(dy-(sx*sin+sy*cos)));
 }
 /**
  * Grow a part's canvas by padding it on each side. Existing artwork keeps its canvas position in every
@@ -131,7 +134,7 @@ export function grownInstance(instance,before,after,left,top) {
   const op={...instance}, box=transformedSize(op,before);
   if(op.width===undefined && op.height===undefined) {
     const shift=grownInstanceShift(op.transform,before,after,left,top);
-    keepRotatedCentre(op,shift,box,transformedSize(op,after));
+    keepTurnedPivot(op,shift,box,transformedSize(op,after));
     op.x+=shift.x; op.y+=shift.y; return op;
   }
   // Resized instances keep their scale: padding grows by the same factor so the artwork stays put (to the pixel).
@@ -139,7 +142,7 @@ export function grownInstance(instance,before,after,left,top) {
   const shown={width:Math.round(after.width*sx),height:Math.round(after.height*sy)};
   const shift=grownInstanceShift(op.transform,{width:op.width??before.width,height:op.height??before.height},shown,Math.round(left*sx),Math.round(top*sy));
   op.width=shown.width; op.height=shown.height;
-  keepRotatedCentre(op,shift,box,transformedSize(op,before));
+  keepTurnedPivot(op,shift,box,transformedSize(op,before));
   op.x+=shift.x; op.y+=shift.y;
   return op;
 }

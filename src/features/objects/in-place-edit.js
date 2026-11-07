@@ -1,7 +1,7 @@
 /** Detached object painting. The editor owns gesture lifecycle and the project commit boundary. */
 import { validateProject, compositeFrame, floodFill, linePoints, rectanglePoints, ellipsePoints, MAX_TOTAL_PIXELS, MAX_SIZE } from '../../domain/project.js';
 import { renderParts, renderSource, pixelSpans, MAX_PARTS } from '../../domain/artwork.js';
-import { canvasToPartPoint, partToCanvasOffset, transformedSize, instanceBox } from '../../domain/geometry.js';
+import { canvasToPartPoint, partToCanvasOffset, transformedSize, instanceBox, instancePixel } from '../../domain/geometry.js';
 import { referencesToPart, forkInstance, paintSharedPart, growPart, grownInstance } from '../../domain/parts.js';
 import { brushPoints, snapLineEnd, replaceColor, copyPixels, pastePixels, shadeIndex, ditherCell } from '../../domain/toolbox.js';
 import { moveSelectedPixels } from '../../domain/selection.js';
@@ -35,10 +35,9 @@ function loadDraft(session) {
   if(session.baked) {
     const box=instanceBox(session.placed,image), pixels=Array(box.width*box.height).fill(-1);
     for(let y=0;y<box.height;y++) for(let x=0;x<box.width;x++) {
-      const local=canvasToPartPoint(session.placed,image,{x:box.x+x,y:box.y+y});
-      if(local.x>=0 && local.y>=0 && local.x<image.width && local.y<image.height)pixels[y*box.width+x]=image.pixels[local.y*image.width+local.x];
+      pixels[y*box.width+x]=instancePixel(session.placed,image,{x:box.x+x,y:box.y+y});
     }
-    const {angle,width,height,...rest}=session.placed;
+    const {angle,width,height,pivot,skew,deform,sampling,...rest}=session.placed;
     pose={...rest,x:box.x,y:box.y,transform:'N'};draft={width:box.width,height:box.height,pixels};
   }
   Object.assign(session,{instance:pose,width:draft.width,height:draft.height,originalWidth:draft.width,originalHeight:draft.height,
@@ -47,14 +46,14 @@ function loadDraft(session) {
 /** 'baked' (this frame's transformed pixels), 'original' (unposed original artwork) or 'plain'. */
 export function inPlaceMode(session) { return session.baked?'baked':session.posed?'original':'plain'; }
 
-function posed(instance) { return Boolean(instance.angle) || instance.width!==undefined || instance.height!==undefined; }
+function posed(instance) { return Boolean(instance.angle || instance.skew || instance.deform) || instance.width!==undefined || instance.height!==undefined; }
 /**
  * Rotated or resized objects are edited as the original artwork: no free angle, at the part's own size (90° turns and
  * flips stay, they are lossless), centred where the placed object is. The placement itself never changes.
  */
 function editingPose(instance,part) {
   if(!posed(instance))return instance;
-  const {angle,width,height,...pose}=instance, placed=transformedSize(instance,part), own=transformedSize(pose,part);
+  const {angle,width,height,pivot,skew,deform,sampling,...pose}=instance, placed=transformedSize(instance,part), own=transformedSize(pose,part);
   pose.x=Math.round(instance.x+placed.width/2-own.width/2);pose.y=Math.round(instance.y+placed.height/2-own.height/2);
   return pose;
 }
@@ -312,7 +311,7 @@ function bakeInPlace(session) {
   const op=project.animations.find(a=>a.id===target.animationId).frames.find(f=>f.id===target.frameId).cels.find(c=>c.layerId===target.layerId).source.ops.find(op=>op.type==='use' && op.id===id);
   const part=project.parts.find(part=>part.id===op.partId), pose=inPlaceInstance(session);
   Object.assign(part,{width:session.width,height:session.height,ops:pixelSpans(session.pixels,session.width)});
-  delete op.angle;delete op.width;delete op.height;
+  for(const key of ['angle','width','height','pivot','skew','deform','sampling'])delete op[key];
   Object.assign(op,{x:pose.x,y:pose.y,transform:'N'});
   return validateProject(project);
 }

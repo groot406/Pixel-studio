@@ -1238,3 +1238,9 @@ body.is-resizing-panels { cursor: col-resize; }
 .workbench.timeline-collapsed .timeline .frame-list,
 .workbench.timeline-collapsed .timeline .timeline-footer,
 .workbench.timeline-collapsed .splitter-timeline { display: none; }
+
+/* App chrome behaves like a native tool: a mis-drag must not highlight labels and buttons.
+   Text you might want to copy (fields, dialog text, code) stays selectable. */
+body { -webkit-user-select: none; user-select: none; }
+input, textarea, select, [contenteditable]:not([contenteditable="false"]),
+dialog :is(p, li, code, pre, kbd, .notice, .field-label, .helper-text, .modal-body-text) { -webkit-user-select: text; user-select: text; }

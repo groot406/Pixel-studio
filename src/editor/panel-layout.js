@@ -26,6 +26,17 @@ export function fitFloatRect(rect,viewport) {
   return {width,height,x:clamp(rect.x,8-width+80,viewport.width-80),y:clamp(rect.y,8,viewport.height-40)};
 }
 
+/** Resize a floating panel from one edge or corner (n, se, w, …); the opposite edges stay put. */
+export function resizeFloatRect(rect,edge,dx,dy,viewport) {
+  let {x,y,width,height}=rect;
+  const maxWidth=Math.max(FLOAT_MIN.width,viewport.width-16), maxHeight=Math.max(FLOAT_MIN.height,viewport.height-16);
+  if(edge.includes('e'))width=clamp(rect.width+dx,FLOAT_MIN.width,maxWidth);
+  if(edge.includes('s'))height=clamp(rect.height+dy,FLOAT_MIN.height,Math.min(maxHeight,viewport.height-8-rect.y));
+  if(edge.includes('w')){width=clamp(rect.width-dx,FLOAT_MIN.width,maxWidth);x=rect.x+rect.width-width;}
+  if(edge.includes('n')){height=clamp(rect.height-dy,FLOAT_MIN.height,Math.min(maxHeight,rect.y+rect.height-8));y=rect.y+rect.height-height;}
+  return {x:Math.round(x),y:Math.round(y),width:Math.round(Math.max(FLOAT_MIN.width,width)),height:Math.round(Math.max(FLOAT_MIN.height,height))};
+}
+
 export function initPanelLayout({onLayout=()=>{},narrow=()=>matchMedia('(max-width: 760px)').matches}={}) {
   const workbench=document.getElementById('workbench'), column=workbench.querySelector('.editor-column');
   let layout;
@@ -102,7 +113,7 @@ export function initPanelLayout({onLayout=()=>{},narrow=()=>matchMedia('(max-wid
     const box=document.createElement('div');
     box.className='floating-panel';box.dataset.float=name;box.dataset.home=homes.get(name).side;
     box.setAttribute('role','dialog');box.setAttribute('aria-label',`${titleOf(section)} (floating)`);
-    box.innerHTML=`<div class="float-bar" title="Drag to move"><span class="float-title"></span><button class="icon-button float-dock" type="button" title="Dock back into the sidebar" aria-label="Dock ${titleOf(section)} back into the sidebar">⇲</button></div><div class="float-body"></div>`;
+    box.innerHTML=`<div class="float-bar"><span class="float-title"></span><button class="icon-button float-dock" type="button" title="Dock back into the sidebar" aria-label="Dock ${titleOf(section)} back into the sidebar">⇲</button></div><div class="float-body"></div>`;
     box.querySelector('.float-title').textContent=titleOf(section);
     box.querySelector('.float-body').appendChild(section);
     section.open=true;section.classList.add('is-floating');
@@ -121,8 +132,31 @@ export function initPanelLayout({onLayout=()=>{},narrow=()=>matchMedia('(max-wid
       const end=()=>{bar.removeEventListener('pointermove',move);rememberRect(name,box);};
       bar.addEventListener('pointermove',move);bar.addEventListener('pointerup',end,{once:true});bar.addEventListener('pointercancel',end,{once:true});
     });
-    // CSS `resize: both` changes the size; remember it once the user lets go.
-    new ResizeObserver(()=>{if(floats.get(name)===box && box.isConnected)rememberRect(name,box);}).observe(box);
+    for(const edge of ['n','e','s','w','ne','nw','se','sw']) {
+      const handle=document.createElement('div');
+      handle.className=`float-resize float-resize-${edge}`;handle.dataset.edge=edge;handle.setAttribute('aria-hidden','true');
+      box.appendChild(handle);
+      handle.addEventListener('pointerdown',event=>{
+        if(event.button!==0)return;
+        event.preventDefault();event.stopPropagation();raise(box);handle.setPointerCapture(event.pointerId);
+        const sx=event.clientX, sy=event.clientY, b=box.getBoundingClientRect();
+        const start={x:b.left,y:b.top,width:b.width,height:b.height};
+        document.body.classList.add('is-resizing-panels');document.body.style.cursor=getComputedStyle(handle).cursor;box.classList.add('resizing');
+        const move=e=>placeBox(box,resizeFloatRect(start,edge,e.clientX-sx,e.clientY-sy,{width:innerWidth,height:innerHeight}));
+        const end=()=>{handle.removeEventListener('pointermove',move);document.body.classList.remove('is-resizing-panels');document.body.style.removeProperty('cursor');box.classList.remove('resizing');rememberRect(name,box);onLayout();};
+        handle.addEventListener('pointermove',move);handle.addEventListener('pointerup',end,{once:true});handle.addEventListener('pointercancel',end,{once:true});
+      });
+    }
+    // Keyboard: Alt+arrows on the title bar resize (Shift for bigger steps).
+    bar.tabIndex=0;bar.title='Drag to move · drag edges to resize · Alt+arrows resize';
+    bar.addEventListener('keydown',event=>{
+      const keys={ArrowRight:[1,0],ArrowLeft:[-1,0],ArrowDown:[0,1],ArrowUp:[0,-1]};
+      if(!event.altKey || !(event.key in keys))return;
+      event.preventDefault();
+      const step=event.shiftKey?48:16, [kx,ky]=keys[event.key], b=box.getBoundingClientRect();
+      placeBox(box,resizeFloatRect({x:b.left,y:b.top,width:b.width,height:b.height},'se',kx*step,ky*step,{width:innerWidth,height:innerHeight}));
+      rememberRect(name,box);onLayout();
+    });
     rememberRect(name,box);renderButtons();onLayout();
   }
   function dock(name) {

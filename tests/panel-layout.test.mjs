@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { sanitizeLayout, fitFloatRect, SIZE_LIMITS } from '../src/editor/panel-layout.js';
+import { sanitizeLayout, fitFloatRect, resizeFloatRect, SIZE_LIMITS } from '../src/editor/panel-layout.js';
 
 test('sanitizeLayout clamps sizes and drops malformed entries', () => {
   const layout = sanitizeLayout({
@@ -19,4 +19,13 @@ test('fitFloatRect keeps the title bar reachable inside the viewport', () => {
   const viewport = { width: 1000, height: 700 };
   assert.deepEqual(fitFloatRect({ x: 5000, y: -50, width: 300, height: 200 }, viewport), { x: 920, y: 8, width: 300, height: 200 });
   assert.deepEqual(fitFloatRect({ x: -900, y: 900, width: 2000, height: 50 }, viewport), { x: -896, y: 660, width: 984, height: 120 });
+});
+
+test('resizeFloatRect keeps the opposite edges fixed and respects the minimum and viewport', () => {
+  const viewport = { width: 1000, height: 700 }, rect = { x: 300, y: 200, width: 300, height: 200 };
+  assert.deepEqual(resizeFloatRect(rect, 'se', 50, 40, viewport), { x: 300, y: 200, width: 350, height: 240 });
+  assert.deepEqual(resizeFloatRect(rect, 'nw', -20, -30, viewport), { x: 280, y: 170, width: 320, height: 230 });
+  assert.deepEqual(resizeFloatRect(rect, 'w', 250, 0, viewport), { x: 400, y: 200, width: 200, height: 200 });
+  assert.deepEqual(resizeFloatRect(rect, 'n', 0, -500, viewport), { x: 300, y: 8, width: 300, height: 392 });
+  assert.deepEqual(resizeFloatRect(rect, 's', 0, 900, viewport), { x: 300, y: 200, width: 300, height: 492 });
 });

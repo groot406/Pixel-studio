@@ -6,6 +6,10 @@ The **Objects** panel exposes part instances and pixel artwork, with optional gr
 
 Native saves and PXA 2 retain object names, instance settings, groups and shared artwork. PXA 1/PXS are raster copies that bake object structure. Custom animation/frame orders use PXA `ORDER`/`FRAMEORDER` or versioned PXS payloads. Existing files still import with their original appearance and timing. Use the combined **Outline artwork** action for one outer silhouette; baked-in outlines inside existing parts stay editable in the shared editor's full-sprite context.
 
+## Hosted version
+
+The editor is published at [groot406.github.io/Pixel-studio](https://groot406.github.io/Pixel-studio/) by GitHub Actions. Changes pushed to `main` are built and deployed automatically. The hosted editor supports drawing, importing/exporting, and browser-local projects; AI generation through the local Codex bridge requires the downloadable local edition below.
+
 ## Run
 
 Requires Node.js 20 or newer. There are no npm dependencies to install.

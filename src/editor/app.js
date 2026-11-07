@@ -35,6 +35,9 @@ import { instancePivot } from '../domain/geometry.js';
 import { antialiasStroke, smoothJaggies } from '../domain/antialias.js';
 import { cloneProject, sameValue, pushHistory, historyProject } from '../domain/history.js';
 import { initSafety, findRecoverable, showRecovery, writeJournal, clearJournal, alertToast, downloadBackup } from './safety.js';
+import { TOOL_KEYS } from './onboarding.js';
+import { initOnboarding, offerTour } from './tour.js';
+import { initHelpCenter, openHelpCenter } from './help-center.js';
 import { initVersions, versionsDialog, saveVersion, versionBefore, noteChange, autoSnapshot } from './versions-dialog.js';
 
 const $ = (id) => document.getElementById(id);
@@ -1898,7 +1901,7 @@ function animationTick(time) {
 function openDialog(title, content, eyebrow = 'PIXEL STUDIO') {
   if (finishDrawing()) renderAll();
   $('modal').dispatchEvent(new Event('pixel-studio:dialog-replace'));
-  $('modal').classList.remove('versions-modal','wide','start-modal','part-library-modal','prompt-builder-modal','ai-edit-modal','shared-part-modal','palette-studio-modal','export-modal');
+  $('modal').classList.remove('versions-modal','wide','start-modal','part-library-modal','prompt-builder-modal','ai-edit-modal','shared-part-modal','palette-studio-modal','export-modal','help-modal');
   $('modal-title').textContent = title;
   $('modal-eyebrow').textContent = eyebrow;
   $('modal-content').innerHTML = content;
@@ -1998,6 +2001,7 @@ function resizeDialog() {
 function newProjectDialog({welcome=false}={}) {
   openDialog(welcome?'Welcome to Pixel Studio':'Start something new', `<div class="start-screen"><section class="start-blank"><form id="new-project-form"><p class="modal-body-text">Choose your canvas. What will you make?</p><label class="field"><span class="field-label">Project name</span><input id="new-project-name" value="Untitled sprite" maxlength="80" required autocomplete="off"></label>${dimensionFields('new',32,32)}<label class="check-row"><input id="keep-palette" type="checkbox" checked><span>Keep my current color palette</span></label><p class="helper-text">Opens in a new tab. Your other projects stay open.</p><div class="notice"><strong>Start from an idea</strong><p>Build a prompt with the pixel format and your animation plan. No example artwork needed.</p><button type="button" id="new-project-prompt" class="text-button">Build an AI prompt ↗</button></div><div class="modal-actions"><button type="button" class="button" id="cancel-new">${welcome?'Keep exploring':'Cancel'}</button><button type="submit" class="button primary">Create project</button></div></form></section><section class="start-examples" aria-labelledby="start-examples-title"><div class="start-examples-head"><h3 id="start-examples-title" class="start-heading">Or open an example</h3><button type="button" id="download-samples" class="text-button">Data files ↗</button></div><div id="start-sample-list" class="start-sample-list"></div></section></div>`, welcome?'WELCOME':'NEW PROJECT');
   $('modal').classList.add('start-modal');
+  if(welcome)$('modal').addEventListener('close',offerTour,{once:true});
   renderSampleCards($('start-sample-list'));
   $('download-samples').onclick = samplesDialog;
   bindDimensionFields('new');
@@ -2371,10 +2375,6 @@ function samplesDialog() {
   $('sample-file-format').onchange=render;
   render();
 }
-function helpDialog() {
-  const shortcuts = [['V','Select / move objects'],['B','Pencil'],['E','Eraser'],['L','Straight line'],['F','Flood fill'],['N','Gradient · ⇧ snaps to 45°'],['U','Replace color'],['I / Alt','Pick a color'],['R','Square / rectangle'],['C','Circle / ellipse'],['S','Select / move pixels'],['W','Magic wand · ⇧ adds'],['T','Dither brush'],['H','Shade along palette ramps · right-click reverses'],['P','Curve / path · Enter applies, Esc cancels'],['K','Transform · resize, squash, rotate, flip'],['J','Skeleton: rig parts into bones and pose them'],[', / .','Turn selected objects 90° (Transform)'],['Shift-click','Select several objects (Object / Transform)'],['⌘ / Ctrl + G','Make object from selection'],['[ / ]','Smaller / larger brush'],['⌘ / Ctrl + A','Select all pixels'],['⌘ / Ctrl + C / X / V','Copy / cut / paste pixels, or the selected object'],['⌘ / Ctrl + ⇧ + V','Paste object as an independent copy'],['⌘ / Ctrl + D','Duplicate selected object'],['⇧ + click','Straight pencil / eraser line from the last stroke'],['Arrows / ⇧ + arrows','Nudge selection by 1 / 8 pixels'],['Delete','Clear selected pixels'],['Enter / Esc','Deselect pixels'],['Shift + drag','Square, circle, or 45° line'],['Drag object rows','Reorder, or drop into a group'],['Right-click object row','Object menu'],['G','Toggle grid'],['O','Onion skin'],['Space','Play / pause preview'],['D','Duplicate frame'],['← / →','Previous / next frame'],['+ / −','Zoom in / out'],['0','Fit canvas'],['⌘ / Ctrl + Z','Undo'],['⌘ / Ctrl + ⇧ + Z','Redo'],['⌘ / Ctrl + S','Export pixel data']];
-  openDialog('Small canvas. Handy shortcuts.', `<p class="modal-body-text">Draw with a mouse, pen, or finger. Right-click to erase. Brush size and symmetry live below the tools; flip and rotate actions live in Transform. Use the palette picker to recolor a slot in every frame, or Swap to exchange two colors. AI prompt creates a complete generation brief with the pixel format and an ordered animation plan, even from an empty project.</p><div class="shortcut-grid">${shortcuts.map(([key,action])=>`<span>${action}</span><kbd>${key}</kbd>`).join('')}</div><div class="notice">Each project tab has its own artwork and Undo history. New projects and imports open in new tabs. Close a tab and reopen it from Saved projects; projects autosave on this device. Collapse individual panel headings, or hide either sidebar with the buttons above the canvas.</div><p class="helper-text">Tools edit the active pixel object. Transform can affect one frame or the active pixel object across an animation or project. Mirror animation copies each frame’s placements while retaining shared part definitions. Set individual frame holds in milliseconds below the timeline. Choose Object (V) to select and move part instances; double-click one to edit its shared artwork in every appearance. Object edits default to the current animation. Groups are optional; use Ungroup to expose their objects. Export PXA 2 for editable objects and timings; PNGs combine visible artwork.</p>`, 'QUICK GUIDE');
-}
 function accountDialog() {
   if (['127.0.0.1','localhost','[::1]'].includes(location.hostname)) { aiEditDialog(); return; }
   openDialog('AI in Pixel Studio', `<p class="modal-body-text">Use your own Codex ChatGPT account in the local edition. Describe an edit, review the result, then apply it with Undo available.</p><div class="notice"><strong>Local Codex edition</strong><p>Download and unzip Pixel Studio, then run <code>npm start</code> in its folder or open <strong>Start-Pixel-Studio.command</strong> on your Mac. Requires Node.js 20+ and the Codex CLI signed in with ChatGPT.</p><a class="button primary" href="./downloads/pixel-studio-local.zip" download>Download local edition</a></div><p class="modal-body-text">To move your current artwork to localhost, export a .pxa or .pxs file here and import it there. Each address keeps its own saved projects.</p><div class="modal-actions"><button id="account-ai-edit" class="button primary">Review an AI edit</button><button id="account-ai-export" class="button">Build a creation prompt</button></div><details class="prompt-style-details"><summary>Website sign-in</summary><p class="modal-body-text">Sign in to this website with your ChatGPT account. Using your plan for automatic generation on the hosted website requires a separate approved connection.</p><a class="button chatgpt-signin" href="/signin-with-chatgpt?return_to=%2F" target="_top" data-oai-siwc-button>Continue with ChatGPT</a><p><a class="text-button" href="/signout-with-chatgpt?return_to=%2F" target="_top">Sign out of Pixel Studio</a></p><a href="https://developers.openai.com/siwc/quickstart" target="_blank" rel="noopener noreferrer">About ChatGPT plan connections ↗</a></details>`, 'AI CONNECTION');
@@ -2540,8 +2540,8 @@ function bindEvents() {
   $('resize-canvas').onclick = resizeDialog;
   $('import-button').onclick = importDialog;
   $('export-button').onclick = exportDialog;
-  $('help-button').onclick = helpDialog;
-  $('shortcuts-button').onclick = helpDialog;
+  $('help-button').onclick = () => openHelpCenter('tours');
+  $('shortcuts-button').onclick = () => openHelpCenter('shortcuts');
   $('account-button').onclick = accountDialog;
   $('close-modal').onclick = () => $('modal').close();
   $('modal').addEventListener('click',event => {
@@ -2603,7 +2603,7 @@ function bindEvents() {
       if (key==='escape' || key==='enter') { event.preventDefault(); deselectPixels(); return; }
     }
     if (key==='escape' && state.objectSelection && !state.inPlaceEdit) { event.preventDefault(); state.objectSelection=null; renderAll(); return; }
-    const tool = {v:'object',b:'pencil',e:'eraser',l:'line',f:'fill',n:'gradient',u:'replace',i:'eyedropper',r:'rectangle',c:'ellipse',s:'select',w:'wand',t:'dither',h:'shade',k:'resize',p:'curve'}[key];
+    const tool = TOOL_KEYS[key];
     if (tool) { state.tool = tool; if(!SELECT_TOOLS.includes(tool) && !['gradient','curve'].includes(tool))state.selection=null; renderTools(); renderSelection(); renderCanvas(); return; }
     if (key === 'j') { event.preventDefault(); toggleRigMode(); return; }
     if (key === 'g') $('toggle-grid').click();
@@ -2614,7 +2614,7 @@ function bindEvents() {
     else if (key === '+' || key === '=') setZoom(state.scale+2);
     else if (key === '-') setZoom(state.scale-2);
     else if (key === '0') { state.fit = true; fitCanvas(); }
-    else if (key === '?') helpDialog();
+    else if (key === '?') openHelpCenter('shortcuts');
     else if (key === 'arrowleft' || key === 'arrowright') {
       event.preventDefault();
       const frames = currentAnimation().frames;
@@ -2680,6 +2680,7 @@ async function init() {
   // `?perf` exposes editor internals to scripts/profile-browser.mjs.
   if(new URLSearchParams(location.search).has('perf'))globalThis.pixelStudioPerf={state,renderAll,renderCanvas,renderTimeline,renderLayers,renderPreview,snapshot,remember,selectFrameAt,saveNow};
   initPanelLayout({onLayout:()=>requestAnimationFrame(()=>fitCanvas())});
+  initOnboarding({state,$,escapeHTML,toast});initHelpCenter({state,$,escapeHTML,toast,openDialog});
   requestAnimationFrame(() => { fitCanvas(); requestAnimationFrame(animationTick); });
   // First visit: offer examples and a blank canvas; the panda sample stays open behind it.
   if(!session && !localStorage.getItem(STORAGE_KEY) && state.samples.length)newProjectDialog({welcome:true});

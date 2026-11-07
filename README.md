@@ -21,9 +21,19 @@ Working with objects:
 - **Edit switch (canvas toolbar):** *All frames* applies pencil, eraser, shapes, curves, fill, replace, dither and shade strokes, plus object moves and resizes, to every frame of the current animation; *This frame only* limits them to the selected frame.
 - **Workspace layout:** drag the edges of the toolbox, side panel and Frames panel to resize them (arrow keys work on a focused edge; double-click resets). The chevron on the Frames heading minimises it to one slim bar with small thumbnails and ‹ › to keep switching frames. ⇱ on a side-panel heading pops that section out as a floating window: drag its title bar to move it, drag any edge or corner to resize it (or Alt+arrow keys on the focused title bar); ⇲ docks it again. The layout is remembered in this browser.
 - **Live preview** has its own animation switcher (‹ select ›) right under the preview.
-- **New project** opens a blank canvas form, with a small strip of example projects underneath. It also greets first-time visitors.
+- **New project** opens a blank canvas form, with a small strip of example projects underneath. It also greets first-time visitors, then offers a one-minute guided tour.
 
 Native saves and PXA 2 retain object names, instance settings, groups and shared artwork. PXA 1/PXS are raster copies that bake object structure. Custom animation/frame orders use PXA `ORDER`/`FRAMEORDER` or versioned PXS payloads. Existing files still import with their original appearance and timing. Use the combined **Outline artwork** action for one outer silhouette; baked-in outlines inside existing parts stay editable in the shared editor's full-sprite context.
+
+## Getting started & help
+
+- **Welcome:** the first visit opens New project with example projects (the *Stick puppet · skeleton* example is rigged for Skeleton mode). After it closes, a toast offers the **Basics tour** (*Take the tour* / *Not now*); it is only offered once.
+- **Help (?)**: the **?** button in the header (or the **?** key when not typing) opens Help & tours:
+  - **Tours** – spotlight tours of the real interface: *Basics* (canvas & zoom, toolbox, palette, frames, Edit switch, objects, Live preview, autosave, export) plus *Objects & parts*, *Animate (motion modes)*, *Skeleton & poses*, *Colour* and *Effects & cleanup*. Completed tours get a tick and can be replayed. In a tour use ← → to step and Esc to stop; collapsed panels are opened for the step and closed again afterwards.
+  - **Shortcuts** – every keyboard shortcut, grouped (tools, editing, frames & playback, view, modes) and searchable: a single key such as `b` finds that key, words such as `frame` search the descriptions.
+  - **What's new** – recent big features, each with *Show me* for its tour. **Docs** links to the sections of this README.
+- **Rich tooltips:** hovering (about 0.4 s) or keyboard-focusing a tool or key action shows its name, shortcut, a one-line description and, for tools such as Pencil, Curve, Shade, Gradient, Select, Wand, Object, Transform and Skeleton, a tiny looping demo. Turn them off (back to plain tooltips) in Help.
+- **First-use hints:** the first time you open a motion mode, Skeleton mode, Palette studio, the Curve tool, a floating panel or use the Edit switch, a small hint explains it once (*Got it*). *Reset tips & tours* in Help shows them again. Progress is stored in this browser (`pixel-studio.onboarding.v1`).
 
 ## Hosted version
 
@@ -180,7 +190,7 @@ src/
   storage/        IndexedDB workspace and memory fallback
   features/ai/    Prompt creation, edit validation, patch engine, review dialog
   editor/app.js   Editor state, DOM wiring, rendering, history and save ordering
-  editor/*.js     Panels and tools wired from app.js (objects, parts, maths tools…)
+  editor/*.js     Panels and tools wired from app.js (objects, parts, maths tools, tours & help…)
 public/           Original HTML, styles, icons, format guide and samples
 local/            Loopback HTTP service and Codex app-server adapter
 scripts/          Build, source watching, syntax checks and benchmarks (`npm run bench`)

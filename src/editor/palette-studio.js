@@ -231,7 +231,8 @@ function confirmReplace() {
   d.paintSprite(d.$('ps-before'), pixels, p, true);
   d.paintSprite(d.$('ps-after'), pixels.map(v => (v < 0 ? v : map[v])), colours, true);
   d.$('ps-cancel').onclick = () => { box.hidden = true; };
-  d.$('ps-do-replace').onclick = () => apply(() => { d.state.project = replacePalette(d.state.project, colours, map).project; return `Palette replaced (${plural(colours.length, 'colour')}). Undo restores the old one.`; });
+  d.$('ps-do-replace').onclick = () => apply(() => {
+    d.versionBefore('Before replacing the palette'); d.state.project = replacePalette(d.state.project, colours, map).project; return `Palette replaced (${plural(colours.length, 'colour')}). Undo restores the old one.`; });
   d.$('ps-do-replace').focus();
 }
 

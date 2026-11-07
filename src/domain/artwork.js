@@ -3,6 +3,7 @@ import { MAX_SIZE, MAX_TOTAL_PIXELS } from './limits.js';
 import { linePoints, rectanglePoints, ellipsePoints, instancePixel, instanceBox, instanceImage, resamples, smoothSampling, TRANSFORM_NAMES, SAMPLING_MODES, DEFAULT_PERSPECTIVE } from './geometry.js';
 import { paletteBlend } from './antialias.js';
 import { ROTSPRITE_SCALE } from './rotsprite.js';
+import { sameValue } from './history.js';
 
 export const MAX_PARTS = 256;
 export const MAX_OPERATIONS = 32768;
@@ -186,9 +187,20 @@ export function renderOperations(ops, width, height, partImages = new Map()) {
   }
   return pixels;
 }
+const partCache = new Map(), PART_CACHE = 512;
+/** Rendered pixels of a part definition, shared (frozen) across identical definitions so per-image instance caches survive re-validation. */
+export function partPixels(part) {
+  const key = `${part.width}x${part.height}:${JSON.stringify(part.ops)}`;
+  let pixels = partCache.get(key);
+  if (pixels) { partCache.delete(key); partCache.set(key, pixels); return pixels; }
+  pixels = Object.freeze(renderOperations(part.ops, part.width, part.height));
+  partCache.set(key, pixels);
+  if (partCache.size > PART_CACHE) partCache.delete(partCache.keys().next().value);
+  return pixels;
+}
 /** Rendered part images by id; with the project `palette`, Smooth AA instances can blend between palette colours. */
 export function renderParts(parts, palette) {
-  return new Map(parts.map(part => [part.id, { ...part, pixels: renderOperations(part.ops, part.width, part.height), ...(palette ? { palette } : {}) }]));
+  return new Map(parts.map(part => [part.id, { ...part, pixels: partPixels(part), ...(palette ? { palette } : {}) }]));
 }
 export function renderSource(source, width, height, partImages) {
   const pixels = renderOperations(source.ops, width, height, partImages);
@@ -236,13 +248,13 @@ export function writeCelPixels(cel, pixels, width) {
 
 /** Editor transaction boundary: legacy tools use draft buffers; only differences become overrides. */
 export function commitRasterEdits(before, after) {
-  if (after.version !== 3 || JSON.stringify(before.parts) !== JSON.stringify(after.parts)) return;
+  if (after.version !== 3 || !sameValue(before.parts, after.parts)) return;
   const frames = new Map(before.animations.flatMap(a => a.frames).map(f => [f.id, f]));
   for (const animation of after.animations) for (const frame of animation.frames) for (const cel of frame.cels) {
     if (!cel.source) continue;
     if (before.width !== after.width || before.height !== after.height) { delete cel.source; continue; }
     const old = frames.get(frame.id)?.cels.find(c => c.layerId === cel.layerId);
-    if (!old?.source || JSON.stringify(old.source) !== JSON.stringify(cel.source)) continue;
+    if (!old?.source || !sameValue(old.source, cel.source)) continue;
     if (cel.pixels.some((v, i) => v !== old.pixels[i])) {
       const next = [...cel.pixels];
       cel.pixels = old.pixels;

@@ -163,6 +163,14 @@ The **Animate** panel rows open *motion modes*: you work directly on the canvas 
 
 Effects that paint pixels write local edits on object cels, like the drawing tools, and skip cels holding locked objects.
 
+## Saving & history
+
+- **Autosave.** Every change is saved to this browser's IndexedDB about half a second after you stop (never in the middle of a stroke), and again when the tab is hidden or closed. The header status shows *Unsaved*, *Saving…*, *Saved on this device* or *Not saved · Download backup*; click it to open the version history, or, after an error, to download a `.pxa` backup. Each save keeps the previous good copy, which is used if the current record cannot be read.
+- **Storage full.** If the browser refuses a save (for example `QuotaExceededError`), the project stays open, a warning offers *Download backup*, and saving is retried. Small recovery copies use `localStorage` and move to IndexedDB when it is full.
+- **Crash recovery.** While a project has unsaved changes, a recovery copy is written every few seconds and when the page hides. Open tabs also leave a heartbeat. If Pixel Studio closed without saving newer work, a *Recover unsaved work* banner appears on the next start: *Compare* shows the saved and unsaved first frames, *Restore* applies the work as an undoable change, and *Discard* keeps it as a version instead of deleting it. Edits made in the last second before a crash can be lost.
+- **Errors.** An unexpected error shows “Something went wrong — your work is safe” with *Download backup*; the editor keeps running and failed edits roll back.
+- **Version history** (header → **History**). *Save version* stores a named snapshot. Automatic snapshots are taken after 5 minutes of active editing or 100 changes, and before risky operations (Replace palette, rig templates, Retarget, AI edits, importing PNGs into the project, restoring a version). Each row shows the first frame, time, frame and animation counts; actions are *Preview* (animated), *Restore* (undoable; the current state is snapshotted first), *Open as copy* in a new tab, *Download* (`.pxa`) and *Delete* (click twice). Named versions are kept until deleted; automatic ones are thinned to all from the last hour, one per hour for a day and one per day for 30 days, within about 24 MB and 300 versions per project. Without IndexedDB, versions last only until reload.
+
 ## Source layout
 
 ```text
@@ -175,7 +183,7 @@ src/
   editor/*.js     Panels and tools wired from app.js (objects, parts, maths tools…)
 public/           Original HTML, styles, icons, format guide and samples
 local/            Loopback HTTP service and Codex app-server adapter
-scripts/          Build, source watching and syntax checks
+scripts/          Build, source watching, syntax checks and benchmarks (`npm run bench`)
 tests/           Behavioral tests and deterministic protocol fixtures
 patches/          Original supplied patch archive
 docs/upstream/   Retained upstream guides and original Site file hashes
@@ -185,7 +193,7 @@ See [architecture and compatibility](docs/architecture.md) for ownership, data c
 
 ## Existing projects and compatibility
 
-Keep using the same hostname and port to retain your browser workspace. The public Site and localhost have separate storage; export `.pxa` or `.pxs` from the Site and import it here. JSON project versions 1, 2 and 3, PXA 1 and 2, and PXS container version 1 are supported. Existing browser storage keys and the IndexedDB record layout are unchanged.
+Keep using the same hostname and port to retain your browser workspace. The public Site and localhost have separate storage; export `.pxa` or `.pxs` from the Site and import it here. JSON project versions 1, 2 and 3, PXA 1 and 2, and PXS container version 1 are supported. Existing browser storage keys and the project record layout are unchanged; database version 2 only adds stores for backups, versions and recovery journals.
 
 The editor retains its original **128 × 128 maximum canvas**, **64 colors**, **32 layers**, and **1,048,576 stored pixel** budget. The standalone patch advertised a 256 × 256 engine, but enabling that across the editor would require a deliberate PXS format migration: existing width/height fields are one byte. This integration uses the editor's authoritative limits rather than silently corrupting binary exports.
 
@@ -195,4 +203,5 @@ The editor retains its original **128 × 128 maximum canvas**, **64 colors**, **
 - **Codex disconnected:** check `codex login status`, keep the launcher running, then click Refresh in the AI dialog.
 - **Inpaint unavailable:** select a rectangle and unlock the active layer.
 - **No durable browser storage:** the editor remains usable, but export your projects before closing.
+- **“Not saved” in the header:** the browser storage is full or blocked. Download a backup, then delete old versions or free space; saving retries automatically.
 - **Changed source is not visible:** use `npm run dev` and refresh, or restart `npm start`. Opening `public/index.html` directly does not start the module server or local AI bridge.

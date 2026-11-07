@@ -28,7 +28,7 @@
     <symbol id="i-line" viewBox="0 0 24 24"><path d="m5 19 14-14"/><rect x="3" y="17" width="4" height="4" rx=".5"/><rect x="17" y="3" width="4" height="4" rx=".5"/></symbol>
     <symbol id="i-curve" viewBox="0 0 24 24"><path d="M5 19C5 9 19 15 19 5"/><rect x="3" y="17" width="4" height="4" rx=".5"/><rect x="17" y="3" width="4" height="4" rx=".5"/></symbol>
     <symbol id="i-path" viewBox="0 0 24 24"><path d="M4 18c3-9 6-9 8-4s5 5 8-4"/><circle cx="4" cy="18" r="1.6"/><circle cx="12" cy="14" r="1.6"/><circle cx="20" cy="10" r="1.6"/></symbol>
-    <symbol id="i-check" viewBox="0 0 24 24"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/><rect x="8.5" y="8.5" width="3" height="3"/></symbol>
+    <symbol id="i-inspect" viewBox="0 0 24 24"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/><rect x="8.5" y="8.5" width="3" height="3"/></symbol>
     <symbol id="i-replace" viewBox="0 0 24 24"><rect x="3" y="3" width="6" height="6" rx="1"/><rect x="15" y="15" width="6" height="6" rx="1"/><path d="M13 5h6v6m-3-3 3 3 3-3M11 19H5v-6m-3 3 3-3 3 3"/></symbol>
     <symbol id="i-flip-h" viewBox="0 0 24 24"><path d="M12 3v18" stroke-dasharray="2 3"/><path d="m8 6-5 6 5 6ZM16 6l5 6-5 6Z"/></symbol>
     <symbol id="i-flip-v" viewBox="0 0 24 24"><path d="M3 12h18" stroke-dasharray="2 3"/><path d="m6 8 6-5 6 5ZM6 16l6 5 6-5Z"/></symbol>
@@ -97,12 +97,13 @@
     <symbol id="i-palette" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18c1.2 0 1.8-.8 1.8-1.7 0-1.1-.9-1.5-.9-2.5 0-.9.7-1.6 1.6-1.6H17a4 4 0 0 0 4-4C21 6.6 17 3 12 3Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="7.5" cy="11" r="1.4" fill="currentColor"/><circle cx="10" cy="7.2" r="1.4" fill="currentColor"/><circle cx="14.6" cy="7.4" r="1.4" fill="currentColor"/></symbol>
     <symbol id="i-ramp" viewBox="0 0 24 24"><rect x="3" y="8" width="4" height="8" rx="1" fill="currentColor"/><rect x="8" y="8" width="4" height="8" rx="1" fill="currentColor" fill-opacity=".6"/><rect x="13" y="8" width="4" height="8" rx="1" fill="currentColor" fill-opacity=".3"/><rect x="18" y="8" width="3" height="8" rx="1"/></symbol>
     <symbol id="i-cycle" viewBox="0 0 24 24"><path d="M20 12a8 8 0 0 1-14 5.3M4 12a8 8 0 0 1 14-5.3"/><path d="M18 3v4h-4M6 21v-4h4"/></symbol>
+    <symbol id="i-history" viewBox="0 0 24 24"><path d="M3.5 12a8.5 8.5 0 1 0 2.5-6"/><path d="M3 4v4h4"/><path d="M12 7.5V12l3 2"/></symbol>
     <symbol id="i-animate" viewBox="0 0 24 24"><rect x="3" y="6" width="12" height="12" rx="2"/><path d="M18 8v8M21 10v4"/></symbol>
   </defs></svg>
 
   <header class="app-header">
     <a class="brand" href="./" aria-label="Pixel Studio home"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span>pixel<span class="brand-light">studio</span><small>MAKE SOMETHING LITTLE.</small></span></a>
-    <div class="project-info"><label class="sr-only" for="project-name">Project name</label><input id="project-name" value="Panda adventurer" maxlength="80" spellcheck="false"><span id="save-status" class="save-status"><i></i> Saved on this device</span></div>
+    <div class="project-info"><label class="sr-only" for="project-name">Project name</label><input id="project-name" value="Panda adventurer" maxlength="80" spellcheck="false"><button type="button" id="save-status" class="save-status" data-state="saved"><i></i> Saved on this device</button></div>
     <div class="header-actions"><button id="help-button" class="icon-button" title="Keyboard shortcuts and help" aria-label="Keyboard shortcuts and help"><svg><use href="#i-help"/></svg></button><button id="new-project" class="button subtle" aria-label="New project"><svg><use href="#i-plus"/></svg><span>New</span></button><button id="import-button" class="button" aria-label="Import"><svg><use href="#i-import"/></svg><span>Import</span></button><button id="export-button" class="button primary" aria-label="Export"><svg><use href="#i-export"/></svg><span>Export</span></button><button id="prompt-builder-button" class="button prompt-builder-entry" title="Build an AI prompt" aria-label="Build an AI prompt"><svg aria-hidden="true"><use href="#i-spark"/></svg><span>AI prompt</span></button><button id="ai-edit-button" class="button ai-edit-entry" title="Edit artwork with AI" aria-label="Edit artwork with AI"><svg aria-hidden="true"><use href="#i-pencil"/></svg><span>AI edit</span></button></div>
   </header>
 
@@ -111,6 +112,7 @@
     <div id="project-tabs" class="project-tabs" role="tablist" aria-label="Open projects"></div>
     <button id="new-project-tab" class="icon-button" title="New project tab" aria-label="New project tab"><svg aria-hidden="true"><use href="#i-plus"/></svg></button>
     <button id="open-saved-projects" class="button subtle saved-projects-button" title="Saved projects" aria-label="Saved projects"><svg aria-hidden="true"><use href="#i-folder"/></svg><span>Saved projects</span></button>
+    <button id="open-version-history" class="button subtle saved-projects-button" title="Version history: save, preview and restore versions" aria-label="Version history"><svg aria-hidden="true"><use href="#i-history"/></svg><span>History</span></button>
     <button id="toggle-details-panel" class="button subtle panel-toggle" title="Show or hide animation and object panels" aria-label="Toggle details panel" aria-controls="details-panel" aria-expanded="true"><svg aria-hidden="true"><use href="#i-panel-right"/></svg><span>Details</span></button>
   </nav>
 
@@ -312,7 +314,7 @@
           <button id="effect-dither" class="object-action" type="button"><svg aria-hidden="true"><use href="#i-dither"/></svg><span class="object-action-copy"><strong>Dither</strong><small>Mix two colours in a pattern</small></span></button>
           <button id="effect-cleanup" class="object-action" type="button"><svg aria-hidden="true"><use href="#i-cleanup"/></svg><span class="object-action-copy"><strong>Clean up lines</strong><small>Remove doubled corner pixels</small></span></button>
           <button id="effect-smoothJaggies" class="object-action" type="button"><svg aria-hidden="true"><use href="#i-cleanup"/></svg><span class="object-action-copy"><strong>Smooth jaggies</strong><small>Anti-alias edges with palette colours</small></span></button>
-          <button id="effect-check" class="object-action" type="button" aria-pressed="false" aria-controls="cleanup-results"><svg aria-hidden="true"><use href="#i-check"/></svg><span class="object-action-copy"><strong>Pixel cleanup</strong><small>Find strays, corners, jaggies, banding</small></span></button>
+          <button id="effect-check" class="object-action" type="button" aria-pressed="false" aria-controls="cleanup-results"><svg aria-hidden="true"><use href="#i-inspect"/></svg><span class="object-action-copy"><strong>Pixel cleanup</strong><small>Find strays, corners, jaggies, banding</small></span></button>
         </div>
         <div id="cleanup-results" class="cleanup-results" hidden></div>
       </details>

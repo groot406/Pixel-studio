@@ -33,6 +33,9 @@ import { initPaletteTools } from './palette-tools.js';
 import { initPaletteStudio } from './palette-studio.js';
 import { instancePivot } from '../domain/geometry.js';
 import { antialiasStroke, smoothJaggies } from '../domain/antialias.js';
+import { cloneProject, sameValue, pushHistory, historyProject } from '../domain/history.js';
+import { initSafety, findRecoverable, showRecovery, writeJournal, clearJournal, alertToast, downloadBackup } from './safety.js';
+import { initVersions, versionsDialog, saveVersion, versionBefore, noteChange, autoSnapshot } from './versions-dialog.js';
 
 const $ = (id) => document.getElementById(id);
 const icon = (name) => `<svg aria-hidden="true"><use href="#i-${name}"/></svg>`;
@@ -117,16 +120,16 @@ function normalizeSelection() {
   state.scale = Math.max(1,Math.min(maxZoom(),state.scale));
 }
 function snapshot() {
-  return {project:clone(state.project),animationId:state.animationId,frameId:state.frameId,layerId:state.layerId,objectSelection:clone(state.objectSelection)};
+  return {project:cloneProject(state.project),animationId:state.animationId,frameId:state.frameId,layerId:state.layerId,objectSelection:clone(state.objectSelection)};
 }
 function remember(before) {
   commitRasterEdits(before.project,state.project);
   state.project=validateProject(state.project);
-  if (JSON.stringify(before.project) === JSON.stringify(state.project)) return false;
-  state.undo.push(before);
-  if (state.undo.length > 40) state.undo.shift();
+  if (sameValue(before.project, state.project)) return false;
+  pushHistory(state.undo, before);
   state.redo = [];
   normalizeSelection();
+  noteChange(state.documentId);
   scheduleSave();
   return true;
 }
@@ -141,9 +144,9 @@ function mutate(action) {
 function restore(from, to) {
   finishDrawing();
   if (!from.length) return;
-  to.push(snapshot());
+  pushHistory(to, snapshot());
   const previous = from.pop();
-  state.project = previous.project;
+  state.project = historyProject(previous);
   state.animationId = previous.animationId;
   state.frameId = previous.frameId;
   state.layerId = previous.layerId;
@@ -151,6 +154,7 @@ function restore(from, to) {
   state.selection = null;
   state.swap = false;
   normalizeSelection();
+  noteChange(state.documentId);
   scheduleSave();
   renderAll();
   if (state.fit) fitCanvas();
@@ -207,12 +211,17 @@ function persistSession() {
   const session=workspaceSession();
   return queueSave(()=>projectStore.saveSession(session)).then(()=>{state.sessionSaveError=false;renderSaveStatus();return true;}).catch(()=>{state.sessionSaveError=true;renderSaveStatus();return false;});
 }
+/** Header save indicator: Saved, Unsaved (waiting to save), Saving… or an error that offers a backup download. */
 function renderSaveStatus() {
-  if(state.inPlaceEdit){$('save-status').textContent='Object draft · Apply to save';return;}
-  const document=state.documents.get(state.documentId);
-  if (!state.storageAvailable || state.sessionSaveError || document?.saveError) $('save-status').textContent='Export data to keep your work';
-  else if (document && document.savedRevision!==document.revision) $('save-status').innerHTML='<i></i> Saving…';
-  else $('save-status').innerHTML='<i></i> Saved on this device';
+  const status=$('save-status'), document=state.documents.get(state.documentId);
+  const [mode,text,title]=state.inPlaceEdit?['draft','Object draft · Apply to save','Apply or cancel the canvas object edit to save it']
+    :document?.saveError || state.sessionSaveError?['error','Not saved · Download backup','Saving failed. Click to download a backup of this project']
+    :!state.storageAvailable?['error','Export data to keep your work','This browser is not keeping projects. Click to download a backup']
+    :document?.saving?['saving','Saving…','Saving to this device']
+    :document && document.savedRevision!==document.revision?['unsaved','Unsaved','Changes save automatically in a moment']
+    :['saved','Saved on this device','Saved on this device. Click for version history'];
+  status.dataset.state=mode; status.title=title;
+  status.innerHTML=`<i></i> ${text}`;
 }
 function revealActiveTab() {
   const tabList=$('project-tabs'),selected=tabList.querySelector('[aria-selected="true"]');
@@ -259,6 +268,18 @@ async function closeDocument(id) {
   else renderProjectTabs();
   persistSession(); toast('Tab closed. Reopen it from Saved projects.');
 }
+/** Open (or switch to) a project and replace its artwork with recovered work as one undoable change. */
+async function restoreRecovered(id, project) {
+  if(state.inPlaceEdit)throw new Error('Apply or cancel the canvas object edit before restoring.');
+  if(!state.documents.has(id)) {
+    const saved=await projectStore.getDocument(id).catch(()=>null);
+    const document=makeDocument(saved?.project || project,saved || {id});document.savedRevision=saved?0:-1;
+    state.documents.set(id,document);state.openIds.push(id);
+  }
+  switchDocument(id);
+  if(!sameValue(state.project,project))mutate(()=>{state.project=project;state.selection=null;});
+  persistSession();saveNow();
+}
 async function savedProjectsDialog() {
   await saveNow();
   openDialog('Your saved projects','<p class="modal-body-text">Loading projects saved on this device…</p>','PROJECTS');
@@ -297,20 +318,37 @@ function toast(message) {
   $('toast').hidden = false;
   toastTimer = setTimeout(() => { $('toast').hidden = true; }, 3800);
 }
+const SAVE_DELAY=500;
+/** Autosave: debounced after each change, deferred while a stroke is in progress, then run when the browser is idle. */
 function scheduleSave() {
   clearTimeout(state.saveTimer);
   const document=syncDocument();
-  if(document) document.revision++;
+  if(document) {document.revision++;document.dirtyAt??=Date.now();}
   renderSaveStatus();
-  state.saveTimer = setTimeout(saveNow, 300);
+  state.saveTimer = setTimeout(idleSave, SAVE_DELAY);
+}
+function idleSave() {
+  if(state.drawing){state.saveTimer=setTimeout(idleSave,SAVE_DELAY);return;}
+  if(window.requestIdleCallback)requestIdleCallback(()=>saveNow(),{timeout:1000}); else saveNow();
 }
 function persistDocument(document) {
   if (!projectStore || !document) return Promise.resolve(false);
   const revision=document.revision;
-  const record={id:document.id,project:clone(document.project),animationId:document.animationId,frameId:document.frameId,layerId:document.layerId,objectSelection:document.objectSelection,updatedAt:Date.now()};
+  if (revision===document.savedRevision && !document.saveError && !document.saving) return Promise.resolve(true);
+  const record={id:document.id,project:cloneProject(document.project),animationId:document.animationId,frameId:document.frameId,layerId:document.layerId,objectSelection:document.objectSelection,updatedAt:Date.now()};
+  document.saving=true; renderSaveStatus();
   return queueSave(()=>projectStore.saveDocument(record)).then(()=>{
-    document.savedRevision=revision;document.saveError=false;state.storageAvailable=projectStore.available;renderSaveStatus();return true;
-  }).catch(()=>{document.saveError=true;state.storageAvailable=projectStore.available;renderSaveStatus();return false;});
+    document.saving=false;document.savedRevision=revision;document.saveError=false;state.storageAvailable=projectStore.available;
+    if(document.revision===revision){document.dirtyAt=null;clearJournal(document.id);}
+    autoSnapshot(document);renderSaveStatus();return true;
+  }).catch(error=>{
+    const first=!document.saveError;
+    document.saving=false;document.saveError=true;state.storageAvailable=projectStore.available;renderSaveStatus();
+    try{writeJournal(document);}catch{/* The alert below still offers a download. */}
+    setTimeout(()=>{if(document.saveError && state.documents.get(document.id)===document)persistDocument(document);},15000);
+    if(first)alertToast(error?.name==='QuotaExceededError'?'This device is out of storage space, so the project could not be saved. Download a backup, then free some space or delete old versions.':'This project could not be saved on this device. Your work is still open — download a backup to keep it safe.',[['Download backup',downloadBackup]]);
+    return false;
+  });
 }
 async function saveNow() {
   clearTimeout(state.saveTimer);
@@ -320,23 +358,35 @@ async function saveNow() {
   return saved;
 }
 
-function paintSprite(canvas, pixels, palette, background = false, width = state.project.width, height = state.project.height) {
-  canvas.width = width;
-  canvas.height = height;
-  const context = canvas.getContext('2d');
-  context.imageSmoothingEnabled = false;
-  if (background) {
-    for (let y = 0; y < height; y += 2) for (let x = 0; x < width; x += 2) {
-      context.fillStyle = ((x + y) / 2) % 2 ? '#e7ebe4' : '#f3f5ef';
-      context.fillRect(x, y, 2, 2);
-    }
+const paletteCache=new Map();
+/** Palette entries as little-endian RGBA words for ImageData buffers, cached by palette content. */
+function paletteWords(palette) {
+  const key=palette.join('');
+  let words=paletteCache.get(key);
+  if(!words) {
+    words=new Uint32Array(palette.length);
+    palette.forEach((hex,i)=>{const n=parseInt(hex.slice(1),16);words[i]=0xff000000|(n&0xff)<<16|(n&0xff00)|(n>>16&0xff);});
+    if(paletteCache.size>=32)paletteCache.delete(paletteCache.keys().next().value);
+    paletteCache.set(key,words);
   }
-  pixels.forEach((color, index) => {
-    if (color < 0) return;
-    context.fillStyle = palette[color];
-    context.fillRect(index % width, Math.floor(index / width), 1, 1);
-  });
+  return words;
 }
+/** Paint indexed pixels 1:1 with one putImageData; `background` is a pair of checkerboard words for transparent pixels (2 px squares). */
+function spriteImage(canvas, pixels, palette, background, width, height) {
+  if (canvas.width !== width) canvas.width = width;
+  if (canvas.height !== height) canvas.height = height;
+  const image = new ImageData(width, height), words = new Uint32Array(image.data.buffer), colors = paletteWords(palette);
+  for (let i = 0, n = width * height; i < n; i++) {
+    const color = pixels[i];
+    words[i] = color >= 0 ? colors[color] : background ? background[((i % width >> 1) + ((i / width | 0) >> 1)) & 1] : 0;
+  }
+  canvas.getContext('2d').putImageData(image, 0, 0);
+}
+const THUMB_CHECKER=paletteWords(['#f3f5ef','#e7ebe4']), CANVAS_CHECKER=paletteWords(['#f2f4ed','#e4e9e1']);
+function paintSprite(canvas, pixels, palette, background = false, width = state.project.width, height = state.project.height) {
+  spriteImage(canvas, pixels, palette, background ? THUMB_CHECKER : null, width, height);
+}
+const stageLayers={checker:document.createElement('canvas'),onion:document.createElement('canvas'),art:document.createElement('canvas')};
 
 function canvasPixels() { return state.inPlaceEdit?previewInPlaceEdit(state.inPlaceEdit.session):compositeFrame(state.project,currentFrame()); }
 function renderCanvas() {
@@ -355,20 +405,19 @@ function renderCanvas() {
   context.setTransform(ratio, 0, 0, ratio, 0, 0);
   context.imageSmoothingEnabled = false;
   context.clearRect(0, 0, canvasWidth, canvasHeight);
-  for (let y = 0; y < height; y += 2) for (let x = 0; x < width; x += 2) {
-    context.fillStyle = ((x + y) / 2) % 2 ? '#e4e9e1' : '#f2f4ed';
-    context.fillRect(x * state.scale, y * state.scale, 2 * state.scale, 2 * state.scale);
-  }
-  const drawPixels = (pixels) => pixels.forEach((color, index) => {
-    if (color < 0) return;
-    context.fillStyle = state.project.palette[color];
-    context.fillRect((index % width) * state.scale, Math.floor(index / width) * state.scale, state.scale, state.scale);
-  });
+  // Checkerboard, onion skin and artwork are painted 1:1 offscreen and scaled up with nearest-neighbour drawImage.
+  const {checker}=stageLayers;
+  if (checker.width !== width || checker.height !== height) spriteImage(checker, [], [], CANVAS_CHECKER, width, height);
+  context.drawImage(checker, 0, 0, canvasWidth, canvasHeight);
+  const drawPixels = (pixels, layer = stageLayers.art) => {
+    spriteImage(layer, pixels, state.project.palette, null, width, height);
+    context.drawImage(layer, 0, 0, canvasWidth, canvasHeight);
+  };
   const animation = currentAnimation();
   if (!state.inPlaceEdit && state.onion && animation.frames.length > 1) {
     const index = animation.frames.findIndex(f => f.id === state.frameId);
     context.globalAlpha = 0.23;
-    drawPixels(compositeFrame(state.project,animation.frames[(index - 1 + animation.frames.length) % animation.frames.length]));
+    drawPixels(compositeFrame(state.project,animation.frames[(index - 1 + animation.frames.length) % animation.frames.length]),stageLayers.onion);
     context.globalAlpha = 1;
   }
   drawPixels(canvasPixels());
@@ -849,7 +898,7 @@ function beginCanvasPartEdit(item,partId) {
     const edit={session,documentId:state.documentId,revision:state.documents.get(state.documentId)?.revision,previousTool:state.tool,previousPlaying:state.playing,inert:new Map(),disabled:new Map(),error:null};
     state.inPlaceEdit=edit;state.tool='pencil';state.playing=false;state.selection=null;state.swap=false;state.swapFirst=null;
     state.cursor={x:Math.max(0,Math.min(state.project.width-1,bounds.x)),y:Math.max(0,Math.min(state.project.height-1,bounds.y))};
-    for(const element of document.querySelectorAll('.app-header,#project-tabs,#new-project-tab,#open-saved-projects,#details-panel,.timeline,.transform-section,.account-section,.left-bottom,.floating-panel[data-home="details-panel"],.panel-splitter')) {
+    for(const element of document.querySelectorAll('.app-header,#project-tabs,#new-project-tab,#open-saved-projects,#open-version-history,#details-panel,.timeline,.transform-section,.account-section,.left-bottom,.floating-panel[data-home="details-panel"],.panel-splitter')) {
       edit.inert.set(element,element.inert);element.inert=true;
     }
     for(const element of document.querySelectorAll('[data-tool="object"],[data-tool="resize"],[data-tool="wand"],#make-object,#magic-outline,#resize-canvas,#toggle-onion,#color-picker,#hex-color,#add-color,#swap-colors')) {
@@ -1221,6 +1270,7 @@ function renderSampleCards(container) {
   });
 }
 function renderAll() {
+  if (pendingRender) { cancelAnimationFrame(pendingRender); pendingRender = 0; pendingPreview = false; }
   normalizeSelection();
   syncMotionMode();
   syncRigMode();
@@ -1679,9 +1729,20 @@ function pointerMove(event) {
       if (drawing.tool === 'ellipse') antialiasShape(drawing);
     }
     drawing.last = point;
-    renderPreview();
-  }
-  renderCanvas();
+    renderSoon(true);
+  } else renderSoon();
+}
+let pendingRender = 0, pendingPreview = false;
+/** Coalesce pointer-driven canvas (and preview) redraws into one per animation frame. */
+function renderSoon(preview = false) {
+  pendingPreview ||= preview;
+  pendingRender ||= requestAnimationFrame(flushRender);
+}
+function flushRender() {
+  const preview = pendingPreview;
+  if (pendingRender) cancelAnimationFrame(pendingRender);
+  pendingRender = 0; pendingPreview = false;
+  renderCanvas(); if (preview) renderPreview();
 }
 function pointerEnd(event) {
   if (curvePointerUp(event)) return;
@@ -1837,7 +1898,7 @@ function animationTick(time) {
 function openDialog(title, content, eyebrow = 'PIXEL STUDIO') {
   if (finishDrawing()) renderAll();
   $('modal').dispatchEvent(new Event('pixel-studio:dialog-replace'));
-  $('modal').classList.remove('wide','start-modal','part-library-modal','prompt-builder-modal','ai-edit-modal','shared-part-modal','palette-studio-modal','export-modal');
+  $('modal').classList.remove('versions-modal','wide','start-modal','part-library-modal','prompt-builder-modal','ai-edit-modal','shared-part-modal','palette-studio-modal','export-modal');
   $('modal-title').textContent = title;
   $('modal-eyebrow').textContent = eyebrow;
   $('modal-content').innerHTML = content;
@@ -1859,6 +1920,7 @@ function aiEditDialog() {
         throw new Error('This project changed after the edit started. Open AI edit again to work from the latest artwork.');
       }
       const clean = validateProject(proposedProject);
+      versionBefore('Before AI edit');
       mutate(() => { state.project = clean; state.selection = null; state.previewTime = 0; });
       toast('AI edit applied. Undo restores your previous artwork.');
     },
@@ -2103,6 +2165,7 @@ async function importPng(file) {
         if (destination === 'frame') {
           if (!canAddFrame()) throw new Error('This project has reached its frame or pixel limit.');
           if (!canEditPixels()) throw new Error('Select visible pixel artwork and unlock its objects before importing a frame.');
+          versionBefore('Before PNG import');
           mutate(() => {
             const frame = makeLayeredFrame(state.project);
             frame.cels.find(cel=>cel.layerId===state.layerId).pixels=pixels;
@@ -2114,6 +2177,7 @@ async function importPng(file) {
           toast('PNG added as a frame on the selected layer.');
         } else if (destination === 'layer') {
           if (!canAddLayer()) throw new Error('This project has reached its layer or pixel limit.');
+          versionBefore('Before PNG import');
           mutate(() => {
             const layer=insertLayer(file.name.replace(/\.png$/i,'').slice(0,80) || 'Imported layer');
             currentFrame().cels.find(cel=>cel.layerId===layer.id).pixels=pixels;
@@ -2320,7 +2384,7 @@ function accountDialog() {
 
 function bindEvents() {
   bindFileDrop();
-  const mathsDeps={state,$,icon,escapeHTML,mutate,snapshot,remember,renderAll,renderCanvas,renderPreview,renderTools,toast,openDialog,paintSprite,finishDrawing,drawPoints,
+  const mathsDeps={state,$,icon,escapeHTML,mutate,snapshot,remember,versionBefore,renderAll,renderCanvas,renderPreview,renderTools,toast,openDialog,paintSprite,finishDrawing,drawPoints,
     currentAnimation,currentFrame,currentLayer,selectedObject,selectedItems,transformItems,resizableObject,objectTarget,canEditPixels,canvasPixels,canvasPosition,normalizeSelection,selectObject,selectFrameAt,addFrame,undo:()=>restore(state.undo,state.redo)};
   initToolExtras(mathsDeps);initObjectPose(mathsDeps);initMotionModes(mathsDeps);initRigMode(mathsDeps);initAnimatePanel(mathsDeps);initEffectsPanel(mathsDeps);initPaletteTools(mathsDeps);initPaletteStudio(mathsDeps);
   // Holding Shift previews the straight line a pencil or eraser click will draw.
@@ -2332,6 +2396,8 @@ function bindEvents() {
   $('edit-animation-ai').onclick=aiEditDialog;
   $('new-project-tab').onclick=()=>newProjectDialog();
   $('open-saved-projects').onclick=savedProjectsDialog;
+  $('open-version-history').onclick=()=>versionsDialog().then(()=>$('version-name')?.focus());
+  $('save-status').onclick=()=>{const mode=$('save-status').dataset.state;if(mode==='error')downloadBackup();else if(mode!=='draft')versionsDialog();};
   $('project-tabs').addEventListener('keydown',event=>{
     if(!event.target.closest('[role="tab"]') || !['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;
     event.preventDefault();event.stopPropagation();
@@ -2606,7 +2672,13 @@ async function init() {
   state.documentId=active.id;
   for(const key of ['project','animationId','frameId','layerId','objectSelection','undo','redo','selection','scale','fit','color','previewIndex'])state[key]=active[key];
   normalizeSelection();
+  const store=()=>projectStore;
+  initVersions({state,$,icon,escapeHTML,openDialog,toast,paintSprite,mutate,replaceProject,downloadBlob,fileName,saveNow,syncDocument,uid,store});
   bindEvents(); renderAll();
+  initSafety({state,icon,escapeHTML,toast,downloadBlob,fileName,paintSprite,syncDocument,store,restoreRecovered,saveVersion});
+  findRecoverable().then(found=>{if(found.length)showRecovery(found);}).catch(()=>{});
+  // `?perf` exposes editor internals to scripts/profile-browser.mjs.
+  if(new URLSearchParams(location.search).has('perf'))globalThis.pixelStudioPerf={state,renderAll,renderCanvas,renderTimeline,renderLayers,renderPreview,snapshot,remember,selectFrameAt,saveNow};
   initPanelLayout({onLayout:()=>requestAnimationFrame(()=>fitCanvas())});
   requestAnimationFrame(() => { fitCanvas(); requestAnimationFrame(animationTick); });
   // First visit: offer examples and a blank canvas; the panda sample stays open behind it.

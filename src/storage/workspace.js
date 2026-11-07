@@ -1,9 +1,13 @@
-/** Device-local project storage. Closing a tab never deletes its saved document. */
+/**
+ * Device-local project storage. Closing a tab never deletes its saved document. Each save also keeps the previous
+ * record as a last good copy, project versions are stored as packed text (domain/versions.js), and journals hold crash-recovery copies.
+ */
 import { getAnimationLayers, validateProject } from '../domain/project.js';
 import { celObjects } from '../domain/objects.js';
 
 const DATABASE_NAME = 'pixel-studio-workspace';
-const DATABASE_VERSION = 1;
+const DATABASE_VERSION = 2;
+const VERSION_KINDS = ['auto', 'named', 'before'];
 const SESSION_KEY = 'workspace';
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const identifier = value => typeof value === 'string' && value.length <= 200 && value.trim().length > 0;
@@ -66,6 +70,19 @@ function sessionRecord(input) {
   return result;
 }
 
+/** A version record: listing metadata (see domain/versions.js) plus the packed project as `data`. */
+function versionRecord(input) {
+  if (!object(input) || !identifier(input.id) || !identifier(input.documentId) || !VERSION_KINDS.includes(input.kind)
+    || !Number.isFinite(input.createdAt) || typeof input.data !== 'string' || !input.data) throw new Error('A project version needs an ID, project, kind, time and data.');
+  const { data, ...meta } = input;
+  return { meta: { ...meta, bytes: data.length }, data: { id: input.id, data } };
+}
+function journalRecord(input) {
+  if (!object(input) || !identifier(input.documentId) || typeof input.data !== 'string' || !Number.isFinite(input.updatedAt)) throw new Error('A recovery journal needs a project ID, time and data.');
+  return { ...input };
+}
+const byNewest = list => list.sort((a, b) => b.createdAt - a.createdAt);
+
 function readDocument(record) {
   if (!record) return null;
   try { return documentRecord(record); }
@@ -79,19 +96,27 @@ function readSession(record) {
 }
 
 /** This fallback stays usable without claiming that its data survives a reload. */
-function memoryStore() {
-  const documents = new Map();
+export function memoryStore() {
+  const documents = new Map(), backups = new Map(), versions = new Map(), versionData = new Map(), journals = new Map();
   let session = null;
   return {
     available: false,
     async loadSession() { return readSession(session); },
     async saveSession(input) { session = sessionRecord(input); },
-    async getDocument(id) { return readDocument(documents.get(id)); },
+    async getDocument(id) { return readDocument(documents.get(id)) || readDocument(backups.get(id)); },
     async saveDocument(input) {
       const document = documentRecord(input);
+      if (documents.has(document.id)) backups.set(document.id, documents.get(document.id));
       documents.set(document.id, document);
     },
     async listDocuments() { return metadataList([...documents.values()].map(documentMetadata)); },
+    async listVersions(documentId) { return byNewest([...versions.values()].filter(v => v.documentId === documentId)); },
+    async getVersionData(id) { return versionData.get(id)?.data ?? null; },
+    async saveVersion(input) { const { meta, data } = versionRecord(input); versions.set(meta.id, meta); versionData.set(meta.id, data); return meta; },
+    async deleteVersions(ids) { for (const id of ids) { versions.delete(id); versionData.delete(id); } },
+    async listJournals() { return [...journals.values()]; },
+    async saveJournal(input) { const entry = journalRecord(input); journals.set(entry.documentId, entry); },
+    async deleteJournal(documentId) { journals.delete(documentId); },
   };
 }
 
@@ -99,16 +124,17 @@ function memoryStore() {
 function transact(database, stores, mode, action) {
   return new Promise((resolve, reject) => {
     let transaction;
-    let result;
+    let result, failure;
     try { transaction = database.transaction(stores, mode); }
     catch (error) { reject(error); return; }
     transaction.oncomplete = () => resolve(result);
-    transaction.onabort = () => reject(transaction.error || new Error('The project storage transaction was interrupted.'));
+    transaction.onabort = () => reject(failure || transaction.error || new Error('The project storage transaction was interrupted.'));
+    // Errors thrown in request callbacks would otherwise escape as uncaught exceptions while the transaction commits.
+    const fail = error => { failure ??= error; try { transaction.abort(); } catch { reject(error); } };
     try {
-      action(transaction, value => { result = value; });
+      action(transaction, value => { result = value; }, fail);
     } catch (error) {
-      try { transaction.abort(); } catch { /* The transaction may have already finished. */ }
-      reject(error);
+      fail(error);
     }
   });
 }
@@ -130,14 +156,21 @@ function persistentStore(database) {
     },
     async getDocument(id) {
       if (!identifier(id)) return null;
-      return readDocument(await read('projects', id));
+      return readDocument(await read('projects', id)) || readDocument(await read('backups', id));
     },
+    /** One transaction: the previous record becomes the last good copy, then the new one replaces it (all or nothing). */
     async saveDocument(input) {
       const document = documentRecord(input);
       const metadata = documentMetadata(document);
-      await transact(database, ['projects', 'metadata'], 'readwrite', transaction => {
-        transaction.objectStore('projects').put(document);
-        transaction.objectStore('metadata').put(metadata);
+      await transact(database, ['projects', 'metadata', 'backups'], 'readwrite', (transaction, done, fail) => {
+        const projects = transaction.objectStore('projects'), previous = projects.get(document.id);
+        previous.onsuccess = () => {
+          try {
+            if (previous.result) transaction.objectStore('backups').put(previous.result);
+            projects.put(document);
+            transaction.objectStore('metadata').put(metadata);
+          } catch (error) { fail(error); }
+        };
       });
     },
     async listDocuments() {
@@ -146,6 +179,41 @@ function persistentStore(database) {
         request.onsuccess = () => done(request.result);
       });
       return metadataList(records);
+    },
+    async listVersions(documentId) {
+      if (!identifier(documentId)) return [];
+      return byNewest(await transact(database, ['versions'], 'readonly', (transaction, done) => {
+        const request = transaction.objectStore('versions').index('documentId').getAll(documentId);
+        request.onsuccess = () => done(request.result);
+      }));
+    },
+    async getVersionData(id) { return identifier(id) ? (await read('versionData', id))?.data ?? null : null; },
+    async saveVersion(input) {
+      const { meta, data } = versionRecord(input);
+      await transact(database, ['versions', 'versionData'], 'readwrite', transaction => {
+        transaction.objectStore('versionData').put(data);
+        transaction.objectStore('versions').put(meta);
+      });
+      return meta;
+    },
+    async deleteVersions(ids) {
+      if (!ids.length) return;
+      await transact(database, ['versions', 'versionData'], 'readwrite', transaction => {
+        for (const id of ids) { transaction.objectStore('versions').delete(id); transaction.objectStore('versionData').delete(id); }
+      });
+    },
+    async listJournals() {
+      return transact(database, ['journal'], 'readonly', (transaction, done) => {
+        const request = transaction.objectStore('journal').getAll();
+        request.onsuccess = () => done(request.result);
+      });
+    },
+    async saveJournal(input) {
+      const entry = journalRecord(input);
+      await transact(database, ['journal'], 'readwrite', transaction => transaction.objectStore('journal').put(entry));
+    },
+    async deleteJournal(documentId) {
+      await transact(database, ['journal'], 'readwrite', transaction => transaction.objectStore('journal').delete(documentId));
     },
   };
 }
@@ -177,6 +245,10 @@ export async function openProjectStore() {
         if (!database.objectStoreNames.contains('projects')) database.createObjectStore('projects', { keyPath: 'id' });
         if (!database.objectStoreNames.contains('metadata')) database.createObjectStore('metadata', { keyPath: 'id' });
         if (!database.objectStoreNames.contains('session')) database.createObjectStore('session');
+        if (!database.objectStoreNames.contains('backups')) database.createObjectStore('backups', { keyPath: 'id' });
+        if (!database.objectStoreNames.contains('versions')) database.createObjectStore('versions', { keyPath: 'id' }).createIndex('documentId', 'documentId');
+        if (!database.objectStoreNames.contains('versionData')) database.createObjectStore('versionData', { keyPath: 'id' });
+        if (!database.objectStoreNames.contains('journal')) database.createObjectStore('journal', { keyPath: 'documentId' });
       } catch { request.transaction.abort(); }
     };
     request.onsuccess = () => finish(request.result);

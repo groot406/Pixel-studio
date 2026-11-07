@@ -127,8 +127,9 @@ function preview(project, animationId, rootId) {
 const dialogError = message => { const el = d().$('rig-dialog-error'); if (el) { el.textContent = message || ''; el.hidden = !message; } };
 function onClose() { const modal = d().$('modal'), stop = () => { clearInterval(timer); modal.removeEventListener('close', stop); modal.removeEventListener('pixel-studio:dialog-replace', stop); }; modal.addEventListener('close', stop); modal.addEventListener('pixel-studio:dialog-replace', stop); }
 /** Commit a generated project and show its animation. */
-function finish(project, animationId, message) {
+function finish(project, animationId, message, reason) {
   d().$('modal').close();
+  d().versionBefore(reason);
   a.commit(() => project, message);
   const animation = st().project.animations.find(x => x.id === animationId);
   if (animation) { Object.assign(st(), { animationId, frameId: animation.frames[0].id, previewIndex: 0, previewTime: 0 }); d().renderAll(); }
@@ -176,7 +177,7 @@ function templatesDialog() {
       if (!name.dataset.edited) name.value = def.name;
       run();
     } else if (event.target.closest('[data-close]')) d().$('modal').close();
-    else if (event.target.closest('#rig-dialog-go') && s.candidate) finish(s.candidate.project, s.candidate.animationId, `${TEMPLATES[s.template].label} generated: ${s.candidate.frameIds.length} frames.`);
+    else if (event.target.closest('#rig-dialog-go') && s.candidate) finish(s.candidate.project, s.candidate.animationId, `${TEMPLATES[s.template].label} generated: ${s.candidate.frameIds.length} frames.`, `Before ${TEMPLATES[s.template].label} template`);
   });
   box.addEventListener('input', event => {
     const el = event.target;
@@ -234,7 +235,7 @@ function retargetDialog() {
   };
   box.addEventListener('click', async event => {
     if (event.target.closest('[data-close]')) d().$('modal').close();
-    else if (event.target.closest('#rig-dialog-go') && s.candidate) finish(s.candidate.project, s.candidate.animationId, `Retargeted onto ${targets.find(t => t.id === s.target)?.name}.`);
+    else if (event.target.closest('#rig-dialog-go') && s.candidate) finish(s.candidate.project, s.candidate.animationId, `Retargeted onto ${targets.find(t => t.id === s.target)?.name}.`, 'Before retargeting');
     else if (event.target.closest('#rt-paste')) {
       try {
         clip = readPoseClip(JSON.parse(await navigator.clipboard.readText()));

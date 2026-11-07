@@ -19,6 +19,20 @@ function uses(project) {
   return partId=>seen.get(partId)?.size || 0;
 }
 
+let thumbs={key:'',rows:new Map()};
+/** Object row pixels, cached by the row's operations while the parts and palette stay the same. */
+function rowPixels(project,ops,images) {
+  const key=JSON.stringify([project.parts||[],project.palette]);
+  if(thumbs.key!==key)thumbs={key,rows:new Map()};
+  const rowKey=`${project.width}x${project.height}:${JSON.stringify(ops)}`;
+  let pixels=thumbs.rows.get(rowKey);
+  if(!pixels) {
+    pixels=renderOperations(ops,project.width,project.height,images());
+    if(thumbs.rows.size>=400)thumbs.rows.delete(thumbs.rows.keys().next().value);
+    thumbs.rows.set(rowKey,pixels);
+  }
+  return pixels;
+}
 export function renderObjectsPanel({project,animation,frame,selected,selection=[],scope,collapsed,canPaste,onSelect,onAction,onScope,onDrop,paint}) {
   closeMenu();
   const useCount=uses(project);
@@ -29,7 +43,8 @@ export function renderObjectsPanel({project,animation,frame,selected,selection=[
     const children=stack.grouped?stack.children.filter(node=>!isEmptyNode(cel,node)):stack.children;
     return {...stack,children,empty:stack.children.every(node=>isEmptyNode(cel,node))};
   });
-  const images=renderParts(project.parts || [], project.palette);
+  let images;
+  const partImages=()=>images??=renderParts(project.parts || [], project.palette);
   const row=(stack,node,group=false)=>{
     const {layer}=stack, instance=node?.instance, key=group?'@group':node.key;
     const active=selection.some(item=>item.layerId===layer.id && item.key===key) || (selected?.layerId===layer.id && selected.key===key && !selection.length);
@@ -55,7 +70,7 @@ export function renderObjectsPanel({project,animation,frame,selected,selection=[
   list.querySelectorAll('[data-object-row]').forEach(element=>{
     const item=rows[Number(element.dataset.objectRow)], layer=project.layers.find(l=>l.id===item.layerId), cel=frame.cels.find(c=>c.layerId===item.layerId);
     let pixels=cel.pixels;
-    if(!item.group && cel.source) pixels=renderOperations(item.node.type==='overrides'?cel.source.overrides:cel.source.ops.slice(item.node.start,item.node.end),project.width,project.height,images);
+    if(!item.group && cel.source) pixels=rowPixels(project,item.node.type==='overrides'?cel.source.overrides:cel.source.ops.slice(item.node.start,item.node.end),partImages);
     paint(element.querySelector('canvas'),pixels,project.palette,true);
     element.querySelector('.object-select').onclick=event=>onSelect(item,event.shiftKey || event.ctrlKey || event.metaKey);
     element.querySelector('.object-select').ondblclick=()=>{if(item.node?.instance)onAction('edit',item);};

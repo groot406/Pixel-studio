@@ -347,7 +347,7 @@ function aaPixel(instance, part, size, box, x, y) {
   return { color: coverage >= .5 ? color : -1, raw: d, edge: coverage >= .25 && coverage < .75 ? coverage : 0 };
 }
 
-const imageCache = new WeakMap(), IMAGE_CACHE = 48;
+const imageCache = new WeakMap(), IMAGE_CACHE_AREA = 1 << 19;
 /**
  * The instance drawn into its own box (relative to the instance origin), for instances that resample their part:
  * `{x, y, width, height, pixels, edge?}`, cached per part image and pose. Every pixel is inverse-mapped from its centre
@@ -361,9 +361,9 @@ export function instanceImage(instance, part) {
   const key = [instance.transform, instance.width, instance.height, instance.angle, instance.pivot?.x, instance.pivot?.y, JSON.stringify(instance.skew),
     JSON.stringify(instance.tilt), JSON.stringify(instance.deform), instance.sampling, instance.sampling === 'aa' ? part.palette?.join() : ''].join('|');
   let byPose = imageCache.get(part.pixels);
-  if (!byPose) imageCache.set(part.pixels, byPose = new Map());
+  if (!byPose) imageCache.set(part.pixels, byPose = Object.assign(new Map(), { area: 0 }));
   const cached = byPose.get(key);
-  if (cached) return cached;
+  if (cached) { byPose.delete(key); byPose.set(key, cached); return cached; }
   const rect = instanceBox({ ...instance, x: 0, y: 0 }, part), size = instanceSize(instance, part), box = transformedSize(instance, part);
   const { width, height } = rect, n = width * height, pixels = new Array(n).fill(-1), owner = new Int32Array(n).fill(-1);
   const pw = part.width, ph = part.height, P = part.pixels, count = new Int32Array(pw * ph), best = new Int32Array(pw * ph).fill(-1), bestD = new Float64Array(pw * ph).fill(Infinity);
@@ -455,8 +455,9 @@ export function instanceImage(instance, part) {
     }
   }
   const image = { ...rect, pixels, edge: edge?.size ? edge : null };
-  if (byPose.size >= IMAGE_CACHE) byPose.delete(byPose.keys().next().value);
-  byPose.set(key, image);
+  // Least recently used poses go first once this part's cached images exceed the pixel budget.
+  for (const [old, value] of byPose) { if (byPose.area + n <= IMAGE_CACHE_AREA) break; byPose.delete(old); byPose.area -= value.pixels.length; }
+  byPose.set(key, image); byPose.area += n;
   return image;
 }
 /**

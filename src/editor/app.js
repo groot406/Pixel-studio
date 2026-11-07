@@ -1,7 +1,7 @@
 import { createInPlaceEdit, setInPlaceScope, inPlaceRestriction, inPlaceDirty, inPlacePoint, beginInPlaceStroke, moveInPlaceStroke, finishInPlaceStroke, restoreInPlace, previewInPlaceEdit, prepareInPlaceEdit, PART_EDIT_TOOLS, inPlaceCanvasRect, inPlacePlacement, inPlaceMode, beginInPlaceSelection, moveInPlaceSelection, finishInPlaceSelection, selectAllInPlace, deselectInPlace, nudgeInPlaceSelection, clearInPlaceSelection, copyInPlaceSelection, pasteInPlace } from '../features/objects/in-place-edit.js';
 import { mapPaletteColors, copyObject, copyObjects, pasteObject, objectPixelBounds } from '../domain/object-clipboard.js';
 import { commitRasterEdits, writeCelPixels, cloneArtwork } from '../domain/artwork.js';
-import { celObjects, reorderObject, reorderObjectContainer, updateObject, translateObject, forkObject, deleteObject, addObjectContainer, moveObjectToGroup, removeObjectContainer, objectBounds, hitTestObject, dropObject, resizeObject, frameObjects, orderObjects, translateObjects, deleteObjects, turnObjects, rotateObjects } from '../domain/objects.js';
+import { celObjects, reorderObject, reorderObjectContainer, updateObject, translateObject, forkObject, deleteObject, addObjectContainer, moveObjectToGroup, removeObjectContainer, objectBounds, hitTestObject, dropObject, resizeObject, frameObjects, orderObjects, translateObjects, deleteObjects, turnObjects, rotateObjects, tiltObjects } from '../domain/objects.js';
 import { transformedSize } from '../domain/geometry.js';
 import { resizeBox } from '../domain/resize.js';
 import { renderObjectsPanel } from './objects-panel.js';
@@ -28,6 +28,7 @@ import { initMotionModes, syncMotionMode, drawMotionOverlay } from './motion-mod
 import { initRigMode, syncRigMode, drawRigOverlay, toggleRigMode } from './rig-mode.js';
 import { initEffectsPanel, renderEffectsPanel } from './effects-panel.js';
 import { initPaletteTools } from './palette-tools.js';
+import { initPaletteStudio } from './palette-studio.js';
 import { instancePivot } from '../domain/geometry.js';
 
 const $ = (id) => document.getElementById(id);
@@ -51,7 +52,7 @@ const TOOL_HINTS = {
   wand:'Click a shape to select it. Shift-click adds more. Then press Make object (Ctrl/⌘ G).',
   dither:'Paints a checkerboard pattern with the current color. Great for gradients and texture.',
   shade:'Click or drag to darken pixels one palette step. Right-click lightens.',
-  resize:'Drag a handle to resize; Shift keeps the ratio. Keep area squashes without changing the area. Drag the round handle to rotate (Shift snaps to 15°); , and . turn 90°. The shared artwork never changes. Shift-click selects several.',
+  resize:'Drag a handle to resize; Shift keeps the ratio. Keep area squashes without changing the area. Drag the round handle to rotate (Shift snaps to 15°); drag the blue diamond for a 3D turn: sideways turns ↔ about the Y axis, up or down tips ↕ about the X axis; , and . turn 90°. The shared artwork never changes. Shift-click selects several.',
 };
 const BRUSH_TOOLS = ['pencil','eraser','line','dither','shade'];
 const SYMMETRY_TOOLS = [...BRUSH_TOOLS,'rectangle','ellipse'];
@@ -493,7 +494,7 @@ function renderResizeHandles() {
   const element=$('resize-handles'), object=state.tool==='resize' && resizableObject();
   element.hidden=!object;
   if(!object)return;
-  element.classList.toggle('is-rotated',Boolean(object.node.instance.angle));
+  element.classList.toggle('is-rotated',Boolean(object.node.instance.angle || object.node.instance.tilt));
   const {box}=object, s=state.scale;
   Object.assign(element.style,{left:`${box.x*s}px`,top:`${box.y*s}px`,width:`${box.width*s}px`,height:`${box.height*s}px`});
 }
@@ -503,7 +504,8 @@ function renderResizeOptions() {
   $('object-resize-mode').value=state.resizeMode;
   const object=resizableObject();
   const angle=object?object.node.instance.angle || 0:0, count=transformItems().length;
-  for(const id of ['object-resize-squash','object-resize-stretch','object-resize-reset'])$(id).disabled=!object || Boolean(angle);
+  const tilted=Boolean(object?.node.instance.tilt);
+  for(const id of ['object-resize-squash','object-resize-stretch','object-resize-reset'])$(id).disabled=!object || Boolean(angle) || tilted;
   for(const id of ['object-turn-left','object-turn-right','object-flip-x','object-flip-y','object-angle','object-angle-reset'])$(id).disabled=!count;
   if(document.activeElement!==$('object-angle'))$('object-angle').value=String(angle);
   $('object-angle-reset').disabled=!angle && count<2;
@@ -511,8 +513,8 @@ function renderResizeOptions() {
   const own=transformedSize({...object.node.instance,width:undefined,height:undefined},object.part), w=own.width, h=own.height;
   const size=transformedSize(object.node.instance,object.part), {width,height}=size, percent=v=>Math.round(v*100);
   $('object-resize-size').textContent=(width===w && height===h?`${width} × ${height} px · original size`:`${width} × ${height} px · ${percent(width/w)}% × ${percent(height/h)}% of ${w} × ${h}`)
-    +(angle?` · rotated ${angle}° (reset the angle to resize)`:'')+(count>1?` · ${count} objects selected`:'');
-  $('object-resize-reset').disabled=Boolean(angle) || (width===w && height===h);
+    +(angle?` · rotated ${angle}° (reset the angle to resize)`:'')+(tilted?' · 3D turned (make it flat in Object pose to resize)':'')+(count>1?` · ${count} objects selected`:'');
+  $('object-resize-reset').disabled=Boolean(angle) || tilted || (width===w && height===h);
 }
 /** Start dragging a resize handle of the selected object. */
 function beginResize(event,handle) {
@@ -521,6 +523,7 @@ function beginResize(event,handle) {
   if(!object)return;
   event.preventDefault();event.stopPropagation();
   if(handle==='rotate'){beginRotate(event,object);return;}
+  if(handle==='tilt'){beginTilt(event,object);return;}
   const layer=state.project.layers.find(l=>l.id===object.item.layerId);
   if(layer.locked || object.node.instance.locked){toast('Unlock this object or its group before resizing it.');return;}
   $('pixel-canvas').setPointerCapture(event.pointerId);
@@ -573,6 +576,22 @@ function beginRotate(event,object) {
   const centre=instancePivot(op,object.part), at=canvasPosition(event);
   $('pixel-canvas').setPointerCapture(event.pointerId);
   state.drawing={tool:'rotate',pointerId:event.pointerId,before:snapshot(),items:items.length?items:[object.item],target:object.target,centre,start:Math.atan2(at.y-centre.y,at.x-centre.x),startAngle:op.angle || 0};
+}
+/** Drag the 3D turn handle: sideways turns about the Y axis, up or down tips about the X axis (the larger movement wins). */
+function beginTilt(event,object) {
+  const items=transformItems(), tilt=object.node.instance.tilt;
+  $('pixel-canvas').setPointerCapture(event.pointerId);
+  state.drawing={tool:'tilt',pointerId:event.pointerId,before:snapshot(),items:items.length?items:[object.item],target:object.target,origin:{x:event.clientX,y:event.clientY},start:{x:tilt?.x || 0,y:tilt?.y || 0}};
+}
+function moveTilt(drawing,event) {
+  const dx=event.clientX-drawing.origin.x, dy=event.clientY-drawing.origin.y, sideways=Math.abs(dx)>=Math.abs(dy);
+  // One degree per screen pixel; dragging the front down brings the top toward you (negative tip).
+  let delta=sideways?{x:0,y:Math.round(dx)}:{x:-Math.round(dy),y:0};
+  if(event.shiftKey){const axis=sideways?'y':'x';delta[axis]=Math.round((drawing.start[axis]+delta[axis])/15)*15-drawing.start[axis];}
+  try{state.project=tiltObjects(drawing.before.project,drawing.target,drawing.items,delta,state.objectScope);renderResizeOptions();}
+  catch(error){$('cursor-position').textContent=error.message;}
+  const now=delta.x+drawing.start.x, turn=delta.y+drawing.start.y, wrap=v=>((((v%360)+540)%360)-180) || 0;
+  $('cursor-position').textContent=sideways?`Turn ↔ ${wrap(turn)}°`:`Tip ↕ ${wrap(now)}°`;
 }
 /** Start of a Shift+click straight line: where the last pencil or eraser stroke ended. */
 function shiftLineStart(tool=state.tool) {
@@ -649,7 +668,7 @@ function renderPalette() {
   $('swap-colors').classList.toggle('active', state.swap);
   $('swap-colors').setAttribute('aria-pressed', state.swap);
   $('add-color').disabled = palette.length >= MAX_COLORS;
-  $('palette-help').textContent = state.swap ? (state.swapFirst === null ? 'Choose the first color to swap.' : 'Now choose the second color.') : 'Edit a color to update it in every frame.';
+  $('palette-help').textContent = state.swap ? (state.swapFirst === null ? 'Choose the first color to swap.' : 'Now choose the second color.') : 'Edit a color to update it in every frame. Right-click a swatch for more.';
 }
 function editColor(value) {
   if (state.color < 0) return;
@@ -1606,6 +1625,8 @@ function pointerMove(event) {
       if(event.shiftKey)delta=Math.round((drawing.startAngle+delta)/15)*15-drawing.startAngle;
       try{state.project=rotateObjects(drawing.before.project,drawing.target,drawing.items,delta,state.objectScope);renderResizeOptions();}
       catch(error){$('cursor-position').textContent=error.message;}
+    } else if(drawing.tool==='tilt') {
+      moveTilt(drawing,event);
     } else if(drawing.tool==='object') {
       try{state.project=drawing.items?translateObjects(drawing.before.project,drawing.target,drawing.items,point.x-drawing.origin.x,point.y-drawing.origin.y,state.objectScope).project:translateObject(drawing.before.project,drawing.target,drawing.key,point.x-drawing.origin.x,point.y-drawing.origin.y,state.objectScope);}
       catch(error){$('cursor-position').textContent=error.message;}
@@ -1669,7 +1690,7 @@ function finishDrawing(cancel = false) {
     renderTools();renderCanvas();renderPreview();return true;
   }
   if (cancel) {
-    if(['object','resize','rotate'].includes(drawing.tool))state.project=drawing.before.project;
+    if(['object','resize','rotate','tilt'].includes(drawing.tool))state.project=drawing.before.project;
     else drawing.cel.pixels = drawing.base;
     if (drawing.tool==='select') state.selection=drawing.previousSelection;
   }
@@ -1790,7 +1811,7 @@ function animationTick(time) {
 function openDialog(title, content, eyebrow = 'PIXEL STUDIO') {
   if (finishDrawing()) renderAll();
   $('modal').dispatchEvent(new Event('pixel-studio:dialog-replace'));
-  $('modal').classList.remove('wide','start-modal','part-library-modal','prompt-builder-modal','ai-edit-modal','shared-part-modal');
+  $('modal').classList.remove('wide','start-modal','part-library-modal','prompt-builder-modal','ai-edit-modal','shared-part-modal','palette-studio-modal');
   $('modal-title').textContent = title;
   $('modal-eyebrow').textContent = eyebrow;
   $('modal-content').innerHTML = content;
@@ -2345,7 +2366,7 @@ function bindEvents() {
   bindFileDrop();
   const mathsDeps={state,$,icon,escapeHTML,mutate,snapshot,remember,renderAll,renderCanvas,renderPreview,renderTools,toast,openDialog,paintSprite,finishDrawing,
     currentAnimation,currentFrame,currentLayer,selectedObject,selectedItems,transformItems,resizableObject,objectTarget,canEditPixels,canvasPixels,canvasPosition,normalizeSelection,selectObject,selectFrameAt,addFrame,undo:()=>restore(state.undo,state.redo)};
-  initToolExtras(mathsDeps);initObjectPose(mathsDeps);initMotionModes(mathsDeps);initRigMode(mathsDeps);initAnimatePanel(mathsDeps);initEffectsPanel(mathsDeps);initPaletteTools(mathsDeps);
+  initToolExtras(mathsDeps);initObjectPose(mathsDeps);initMotionModes(mathsDeps);initRigMode(mathsDeps);initAnimatePanel(mathsDeps);initEffectsPanel(mathsDeps);initPaletteTools(mathsDeps);initPaletteStudio(mathsDeps);
   // Holding Shift previews the straight line a pencil or eraser click will draw.
   const trackShift=event=>{if(state.shiftHeld!==event.shiftKey){state.shiftHeld=event.shiftKey;if(state.cursor)renderCanvas();}};
   window.addEventListener('keydown',trackShift);window.addEventListener('keyup',trackShift);

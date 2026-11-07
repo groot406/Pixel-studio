@@ -125,7 +125,7 @@ function untransformPoint(transform, w, h, x, y) {
   return transformPoint(named([a, c, b, d]), swap ? h : w, swap ? w : h, x, y);
 }
 
-/** Free rotation in whole degrees, after size, transform, deform and skew, about the pivot (default: box centre). */
+/** Free rotation in whole degrees, after size, transform, deform, skew and 3D turn, about the pivot (default: box centre). */
 export function instanceAngle(instance) { return instance.angle || 0; }
 const EPSILON = 1e-9;
 function turned(angle) {
@@ -142,7 +142,14 @@ export function transformedSize(instance, part) {
 }
 
 /** Per-instance pose properties beyond position and transform; all optional, absent means default. */
-export const POSE_KEYS = ['width', 'height', 'angle', 'pivot', 'skew', 'deform', 'sampling'];
+export const POSE_KEYS = ['width', 'height', 'angle', 'pivot', 'skew', 'tilt', 'deform', 'sampling'];
+/** Default perspective (percent) of a 3D turn when `tilt.perspective` is omitted. */
+export const DEFAULT_PERSPECTIVE = 30;
+/** The instance's 3D turn `{x, y, perspective}` (degrees, percent), or null when it has none. */
+export function instanceTilt(instance) {
+  const t = instance.tilt;
+  return t && (t.x || t.y) ? { x: t.x || 0, y: t.y || 0, perspective: t.perspective ?? DEFAULT_PERSPECTIVE } : null;
+}
 export const SAMPLING_MODES = ['nearest', 'rotsprite'];
 export const DEFORM_KINDS = ['wave', 'bulge', 'twist'];
 /** Deep copy of an instance's pose properties (absent ones omitted). */
@@ -153,7 +160,7 @@ export function instancePose(instance) {
 function pivotPoint(instance, box) {
   return instance.pivot ? { x: instance.pivot.x + .5, y: instance.pivot.y + .5 } : { x: box.width / 2, y: box.height / 2 };
 }
-/** Canvas point that free rotation and skew turn about (pixel centre of a set pivot, otherwise the exact box centre). */
+/** Canvas point that free rotation, skew and 3D turns act about (pixel centre of a set pivot, otherwise the exact box centre). */
 export function instancePivot(instance, part) {
   const p = pivotPoint(instance, transformedSize(instance, part));
   return { x: instance.x + p.x, y: instance.y + p.y };
@@ -176,32 +183,77 @@ function undeform(d, box, x, y) {
   const a = d.angle * (1 - r) * Math.PI / 180, cos = Math.cos(a), sin = Math.sin(a);
   return [hw + (nx * cos + ny * sin) * hw, hh + (-nx * sin + ny * cos) * hh];
 }
-/** Continuous point (px,py) relative to the instance origin, mapped back through rotation, skew and deform to box space. */
+/** Pivot-relative corners of the box (widened by a wave) after skew: what the 3D turn and rotation act on. */
+function skewedCorners(instance, box, c) {
+  const d = instance.deform, skew = instance.skew, tx = slope(skew?.x), ty = slope(skew?.y);
+  const ax = d?.kind === 'wave' && d.axis === 'x' ? d.amplitude : 0, ay = d?.kind === 'wave' && d.axis === 'y' ? d.amplitude : 0;
+  return [[-ax, -ay], [box.width + ax, -ay], [box.width + ax, box.height + ay], [-ax, box.height + ay]].map(([u, v]) => {
+    let dx = u - c.x, dy = v - c.y;
+    if (skew) { dx += tx*dy; dy += ty*dx; }
+    return [dx, dy];
+  });
+}
+/**
+ * 3D turn as a plane projective map about the pivot. A pivot-relative point (u,v,0) turns about the vertical axis by
+ * tilt.y (positive: the right side goes away), then about the horizontal axis by tilt.x (positive: the top goes away):
+ * X = u·cos y, Y = v·cos x + u·sin y·sin x, Z = u·sin y·cos x − v·sin x. It is then projected as (X,Y)/(1 + k·Z) with
+ * k = perspective/(200·R), R the farthest skewed corner from the pivot, so |k·Z| ≤ perspective/200 and the far edge
+ * shrinks while the near edge grows (at most 1/1.5 and 1/0.5 at 100%). Without perspective a 180° turn is an exact flip.
+ * Returns the linear part [a,b,c,d] (x' = a·u + b·v, y' = c·u + d·v before projection) and the projection row [g,h].
+ */
+function tiltMap(instance, box, c) {
+  const t = instanceTilt(instance);
+  if (!t) return null;
+  const [cy, sy] = turned(t.y), [cx, sx] = turned(t.x);
+  const reach = Math.max(...skewedCorners(instance, box, c).map(([x, y]) => Math.hypot(x, y)));
+  const k = reach > 0 ? Math.max(0, Math.min(100, t.perspective)) / (200 * reach) : 0;
+  return { m: [cy, 0, sy*sx, cx], g: [k*sy*cx, -k*sx] };
+}
+/** Forward 3D turn of a pivot-relative point. */
+function tiltForward({ m: [a, b, c, d], g: [g, h] }, x, y) {
+  const w = 1 + g*x + h*y;
+  return [(a*x + b*y) / w, (c*x + d*y) / w];
+}
+/** Inverse 3D turn of a pivot-relative point, or null where nothing of the turned plane shows (edge-on, behind). */
+function tiltInverse({ m: [a, b, c, d], g: [g, h] }, x, y) {
+  const det = a*d - b*c;
+  if (Math.abs(det) < EPSILON) return null;
+  const u = (d*x - b*y) / det, v = (-c*x + a*y) / det, w = 1 - g*u - h*v;
+  return w > EPSILON ? [u / w, v / w] : null;
+}
+/** Box coordinate that no part pixel lies at: where the inverse 3D turn finds nothing. */
+const NOWHERE = -1e6;
+/** Continuous point (px,py) relative to the instance origin, mapped back through rotation, 3D turn, skew and deform to box space. */
 function boxPoint(instance, box, px, py) {
-  const angle = instanceAngle(instance), skew = instance.skew;
+  const angle = instanceAngle(instance), skew = instance.skew, tilt = instanceTilt(instance);
   let x = px, y = py;
-  if (angle || skew) {
+  if (angle || skew || tilt) {
     const c = pivotPoint(instance, box);
     x -= c.x; y -= c.y;
     if (angle) { const [cos, sin] = turned(angle); [x, y] = [x*cos + y*sin, -x*sin + y*cos]; }
+    if (tilt) {
+      const back = tiltInverse(tiltMap(instance, box, c), x, y);
+      if (!back) return [NOWHERE, NOWHERE];
+      [x, y] = back;
+    }
     if (skew) { y -= slope(skew.y) * x; x -= slope(skew.x) * y; }
     x += c.x; y += c.y;
   }
   return instance.deform ? undeform(instance.deform, box, x, y) : [x, y];
 }
 /**
- * Canvas pixel rectangle covered by an instance. Rotation and skew are affine about the pivot, so the transformed
- * corners bound them; a wave widens the box by its amplitude first, bulge and twist stay inside it.
+ * Canvas pixel rectangle covered by an instance. Skew and rotation are affine and the 3D turn is projective (it keeps
+ * straight lines and, in front of the eye, convexity), so the transformed corners bound them; a wave widens the box by
+ * its amplitude first, bulge and twist stay inside it.
  */
 export function instanceBox(instance, part) {
-  const { width, height } = transformedSize(instance, part), angle = instanceAngle(instance), skew = instance.skew, d = instance.deform;
-  const ax = d?.kind === 'wave' && d.axis === 'x' ? d.amplitude : 0, ay = d?.kind === 'wave' && d.axis === 'y' ? d.amplitude : 0;
-  if (!angle && !skew && !ax && !ay) return { x: instance.x, y: instance.y, width, height };
-  const [cos, sin] = turned(angle), c = pivotPoint(instance, { width, height }), ox = instance.x + c.x, oy = instance.y + c.y;
-  const tx = slope(skew?.x), ty = slope(skew?.y), xs = [], ys = [];
-  for (const [u, v] of [[-ax, -ay], [width + ax, -ay], [width + ax, height + ay], [-ax, height + ay]]) {
-    let dx = u - c.x, dy = v - c.y;
-    if (skew) { dx += tx*dy; dy += ty*dx; }
+  const box = transformedSize(instance, part), { width, height } = box, angle = instanceAngle(instance), skew = instance.skew, d = instance.deform;
+  const wave = d?.kind === 'wave', tilt = instanceTilt(instance);
+  if (!angle && !skew && !wave && !tilt) return { x: instance.x, y: instance.y, width, height };
+  const [cos, sin] = turned(angle), c = pivotPoint(instance, box), ox = instance.x + c.x, oy = instance.y + c.y;
+  const map = tilt && tiltMap(instance, box, c), xs = [], ys = [];
+  for (let [dx, dy] of skewedCorners(instance, box, c)) {
+    if (map) [dx, dy] = tiltForward(map, dx, dy);
     xs.push(ox + dx*cos - dy*sin); ys.push(oy + dx*sin + dy*cos);
   }
   const left = Math.floor(Math.min(...xs) + EPSILON), top = Math.floor(Math.min(...ys) + EPSILON);
@@ -210,7 +262,7 @@ export function instanceBox(instance, part) {
 
 /**
  * Map a canvas pixel into a placed part's untransformed pixel coordinates. Forward order is resize → flip/turn →
- * deform → skew → rotate about the pivot; this inverse-maps the pixel centre back in reverse (nearest neighbour), so
+ * deform → skew → 3D turn (tilt) → rotate about the pivot; this inverse-maps the pixel centre back in reverse (nearest neighbour), so
  * each canvas pixel shows exactly one part pixel and the part itself never changes. Without deform every step is affine
  * or monotonic, so a pixel past one edge of the box lands past the matching edge of the part (in-place editing grows
  * parts that way).
@@ -218,7 +270,7 @@ export function instanceBox(instance, part) {
 export function canvasToPartPoint(instance, part, point) {
   const size = instanceSize(instance, part), box = transformedSize(instance, part);
   let x = point.x - instance.x, y = point.y - instance.y;
-  if (instance.angle || instance.skew || instance.deform) {
+  if (instance.angle || instance.skew || instance.deform || instanceTilt(instance)) {
     const [u, v] = boxPoint(instance, box, x + .5, y + .5);
     x = Math.floor(u + EPSILON); y = Math.floor(v + EPSILON);
   }
@@ -226,9 +278,9 @@ export function canvasToPartPoint(instance, part, point) {
   return { x: sampleIndex(local.x, size.width, part.width), y: sampleIndex(local.y, size.height, part.height) };
 }
 
-/** Whether RotSprite sampling changes this instance's output: only free (non-quarter) angles, skew and deform resample. */
+/** Whether RotSprite sampling changes this instance's output: only free (non-quarter) angles, skew, 3D turns and deform resample. */
 export function smoothSampling(instance) {
-  return instance.sampling === 'rotsprite' && Boolean((instance.angle && instance.angle % 90) || instance.skew || instance.deform);
+  return instance.sampling === 'rotsprite' && Boolean((instance.angle && instance.angle % 90) || instance.skew || instance.deform || instanceTilt(instance));
 }
 /**
  * Palette index (-1 transparent) a placed instance shows at canvas pixel `point`; `part` is a rendered part with pixels.
@@ -260,21 +312,24 @@ export function grownInstanceShift(transform, before, after, left, top) {
   return {x:a.x-b.x,y:a.y-b.y};
 }
 
-/** Skew then rotate a pivot-relative vector as rendering does (`inverse` undoes it). */
-function poseVector(instance, v, inverse = false) {
-  const [cos, sin] = turned(instanceAngle(instance)), skew = instance.skew;
+/** Skew, 3D turn, then rotate a pivot-relative point as rendering does (`inverse` undoes it). */
+function poseVector(instance, part, v, inverse = false) {
+  const [cos, sin] = turned(instanceAngle(instance)), skew = instance.skew, box = transformedSize(instance, part);
+  const map = instanceTilt(instance) && tiltMap(instance, box, pivotPoint(instance, box));
   let { x, y } = v;
   if (inverse) {
     [x, y] = [x * cos + y * sin, -x * sin + y * cos];
+    if (map) [x, y] = tiltInverse(map, x, y) || [x, y];
     if (skew) { y -= slope(skew.y) * x; x -= slope(skew.x) * y; }
     return { x, y };
   }
   if (skew) { x += slope(skew.x) * y; y += slope(skew.y) * x; }
+  if (map) [x, y] = tiltForward(map, x, y);
   return { x: x * cos - y * sin, y: x * sin + y * cos };
 }
-/** Box-relative pivot pixel under canvas point `at`, for the instance as it is shown (rotation and skew undone). */
+/** Box-relative pivot pixel under canvas point `at`, for the instance as it is shown (rotation, 3D turn and skew undone). */
 export function pivotUnder(instance, part, at) {
-  const c = instancePivot(instance, part), local = poseVector(instance, { x: at.x - c.x, y: at.y - c.y }, true);
+  const c = instancePivot(instance, part), local = poseVector(instance, part, { x: at.x - c.x, y: at.y - c.y }, true);
   const clamp = v => Math.max(-128, Math.min(256, Math.floor(v)));
   return { x: clamp(c.x - instance.x + local.x), y: clamp(c.y - instance.y + local.y) };
 }
@@ -285,8 +340,8 @@ export function pivotUnder(instance, part, at) {
 export function withPivot(instance, part, pivot) {
   const next = { ...instance };
   if (pivot) next.pivot = { x: pivot.x, y: pivot.y }; else delete next.pivot;
-  if (!instance.angle && !instance.skew) return next;
-  const a = instancePivot(instance, part), b = instancePivot(next, part), delta = { x: b.x - a.x, y: b.y - a.y }, moved = poseVector(instance, delta);
+  if (!instance.angle && !instance.skew && !instanceTilt(instance)) return next;
+  const a = instancePivot(instance, part), b = instancePivot(next, part), delta = { x: b.x - a.x, y: b.y - a.y }, moved = poseVector(instance, part, delta);
   next.x += Math.round(moved.x - delta.x); next.y += Math.round(moved.y - delta.y);
   return next;
 }

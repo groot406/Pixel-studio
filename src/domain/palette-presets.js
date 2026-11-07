@@ -1,0 +1,43 @@
+// Curated library of well-known pixel-art palettes, as published on lospec.com/palette-list (exact hex values).
+// tags: 'retro' (hardware), 'gameboy' (4-colour handheld greens and friends), 'general' (artist palettes).
+
+const P = (id, name, author, tags, colours) => Object.freeze({ id, name, author, tags: Object.freeze(tags), colours: Object.freeze(colours.split(' ').map(c => `#${c}`)) });
+
+export const PALETTE_PRESETS = Object.freeze([
+  P('pico-8', 'PICO-8', 'Lexaloffle', ['retro', 'general'], '000000 1d2b53 7e2553 008751 ab5236 5f574f c2c3c7 fff1e8 ff004d ffa300 ffec27 00e436 29adff 83769c ff77a8 ffccaa'),
+  P('sweetie-16', 'Sweetie 16', 'GrafxKid', ['general'], '1a1c2c 5d275d b13e53 ef7d57 ffcd75 a7f070 38b764 257179 29366f 3b5dc9 41a6f6 73eff7 f4f4f4 94b0c2 566c86 333c57'),
+  P('dawnbringer-16', 'DawnBringer 16', 'DawnBringer', ['general'], '140c1c 442434 30346d 4e4a4e 854c30 346524 d04648 757161 597dce d27d2c 8595a1 6daa2c d2aa99 6dc2ca dad45e deeed6'),
+  P('dawnbringer-32', 'DawnBringer 32', 'DawnBringer', ['general'], '000000 222034 45283c 663931 8f563b df7126 d9a066 eec39a fbf236 99e550 6abe30 37946e 4b692f 524b24 323c39 3f3f74 306082 5b6ee1 639bff 5fcde4 cbdbfc ffffff 9badb7 847e87 696a6a 595652 76428a ac3232 d95763 d77bba 8f974a 8a6f30'),
+  P('endesga-16', 'Endesga 16', 'ENDESGA', ['general'], 'e4a672 b86f50 743f39 3f2832 9e2835 e53b44 fb922b ffe762 63c64d 327345 193d3f 4f6781 afbfd2 ffffff 2ce8f4 0484d1'),
+  P('endesga-32', 'Endesga 32', 'ENDESGA', ['general'], 'be4a2f d77643 ead4aa e4a672 b86f50 733e39 3e2731 a22633 e43b44 f77622 feae34 fee761 63c74d 3e8948 265c42 193c3e 124e89 0099db 2ce8f5 ffffff c0cbdc 8b9bb4 5a6988 3a4466 262b44 181425 ff0044 68386c b55088 f6757a e8b796 c28569'),
+  P('resurrect-64', 'Resurrect 64', 'Kerrie Lake', ['general'], '2e222f 3e3546 625565 966c6c ab947a 694f62 7f708a 9babb2 c7dcd0 ffffff 6e2727 b33831 ea4f36 f57d4a ae2334 e83b3b fb6b1d f79617 f9c22b 7a3045 9e4539 cd683d e6904e fbb954 4c3e24 676633 a2a947 d5e04b fbff86 165a4c 239063 1ebc73 91db69 cddf6c 313638 374e4a 547e64 92a984 b2ba90 0b5e65 0b8a8f 0eaf9b 30e1b9 8ff8e2 323353 484a77 4d65b4 4d9be6 8fd3ff 45293f 6b3e75 905ea9 a884f3 eaaded 753c54 a24b6f cf657f ed8099 831c5d c32454 f04f78 f68181 fca790 fdcbb0'),
+  P('aap-64', 'AAP-64', 'Adigun A. Polack', ['general'], '060608 141013 3b1725 73172d b4202a df3e23 fa6a0a f9a31b ffd541 fffc40 d6f264 9cdb43 59c135 14a02e 1a7a3e 24523b 122020 143464 285cc4 249fde 20d6c7 a6fcdb ffffff fef3c0 fad6b8 f5a097 e86a73 bc4a9b 793a80 403353 242234 221c1a 322b28 71413b bb7547 dba463 f4d29c dae0ea b3b9d1 8b93af 6d758d 4a5462 333941 422433 5b3138 8e5252 ba756a e9b5a3 e3e6ff b9bffb 849be4 588dbe 477d85 23674e 328464 5daf8d 92dcba cdf7e2 e4d2aa c7b08b a08662 796755 5a4e44 423934'),
+  P('apollo', 'Apollo', 'AdamCYounis', ['general'], '172038 253a5e 3c5e8b 4f8fba 73bed3 a4dddb 19332d 25562e 468232 75a743 a8ca58 d0da91 4d2b32 7a4841 ad7757 c09473 d7b594 e7d5b3 341c27 602c2c 884b2b be772b de9e41 e8c170 241527 411d31 752438 a53030 cf573c da863e 1e1d39 402751 7a367b a23e8c c65197 df84a5 090a14 10141f 151d28 202e37 394a50 577277 819796 a8b5b2 c7cfcc ebede9'),
+  P('pear36', 'Pear36', 'PineappleOnPizza', ['general'], '5e315b 8c3f5d ba6156 f2a65e ffe478 cfff70 8fde5d 3ca370 3d6e70 323e4f 322947 473b78 4b5bab 4da6ff 66ffe3 ffffeb c2c2d1 7e7e8f 606070 43434f 272736 3e2347 57294b 964253 e36956 ffb570 ff9166 eb564b b0305c 73275c 422445 5a265e 80366b bd4882 ff6b97 ffb5b5'),
+  P('cc-29', 'CC-29', 'Alpha6', ['general'], 'f2f0e5 b8b5b9 868188 646365 45444f 3a3858 212123 352b42 43436a 4b80ca 68c2d3 a2dcc7 ede19e d3a068 b45252 6a536e 4b4158 80493a a77b5b e5ceb4 c2d368 8ab060 567b79 4e584a 7b7243 b2b47e edc8c4 cf8acb 5f556a'),
+  P('vinik24', 'Vinik24', 'Vinik', ['general'], '000000 6f6776 9a9a97 c5ccb8 8b5580 c38890 a593a5 666092 9a4f50 c28d75 7ca1c0 416aa3 8d6268 be955c 68aca9 387080 6e6962 93a167 6eaa78 557064 9d9f7f 7e9e99 5d6872 433455'),
+  P('bubblegum-16', 'Bubblegum 16', 'PineappleOnPizza', ['general'], '16171a 7f0622 d62411 ff8426 ffd100 fafdff ff80a4 ff2674 94216a 430067 234975 68aed4 bfff3c 10d275 007899 002859'),
+  P('lost-century', 'Lost Century', 'SurrealEmber', ['general'], 'd1b187 c77b58 ae5d40 79444a 4b3d44 ba9158 927441 4d4539 77743b b3a555 d2c9a5 8caba1 4b726e 574852 847875 ab9b8e'),
+  P('na16', 'NA16', 'Nauris', ['general'], '8c8fae 584563 3e2137 9a6348 d79b7d f5edba c0c741 647d34 e4943a 9d303b d26471 70377f 7ec4c1 34859d 17434b 1f0e1c'),
+  P('steam-lords', 'Steam Lords', 'Slynyrd', ['general'], '213b25 3a604a 4f7754 a19f7c 77744f 775c4f 603b3a 3b2137 170e19 2f213b 433a60 4f5277 65738c 7c94a1 a0b9ba c0d1cc'),
+  P('slso8', 'SLSO8', 'Luis Miguel Maldonado', ['general'], '0d2b45 203c56 544e68 8d697a d08159 ffaa5e ffd4a3 ffecd6'),
+  P('pollen8', 'Pollen8', 'Conker', ['general'], '73464c ab5675 ee6a7c ffa7a5 ffe07e ffe7d6 72dcbb 34acba'),
+  P('nyx8', 'Nyx8', '', ['general'], '08141e 0f2a3f 20394f f6d6bd c3a38a 997577 816271 4e495f'),
+  P('rust-gold-8', 'Rust Gold 8', 'Trigo Mathmancer', ['general'], 'f6cd26 ac6b26 563226 331c17 bb7f57 725956 393939 202020'),
+  P('oil-6', 'Oil 6', 'GrafxKid', ['general'], 'fbf5ef f2d3ab c69fa5 8b6d9c 494d7e 272744'),
+  P('twilight-5', 'Twilight 5', 'Star', ['general'], 'fbbbad ee8695 4a7a96 333f58 292831'),
+  P('gameboy-bgb', 'Game Boy (BGB)', 'Nintendo · BGB emulator', ['retro', 'gameboy'], '081820 346856 88c070 e0f8d0'),
+  P('kirokaze-gameboy', 'Kirokaze Gameboy', 'Kirokaze', ['gameboy'], '332c50 46878f 94e344 e2f3e4'),
+  P('ice-cream-gb', 'Ice Cream GB', 'Kerrie Lake', ['gameboy'], '7c3f58 eb6b6f f9a875 fff6d3'),
+  P('mist-gb', 'Mist GB', 'Kerrie Lake', ['gameboy'], '2d1b00 1e606e 5ab9a8 c4f0c2'),
+  P('lava-gb', 'Lava-GB', 'Aero', ['gameboy'], '051f39 4a2480 c53a9d ff8e80'),
+  P('2bit-demichrome', '2bit Demichrome', 'Space Sandwich', ['gameboy'], '211e20 555568 a0a08b e9efec'),
+  P('hollow', 'Hollow', 'Poltergasm', ['general'], '0f0f1b 565a75 c6b7be fafbf6'),
+  P('ayy4', 'AYY4', 'Polyducks', ['general'], '00303b ff7777 ffce96 f1f2da'),
+  P('cga-16', 'CGA (16 colours)', 'IBM', ['retro'], '000000 0000aa 00aa00 00aaaa aa0000 aa00aa aa5500 aaaaaa 555555 5555ff 55ff55 55ffff ff5555 ff55ff ffff55 ffffff'),
+  P('cga-1-high', 'CGA palette 1 (high)', 'IBM', ['retro'], '000000 ff55ff 55ffff ffffff'),
+  P('commodore-64', 'Commodore 64', 'Commodore', ['retro'], '000000 626262 898989 adadad ffffff 9f4e44 cb7e75 6d5412 a1683c c9d487 9ae29b 5cab5e 6abfc6 887ecb 50459b a057a3'),
+  P('zx-spectrum', 'ZX Spectrum', 'Sinclair', ['retro'], '000000 0000d8 0000ff d80000 ff0000 d800d8 ff00ff 00d800 00ff00 00d8d8 00ffff d8d800 ffff00 d8d8d8 ffffff'),
+  P('1bit-monitor-glow', '1-bit Monitor Glow', 'Polyducks', ['retro'], '222323 f0f6f0'),
+  P('1bit', '1-bit black & white', '', ['retro'], '000000 ffffff'),
+]);

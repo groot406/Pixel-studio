@@ -31,7 +31,7 @@ const part = p => p.parts.find(x => x.id === 'art');
 test('poseOf/applyPose convert between instances and flat poses, omitting defaults', () => {
   const p = scene(1, () => []), art = part(p);
   const inst = use({ x: 1, y: 2, angle: 30, skew: { x: 5, y: 0 }, deform: { kind: 'wave', axis: 'x', amplitude: 2, wavelength: 8, phase: 350 } });
-  assert.deepEqual(poseOf(inst, art), { x: 1, y: 2, width: 6, height: 4, angle: 30, skewX: 5, skewY: 0, phase: 350 });
+  assert.deepEqual(poseOf(inst, art), { x: 1, y: 2, width: 6, height: 4, angle: 30, skewX: 5, skewY: 0, tiltX: 0, tiltY: 0, phase: 350 });
   const back = applyPose(inst, { width: 6, height: 4, angle: 0, skewX: 0, skewY: 0, phase: 370 }, art);
   assert.deepEqual(back, { type: 'use', id: 'o', partId: 'art', transform: 'N', x: 1, y: 2, deform: { ...inst.deform, phase: 10 } });
   assert.deepEqual(applyPose(use({ x: 0, y: 0, deform: { kind: 'twist', angle: 40 } }), { twist: 0, width: 8, height: 3 }, art), use({ x: 0, y: 0, width: 8, height: 3 }));

@@ -86,13 +86,19 @@ export function ease(easing, t) { return easingFn(easing)(clamp(Number.isFinite(
 
 // ---- Tweening -----------------------------------------------------------------------------------------------
 
-/** Flat, numeric pose fields; skewX/skewY map to the instance's `skew`, phase/bulge/twist to its `deform`. */
-export const POSE_FIELDS = Object.freeze(['x', 'y', 'width', 'height', 'angle', 'skewX', 'skewY', 'phase', 'bulge', 'twist']);
-const CYCLIC = { angle: normalizeAngle, phase: v => ((v % 360) + 360) % 360 };
+/**
+ * Flat, numeric pose fields; skewX/skewY map to the instance's `skew`, tiltX/tiltY to its 3D turn `tilt`,
+ * phase/bulge/twist to its `deform`.
+ */
+export const POSE_FIELDS = Object.freeze(['x', 'y', 'width', 'height', 'angle', 'skewX', 'skewY', 'tiltX', 'tiltY', 'phase', 'bulge', 'twist']);
+const CYCLIC = { angle: normalizeAngle, tiltX: normalizeAngle, tiltY: normalizeAngle, phase: v => ((v % 360) + 360) % 360 };
+/** Cyclic fields that tween the way they are written (0 → 360 is a full 3D spin) rather than the shortest way round. */
+const UNWRAPPED = new Set(['tiltX', 'tiltY']);
 
 /**
  * Interpolate the numeric pose fields present in `from` or `to` (a field missing on one side holds the other's value).
- * Angles and wave phase take the shortest way round; results are integers, width/height ≥ 1. Other fields are copied from `from`.
+ * Angles and wave phase take the shortest way round; 3D turns (tiltX/tiltY) go linearly from a to b, so tiltY 0 → 360
+ * spins once, and are then wrapped to -179..180. Results are integers, width/height ≥ 1. Other fields are copied from `from`.
  */
 export function tweenPose(from, to, t, easing = 'linear') {
   const e = ease(easing, t), out = { ...from };
@@ -100,7 +106,7 @@ export function tweenPose(from, to, t, easing = 'linear') {
     const a = from[key] ?? to[key], b = to[key] ?? from[key];
     if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
     const wrap = CYCLIC[key];
-    let v = roundInt(wrap ? a + angleDelta(a, b) * e : lerp(a, b, e));
+    let v = roundInt(wrap && !UNWRAPPED.has(key) ? a + angleDelta(a, b) * e : lerp(a, b, e));
     if (wrap) v = wrap(v);
     if (key === 'width' || key === 'height') v = Math.max(1, v);
     out[key] = v;
@@ -110,11 +116,11 @@ export function tweenPose(from, to, t, easing = 'linear') {
 
 /**
  * Canonical flat pose of a placed instance (`use` op): position, displayed size in part orientation (defaults from
- * `part`), angle, skewX/skewY, and the wave phase / bulge strength / twist angle of its deform when it has one.
+ * `part`), angle, skewX/skewY, tiltX/tiltY (3D turn), and the wave phase / bulge strength / twist angle of its deform when it has one.
  */
 export function poseOf(instance, part) {
   const { width, height } = instanceSize(instance, part), d = instance.deform;
-  const pose = { x: instance.x, y: instance.y, width, height, angle: instance.angle || 0, skewX: instance.skew?.x || 0, skewY: instance.skew?.y || 0 };
+  const pose = { x: instance.x, y: instance.y, width, height, angle: instance.angle || 0, skewX: instance.skew?.x || 0, skewY: instance.skew?.y || 0, tiltX: instance.tilt?.x || 0, tiltY: instance.tilt?.y || 0 };
   if (d?.kind === 'wave') pose.phase = d.phase || 0;
   if (d?.kind === 'bulge') pose.bulge = d.strength;
   if (d?.kind === 'twist') pose.twist = d.angle;
@@ -123,8 +129,9 @@ export function poseOf(instance, part) {
 
 /**
  * Copy of `instance` with the flat `pose` written back in the stored form: part-sized width/height, zero angle and zero
- * skew are omitted; phase/bulge/twist only change a deform of that kind (bulge/twist 0 removes it). Values are clamped
- * to the stored ranges (angle -179..180, skew ±60, bulge ±100, twist ±360).
+ * skew are omitted; a zero 3D turn removes `tilt` (otherwise its perspective is kept); phase/bulge/twist only change a
+ * deform of that kind (bulge/twist 0 removes it). Values are clamped or wrapped to the stored ranges (angle and tilt
+ * -179..180, skew ±60, bulge ±100, twist ±360).
  */
 export function applyPose(instance, pose, part) {
   const op = { ...instance }, int = (v, lo, hi) => clamp(roundInt(v), lo, hi);
@@ -136,6 +143,11 @@ export function applyPose(instance, pose, part) {
   if (Number.isFinite(pose.skewX) || Number.isFinite(pose.skewY)) {
     const x = int(pose.skewX ?? op.skew?.x ?? 0, -60, 60), y = int(pose.skewY ?? op.skew?.y ?? 0, -60, 60);
     if (x || y) op.skew = { x, y }; else delete op.skew;
+  }
+  if (Number.isFinite(pose.tiltX) || Number.isFinite(pose.tiltY)) {
+    const turn = v => { const a = roundInt(normalizeAngle(roundInt(v))); return a === -180 ? 180 : a; };
+    const x = turn(pose.tiltX ?? op.tilt?.x ?? 0), y = turn(pose.tiltY ?? op.tilt?.y ?? 0);
+    if (x || y) op.tilt = { ...op.tilt, x, y }; else delete op.tilt;
   }
   const d = op.deform;
   if (d?.kind === 'wave' && Number.isFinite(pose.phase)) op.deform = { ...d, phase: CYCLIC.phase(roundInt(pose.phase)) };

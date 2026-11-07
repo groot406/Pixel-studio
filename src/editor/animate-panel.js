@@ -1,8 +1,9 @@
 /**
  * Animate panel: launchers for Skeleton mode (rig-mode.js), the canvas motion modes (motion-modes.js: move, bounce,
- * follow-through, IK limb, smear) and the Wave motion dialog, which previews its result live and applies as one undo step.
+ * follow-through, IK limb, smear) and the Wave motion and 3D spin dialogs, which preview their result live and apply as one
+ * undo step.
  */
-import { waveAnimate } from '../domain/animate.js';
+import { waveAnimate, spin3d } from '../domain/animate.js';
 import { compositeFrame } from '../domain/project.js';
 import { celObjects } from '../domain/objects.js';
 import { openMode, closeMotionMode, activeMotionMode } from './motion-modes.js';
@@ -16,6 +17,7 @@ export function initAnimatePanel(deps) {
   d = deps;
   for (const [row, mode] of Object.entries(MODES)) d.$(`animate-${row}`).onclick = () => { closeRigMode({ render: false }); if (activeMotionMode() === mode) closeMotionMode(); else openMode(mode); };
   d.$('animate-wave').onclick = () => { closeRigMode({ render: false }); closeMotionMode(); waveDialog(); };
+  d.$('animate-spin3d').onclick = () => { closeRigMode({ render: false }); closeMotionMode(); spinDialog(); };
   d.$('animate-skeleton').onclick = () => toggleRigMode();
 }
 
@@ -37,12 +39,13 @@ export function renderAnimatePanel() {
     : !objects.length ? 'Place a part on the canvas (drag one from Parts) to animate it.'
     : rigModeOpen() ? 'Skeleton mode: work on the canvas; Done or Enter returns here.'
     : primary ? `Animate “${primary.name}”: pick a motion, then work on the canvas.` : 'Pick a motion, then click the object on the canvas.';
-  for (const row of ['skeleton', ...Object.keys(MODES), 'wave']) {
+  for (const row of ['skeleton', ...Object.keys(MODES), 'wave', 'spin3d']) {
     const button = $(`animate-${row}`), on = row === 'skeleton' ? rigModeOpen() : MODES[row] && active === MODES[row];
-    button.disabled = Boolean(state.inPlaceEdit) || (!objects.length && !(row === 'skeleton' && state.project.bones?.length)) || (row === 'wave' && !primary);
+    const needsPrimary = row === 'wave' || row === 'spin3d';
+    button.disabled = Boolean(state.inPlaceEdit) || (!objects.length && !(row === 'skeleton' && state.project.bones?.length)) || (needsPrimary && !primary);
     button.classList.toggle('active', Boolean(on));
     button.setAttribute('aria-pressed', String(Boolean(on)));
-    button.title = row === 'wave' && !primary && objects.length ? 'Select an object first' : '';
+    button.title = needsPrimary && !primary && objects.length ? 'Select an object first' : '';
   }
 }
 
@@ -110,6 +113,39 @@ function waveDialog() {
   playPreview(d.$('wave-preview'));
 }
 const readWave = () => ({ axis: d.$('wave-axis').value, amplitude: Math.max(1, Number(d.$('wave-amplitude').value) || 1), wavelength: Math.max(2, Number(d.$('wave-length').value) || 2) });
+
+// ---------------------------------------------------------------------------------------------
+// 3D spin
+
+function spinDialog() {
+  const { animation, frame, primary } = context();
+  if (!primary) return;
+  const options = () => {
+    const { $ } = d;
+    return { animationId: animation.id, layerId: primary.layerId, instanceId: primary.key, fromFrameId: frame.id, frames: Number($('spin-frames').value), axis: $('spin-axis').value, turns: Number($('spin-direction').value) };
+  };
+  mathsDialog({
+    title: '3D spin', icon: 'spin3d', submit: 'Add frames',
+    intro: `Turn “${d.escapeHTML(primary.name)}” once all the way round in new frames after this one: a spinning coin, a character turning round, a card flipping over. It loops seamlessly; the back shows the artwork mirrored.`,
+    body: `<canvas id="spin-preview" class="wave-preview" role="img" aria-label="Live preview of the spin"></canvas>
+      <div class="form-grid"><label class="field"><span class="field-label">Axis</span><select id="spin-axis"><option value="y">Turn ↔ (Y axis)</option><option value="x">Tip ↕ (X axis)</option></select></label>
+      <label class="field"><span class="field-label">Direction</span><select id="spin-direction"><option value="1">Forward</option><option value="-1">Backward</option></select></label></div>
+      ${slider('spin-frames', 'Frames per turn', 4, 32, 1, 8, v => `${v}`)}
+      <p id="spin-info" class="maths-info" aria-live="polite"></p>`,
+    update() {
+      const { state } = d, o = options();
+      try { state.previewOverride = spin3d(state.project, o).project; }
+      catch { state.previewOverride = null; }
+      d.$('spin-info').textContent = `Adds ${plural(o.frames - 1, 'frame')} after this one, ${Math.round(360 / o.frames)}° apart. Change the depth effect with Transform → Object pose → Perspective.`;
+    },
+    run() {
+      const { state } = d, result = spin3d(state.project, options());
+      state.project = result.project;
+      return `3D spin over ${plural(result.frameIds.length, 'frame')} · loops seamlessly.`;
+    }
+  });
+  playPreview(d.$('spin-preview'));
+}
 
 /** Play state.previewOverride in a dialog canvas (and the Live Preview) until the dialog closes. */
 function playPreview(canvas) {

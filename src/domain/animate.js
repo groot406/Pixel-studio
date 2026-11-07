@@ -361,6 +361,27 @@ export function waveAnimate(project, { animationId, layerId, instanceId, speed =
   return { project: validateProject(p), frameIds: list.map(a => a.frame.id), seamless: (list.length * speed) % 360 === 0, loopFrames };
 }
 
+/**
+ * A looping 3D spin from a single frame: the from-frame is the first of `frames` (2..64) and `frames − 1` copies follow
+ * it. Frame k turns the object by turns·360·k/frames about `axis` ('y': turn like a coin or door, 'x': tip head over
+ * heels), added to its 3D turn in the from-frame, so the frame after the last would be the first again: a seamless loop.
+ * `turns` is a whole number of spins (negative spins the other way). Returns { project, frameIds (the loop), inserted }.
+ */
+export function spin3d(project, { animationId, layerId, instanceId, fromFrameId, frames = 8, axis = 'y', turns = 1 }) {
+  if (!Number.isInteger(frames) || frames < 2 || frames > 64) throw new Error('A 3D spin takes 2 to 64 frames.');
+  if (!['x', 'y'].includes(axis)) throw new Error('Spin about the x or y axis.');
+  if (!Number.isInteger(turns) || !turns || Math.abs(turns) > 8) throw new Error('Spin 1 to 8 whole turns.');
+  const p = validateProject(project), animation = animationOf(p, animationId);
+  editableLayer(p, layerId);
+  const i = animation.frames.findIndex(f => f.id === fromFrameId), base = i < 0 ? null : opIn(animation.frames[i], layerId, instanceId);
+  if (!base) throw new Error('The object must appear in this frame.');
+  unlockedOp(base);
+  const part = partOf(p, base), start = poseOf(base, part), field = axis === 'x' ? 'tiltX' : 'tiltY';
+  const list = [animation.frames[i], ...insertCopies(p, animation, i, animation.frames[i], frames - 1)];
+  list.forEach((frame, k) => { if (k) writeCarried(p, frame, layerId, applyPose(opIn(frame, layerId, instanceId), { [field]: start[field] + turns * 360 * k / frames }, part)); });
+  return { project: validateProject(p), frameIds: list.map(f => f.id), inserted: list.slice(1).map(f => f.id) };
+}
+
 function centroid(pixels, width) {
   let x = 0, y = 0, n = 0;
   pixels.forEach((v, i) => { if (v >= 0) { x += i % width; y += Math.floor(i / width); n++; } });

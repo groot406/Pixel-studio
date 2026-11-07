@@ -96,14 +96,16 @@ export function flattenCel(project,target) {
 /**
  * Free angles and skew act about the pivot. A set pivot follows its artwork pixel (it moves by −shift inside the box),
  * so nothing moves. The default pivot is the box centre, which moves when the box grows by d = shift + (new − old size)/2;
- * moving the origin by shift − (I − L)·d, with L = rotation·skew, keeps the old pixels in place (rounded to the pixel).
+ * moving the origin by shift − (I − L)·d, with L = rotation·3D turn·skew, keeps the old pixels in place (rounded to the pixel).
  */
 function keepTurnedPivot(op,shift,before,after) {
   if(op.pivot) { op.pivot={x:Math.max(-128,Math.min(256,op.pivot.x-shift.x)),y:Math.max(-128,Math.min(256,op.pivot.y-shift.y))}; return; }
-  if(!op.angle && !op.skew)return;
-  const r=(op.angle || 0)*Math.PI/180, cos=Math.cos(r), sin=Math.sin(r), tan=deg=>Math.tan((deg || 0)*Math.PI/180);
+  if(!op.angle && !op.skew && !op.tilt)return;
+  const r=(op.angle || 0)*Math.PI/180, cos=Math.cos(r), sin=Math.sin(r), tan=deg=>Math.tan((deg || 0)*Math.PI/180), rad=deg=>(deg || 0)*Math.PI/180;
   const dx=shift.x+(after.width-before.width)/2, dy=shift.y+(after.height-before.height)/2;
-  const sx=dx+tan(op.skew?.x)*dy, sy=dy+tan(op.skew?.y)*sx;
+  let sx=dx+tan(op.skew?.x)*dy, sy=dy+tan(op.skew?.y)*sx;
+  // The 3D turn's linear part (perspective is ignored here: it shifts the art by less than a pixel for small growth).
+  if(op.tilt)[sx,sy]=[Math.cos(rad(op.tilt.y))*sx,Math.sin(rad(op.tilt.y))*Math.sin(rad(op.tilt.x))*sx+Math.cos(rad(op.tilt.x))*sy];
   shift.x=Math.round(shift.x-(dx-(sx*cos-sy*sin)));
   shift.y=Math.round(shift.y-(dy-(sx*sin+sy*cos)));
 }

@@ -18,14 +18,15 @@ Object transforms (combine freely; they never change the part itself, so edits t
 - Flip/quarter turn: transform N (default) FX FY R90 R180 R270 R90FX R270FX. FX mirrors left-right, FY top-bottom, R90/R180/R270 turn clockwise, R90FX = turn 90° clockwise then mirror. Lossless; applied inside the part bounds, then the transformed top-left sits at x y.
 - Resize, squash and stretch: RESIZE instance-id width height (1–128 each) draws the part at that size by nearest-neighbour sampling, measured before the flip/turn. Unequal scaling squashes or stretches (a 16×16 part at RESIZE id 20 12 is squashed). RESIZE to the part's own size resets it.
 - Free rotation: ROTATE instance-id degrees (whole degrees, -360..360, stored as -179..180; positive = clockwise; 0 resets) turns the resized, flipped result about its pivot (default: the box centre) by nearest-neighbour sampling. Use TURN for exact 90°/180°/270° turns.
-- Pivot: PIVOT instance-id x y (integers -128..256) sets the point that ROTATE and SKEW turn about: the centre of pixel x y of the flipped/turned, unrotated box, measured from its top-left (the USE x y). PIVOT instance-id CENTER resets to the exact box centre. Example: PIVOT arm 0 3 swings an 8×6 arm about its left edge.
+- Pivot: PIVOT instance-id x y (integers -128..256) sets the point that ROTATE, SKEW and TILT turn about: the centre of pixel x y of the flipped/turned, unrotated box, measured from its top-left (the USE x y). PIVOT instance-id CENTER resets to the exact box centre. Example: PIVOT arm 0 3 swings an 8×6 arm about its left edge.
 - Skew (shear): SKEW instance-id sx sy (whole degrees, -60..60 each; SKEW id 0 0 resets) slants about the pivot: first x moves by tan(sx)·(y − pivot y), then y moves by tan(sy)·(x − pivot x). SKEW id -15 0 leans the top to the right (positive leans it left); good for running lean, wind and fake perspective.
+- 3D turn (pseudo-3D rotation about the other axes): TILT instance-id x y [PERSPECTIVE p] (whole degrees, -180..180 each; TILT id 0 0 resets). y turns the object about a vertical axis through the pivot like a door, coin or a character turning round: its width shrinks by cos(y), at 90 it is edge-on (invisible) and past 90 the back shows (the artwork mirrored); positive y moves the right side away. x tips it about a horizontal axis (head over heels, a card flipping vertically): height shrinks by cos(x), positive x moves the top away. PERSPECTIVE p (0..100, default 30) makes the far edge shorter and the near edge taller; 0 is flat. TILT id 0 180 is a horizontal mirror and TILT id 180 0 a vertical one. A coin spin: TILT coin 0 45, then 0 90, 0 135, ... in successive frames.
 - Deform: DEFORM instance-id NONE | WAVE X|Y amplitude wavelength phase | BULGE strength | TWIST degrees, in box space about the box centre. WAVE X shifts each row y sideways by round(amplitude·sin(360°·y/wavelength + phase)); WAVE Y shifts each column vertically the same way (amplitude 1..32, wavelength 2..256, phase 0..359 degrees; the box grows by the amplitude). BULGE strength (-100..100; positive bulges/magnifies the centre, negative pinches) and TWIST degrees (-360..360; full turn at the centre fading to none at the edge) act inside the ellipse that fits the box. NONE, BULGE 0 and TWIST 0 reset. Animate a flag or water by stepping the WAVE phase each frame: FRAME wave_1 100 FROM wave_0, CEL fx, DEFORM flag WAVE X 2 8 45, then phase 90, 135, ...
-- Sampling: SAMPLE instance-id NEAREST|ROTSPRITE. NEAREST (default) picks one part pixel per canvas pixel. ROTSPRITE smooths free angles, skew and deforms like the RotSprite algorithm (Scale2x three times to 8×, then sampling); it uses only existing palette colours and is identical to NEAREST for unrotated or quarter-turned objects.
-- Order: resize, then flip/quarter turn, then deform, then skew, then free rotation about the pivot. x y is the top-left of the unrotated box; with no PIVOT, rotation keeps that box's centre.
-To place a transformed object, write its USE line, then RESIZE/ROTATE/PIVOT/SKEW/DEFORM/SAMPLE lines for the same instance-id in that cel.
-Changing an existing object in a later cel (for example after FRAME FROM): AT instance-id x y sets its absolute position. TURN instance-id transform changes its flip/quarter turn. RESIZE, ROTATE, PIVOT, SKEW, DEFORM and SAMPLE as above. SWAP instance-id part-id changes its part (keeping position and transforms). DROP instance-id removes it. These keep draw order and do not paint trails.
-Placement may be off canvas within -128..128 and is clipped; transparent part pixels leave underlying artwork visible. Animate objects by changing AT, TURN, RESIZE (squash and stretch: keep width×height roughly constant), ROTATE about a PIVOT (joints such as shoulders and hips), SKEW and DEFORM (for example the WAVE phase) across frames, keeping the same instance-id.
+- Sampling: SAMPLE instance-id NEAREST|ROTSPRITE. NEAREST (default) picks one part pixel per canvas pixel. ROTSPRITE smooths free angles, skew, 3D turns and deforms like the RotSprite algorithm (Scale2x three times to 8×, then sampling); it uses only existing palette colours and is identical to NEAREST for unrotated or quarter-turned objects.
+- Order: resize, then flip/quarter turn, then deform, then skew, then 3D turn (TILT), then free rotation about the pivot. x y is the top-left of the unrotated box; with no PIVOT, rotation keeps that box's centre.
+To place a transformed object, write its USE line, then RESIZE/ROTATE/PIVOT/SKEW/TILT/DEFORM/SAMPLE lines for the same instance-id in that cel.
+Changing an existing object in a later cel (for example after FRAME FROM): AT instance-id x y sets its absolute position. TURN instance-id transform changes its flip/quarter turn. RESIZE, ROTATE, PIVOT, SKEW, TILT, DEFORM and SAMPLE as above. SWAP instance-id part-id changes its part (keeping position and transforms). DROP instance-id removes it. These keep draw order and do not paint trails.
+Placement may be off canvas within -128..128 and is clipped; transparent part pixels leave underlying artwork visible. Animate objects by changing AT, TURN, RESIZE (squash and stretch: keep width×height roughly constant), ROTATE about a PIVOT (joints such as shoulders and hips), SKEW, TILT (spins and turns) and DEFORM (for example the WAVE phase) across frames, keeping the same instance-id.
 OVERRIDE x y pixels writes final local pixels after all cel operations. Dot explicitly erases the cel pixel; omitted coordinates remain unchanged. Overrides stay in canvas coordinates when instances move.`;
 
 export const PXA2_GUIDE = `PXA 2: uppercase commands, one per line; blank lines and full-line # comments allowed. No Markdown. Finish with END.
@@ -133,11 +134,13 @@ function deformToken([kind, ...args]) {
   return kind === 'BULGE' ? { kind: 'bulge', strength: numberToken(args[0]) } : { kind: 'twist', angle: numberToken(args[0]) };
 }
 const deformText = d => !d ? 'NONE' : d.kind === 'wave' ? `WAVE ${d.axis.toUpperCase()} ${d.amplitude} ${d.wavelength} ${d.phase}` : d.kind === 'bulge' ? `BULGE ${d.strength}` : `TWIST ${d.angle}`;
-/** PIVOT/SKEW/DEFORM/SAMPLE lines that move instance `b`'s effects (absent when omitted) to those of `a`. */
+const tiltText = t => !t ? '0 0' : `${t.x} ${t.y}${t.perspective !== undefined ? ` PERSPECTIVE ${t.perspective}` : ''}`;
+/** PIVOT/SKEW/TILT/DEFORM/SAMPLE lines that move instance `b`'s effects (absent when omitted) to those of `a`. */
 function effectLines(a, b = {}) {
   const q = JSON.stringify, lines = [];
   if (q(a.pivot) !== q(b.pivot)) lines.push(`PIVOT ${a.id} ${a.pivot ? `${a.pivot.x} ${a.pivot.y}` : 'CENTER'}`);
   if (q(a.skew) !== q(b.skew)) lines.push(`SKEW ${a.id} ${a.skew?.x || 0} ${a.skew?.y || 0}`);
+  if (q(a.tilt) !== q(b.tilt)) lines.push(`TILT ${a.id} ${tiltText(a.tilt)}`);
   if (q(a.deform) !== q(b.deform)) lines.push(`DEFORM ${a.id} ${deformText(a.deform)}`);
   if (a.sampling !== b.sampling) lines.push(`SAMPLE ${a.id} ${(a.sampling || 'nearest').toUpperCase()}`);
   return lines;
@@ -162,14 +165,20 @@ export function applyCelCommand(source, tokens) {
     op.name=quoted(tokens[2]); op.visible=tokens[3]==='1'; op.locked=tokens[4]==='1';
     return;
   }
-  if (!['AT', 'TURN', 'SWAP', 'DROP', 'RESIZE', 'ROTATE', 'PIVOT', 'SKEW', 'DEFORM', 'SAMPLE'].includes(command)) throw new Error(`Unknown command ${command}.`);
+  if (!['AT', 'TURN', 'SWAP', 'DROP', 'RESIZE', 'ROTATE', 'PIVOT', 'SKEW', 'TILT', 'DEFORM', 'SAMPLE'].includes(command)) throw new Error(`Unknown command ${command}.`);
   if (command === 'PIVOT') { if (tokens.length !== 3 || tokens[2] !== 'CENTER') argumentsCount(tokens, 3); }
   else if (command === 'DEFORM') { const count = { NONE: 0, WAVE: 4, BULGE: 1, TWIST: 1 }[tokens[2]]; if (count === undefined || tokens.length !== 3 + count) throw new Error('DEFORM expects NONE, WAVE X|Y amplitude wavelength phase, BULGE strength or TWIST degrees.'); }
+  else if (command === 'TILT') { if (tokens.length !== 6 || tokens[4] !== 'PERSPECTIVE') argumentsCount(tokens, 3); }
   else argumentsCount(tokens, ['AT', 'RESIZE', 'SKEW'].includes(command) ? 3 : command === 'DROP' ? 1 : 2);
   const op = source.ops.find(op => op.type === 'use' && op.id === id);
   if (!op) throw new Error(`Unknown instance ${id}.`);
   if (command === 'PIVOT') { if (tokens[2] === 'CENTER') delete op.pivot; else op.pivot = { x: numberToken(tokens[2]), y: numberToken(tokens[3]) }; }
   if (command === 'SKEW') op.skew = { x: numberToken(tokens[2]), y: numberToken(tokens[3]) };
+  if (command === 'TILT') {
+    const tilt = { x: numberToken(tokens[2]), y: numberToken(tokens[3]) };
+    if (tokens[4] === 'PERSPECTIVE') tilt.perspective = numberToken(tokens[5]);
+    if (tilt.x || tilt.y) op.tilt = tilt; else delete op.tilt;
+  }
   if (command === 'DEFORM') { op.deform = deformToken(tokens.slice(2)); if (!op.deform) delete op.deform; }
   if (command === 'SAMPLE') {
     if (!['NEAREST', 'ROTSPRITE'].includes(tokens[2])) throw new Error('SAMPLE expects NEAREST or ROTSPRITE.');

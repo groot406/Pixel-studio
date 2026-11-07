@@ -121,8 +121,8 @@ export function placeObject(project,target,key,anchorKey,position,scope='animati
   return validateProject(p);
 }
 
-/** Optional per-instance effects; `null` in a change resets one to its default (centre pivot, no skew/deform, nearest). */
-export const EFFECT_KEYS=['pivot','skew','deform','sampling'];
+/** Optional per-instance effects; `null` in a change resets one to its default (centre pivot, no skew/3D turn/deform, nearest). */
+export const EFFECT_KEYS=['pivot','skew','tilt','deform','sampling'];
 function applyEffects(op,changes) {
   for(const key of EFFECT_KEYS) if(key in changes) { if(changes[key]===null || changes[key]===undefined) delete op[key]; else op[key]=cloneArtwork(changes[key]); }
 }
@@ -150,7 +150,7 @@ export function resizeObject(project,target,key,box,scope='animation') {
   const {p,layer,frame,frames}=context(project,target,scope);
   const here=frame.cels.find(c=>c.layerId===layer.id).source?.ops.find(op=>op.type==='use' && op.id===key);
   if(!here) throw new Error('Choose an object in this frame.');
-  if(here.angle) throw new Error('Reset the rotation before resizing with handles.');
+  if(here.angle || here.tilt) throw new Error('Reset the rotation and 3D turn before resizing with handles.');
   const part=p.parts.find(part=>part.id===here.partId), rotated=swapsAxes(here.transform);
   const size={width:rotated?box.height:box.width,height:rotated?box.width:box.height};
   const dx=box.x-here.x, dy=box.y-here.y;
@@ -244,13 +244,21 @@ export function turnObjects(project,target,items,turn,scope='animation') {
     const before=transformedSize(op,part), transform=composeTransform(op.transform,turn);
     if(swapsAxes(transform)!==swapsAxes(op.transform)){op.x+=Math.trunc((before.width-before.height)/2);op.y+=Math.trunc((before.height-before.width)/2);}
     // The pivot follows its artwork pixel; flips mirror skew and twist, and quarter turns swap the skew axes.
+    // A flip negates the 3D turn about the mirrored axis' partner (FX: y, FY: x); quarter turns swap the axes.
     if(op.pivot){const p=transformPoint(turn,before.width,before.height,op.pivot.x,op.pivot.y);op.pivot={x:Math.max(-128,Math.min(256,p.x)),y:Math.max(-128,Math.min(256,p.y))};}
     op.transform=transform;
     if(turn==='FX' || turn==='FY') {
       if(op.angle)op.angle=-op.angle;
       if(op.skew)op.skew={x:-op.skew.x,y:-op.skew.y};
       if(op.deform?.kind==='twist')op.deform={...op.deform,angle:-op.deform.angle};
-    } else if(op.skew && turn!=='R180')op.skew={x:-op.skew.y,y:-op.skew.x};
+      if(op.tilt)op.tilt=turn==='FX'?{...op.tilt,y:flipTilt(op.tilt.y)}:{...op.tilt,x:flipTilt(op.tilt.x)};
+    } else {
+      if(op.skew && turn!=='R180')op.skew={x:-op.skew.y,y:-op.skew.x};
+      if(op.tilt) {
+        const {x,y}=op.tilt;
+        op.tilt={...op.tilt,...(turn==='R90'?{x:flipTilt(y),y:x}:turn==='R270'?{x:y,y:flipTilt(x)}:{x:flipTilt(x),y:flipTilt(y)})};
+      }
+    }
   });
 }
 
@@ -269,6 +277,22 @@ export function rotateObjects(project,target,items,delta,scope='animation') {
   return eachSelectedInstance(project,target,items,scope,op=>{
     const angle=((((op.angle || 0)+delta)%360)+540)%360-180;
     if(angle)op.angle=angle===-180?180:angle;else delete op.angle;
+  });
+}
+
+/** Negated 3D turn angle in -179..180 (−180 and 180 are the same turn). */
+const flipTilt=v=>v===180 || v===-180?180:(-v || 0);
+/** Wrap degrees into -179..180. */
+const wrapTilt=v=>((((v%360)+540)%360)-180) || 0;
+/**
+ * Add whole degrees of 3D turn (`{x, y}`: tip about the horizontal axis, turn about the vertical axis) to each selected
+ * object in every frame of the scope; each keeps its perspective. Both angles back at 0 removes the turn.
+ */
+export function tiltObjects(project,target,items,delta,scope='animation') {
+  if(!Number.isInteger(delta?.x ?? 0) || !Number.isInteger(delta?.y ?? 0))throw new Error('3D turns use whole degrees.');
+  return eachSelectedInstance(project,target,items,scope,op=>{
+    const x=wrapTilt((op.tilt?.x || 0)+(delta.x || 0)), y=wrapTilt((op.tilt?.y || 0)+(delta.y || 0)), x1=x===-180?180:x, y1=y===-180?180:y;
+    if(x1 || y1)op.tilt={...op.tilt,x:x1,y:y1};else delete op.tilt;
   });
 }
 

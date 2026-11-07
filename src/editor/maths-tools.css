@@ -52,6 +52,10 @@
 .pose-params:empty { display: none; }
 .pose-params select { min-height: 28px; padding: 3px 5px; border: 1px solid #d8e1d0; border-radius: 5px; background: #fffefb; color: #37503c; font: inherit; font-size: 11px; }
 .object-pose .pose-check { margin-top: 2px; font-size: 11px; color: #52664d; }
+.pose-row.pose-wide { grid-template-columns: 66px minmax(0, 1fr) auto; }
+/* On-canvas 3D turn handle, beside the round rotate handle (Transform tool). */
+.resize-handle.tilt-handle { left: calc(50% + 24px); top: calc(100% + 22px); width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 3px; transform: rotate(45deg); background: #fff; border-color: #2d7dff; cursor: move; }
+.resize-handles.is-rotated .resize-handle.tilt-handle { display: block; }
 
 /* Animate / Effects panels reuse .object-action rows. */
 .animate-section .object-action-list, .effects-section .object-action-list { margin-top: 2px; }

@@ -33,7 +33,7 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const frameNo = id => animation().frames.findIndex(f => f.id === id) + 1;
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-const sig = op => JSON.stringify([op.x, op.y, op.width, op.height, op.angle || 0, op.skew || 0, op.deform || 0, op.transform || 'N']);
+const sig = op => JSON.stringify([op.x, op.y, op.width, op.height, op.angle || 0, op.skew || 0, op.tilt || 0, op.deform || 0, op.transform || 'N']);
 const quote = item => `“${d.escapeHTML(item.name)}”`;
 /** Whether the object's pose changes over the animation's frames. */
 const moves = item => new Set(animation().frames.map(f => opIn(f, item)).filter(Boolean).map(sig)).size > 1;

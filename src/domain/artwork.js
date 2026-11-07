@@ -1,6 +1,6 @@
 /** Retained pixel artwork. Source is authoritative; pixels are derived editing buffers. */
 import { MAX_SIZE, MAX_TOTAL_PIXELS } from './limits.js';
-import { linePoints, rectanglePoints, ellipsePoints, instancePixel, instanceBox, smoothSampling, TRANSFORM_NAMES, SAMPLING_MODES } from './geometry.js';
+import { linePoints, rectanglePoints, ellipsePoints, instancePixel, instanceBox, smoothSampling, TRANSFORM_NAMES, SAMPLING_MODES, DEFAULT_PERSPECTIVE } from './geometry.js';
 import { ROTSPRITE_SCALE } from './rotsprite.js';
 
 export const MAX_PARTS = 256;
@@ -26,7 +26,7 @@ function spend(budget, work = 0) {
 }
 
 const absent = value => value === undefined || value === null;
-/** Normalised optional pivot/skew/deform/sampling of a `use` op; defaults (centre, no skew, no deform, nearest) are omitted. */
+/** Normalised optional pivot/skew/tilt/deform/sampling of a `use` op; defaults (centre, no skew, no 3D turn, no deform, nearest, 30% perspective) are omitted. */
 export function instanceEffects(op) {
   const out = {};
   if (!absent(op.pivot)) {
@@ -37,6 +37,12 @@ export function instanceEffects(op) {
     if (!object(op.skew)) throw new Error('Instance skew needs x and y.');
     const x = integer(op.skew.x, -60, 60, 'Skew x'), y = integer(op.skew.y, -60, 60, 'Skew y');
     if (x || y) out.skew = { x, y };
+  }
+  if (!absent(op.tilt)) {
+    if (!object(op.tilt)) throw new Error('Instance 3D turn needs x and y.');
+    const x = integer(op.tilt.x ?? 0, -180, 180, '3D turn x'), y = integer(op.tilt.y ?? 0, -180, 180, '3D turn y');
+    const perspective = integer(op.tilt.perspective ?? DEFAULT_PERSPECTIVE, 0, 100, 'Perspective');
+    if (x || y) out.tilt = perspective === DEFAULT_PERSPECTIVE ? { x, y } : { x, y, perspective };
   }
   if (!absent(op.deform)) {
     const d = op.deform;

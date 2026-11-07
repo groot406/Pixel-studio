@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { decodeAIProject } from '../src/formats/pxa.js';
 import { validateProject, compositeFrame, blankProject } from '../src/domain/project.js';
 import { celObjects } from '../src/domain/objects.js';
+import { copyObject, pasteObject } from '../src/domain/object-clipboard.js';
 import { createObjectFromPixels, splitIntoObjects, partIdFromName } from '../src/domain/object-create.js';
 import { connectedRegion, findIslands, shadeIndex, pixelPerfectStep, ditherCell } from '../src/domain/toolbox.js';
 import { sparklePxa } from './fixtures/pxa-v2.mjs';
@@ -96,4 +97,17 @@ test('masked selections move only their own pixels', async () => {
   assert.deepEqual(r.mask, [1, 4]);
   assert.deepEqual(maskBounds([1, 4], 3), { x: 1, y: 0, width: 1, height: 2 });
   assert.equal(moveMaskedPixels(px, 3, 3, [0, 3], 5, 0).dx, 2, 'moves clamp at the canvas edge');
+});
+
+test('pasting into every frame fills frames where the copied object was absent; duplicate does not', () => {
+  const { p, target } = scene(3);
+  const made = createObjectFromPixels(p, target, { rect: { x: 0, y: 0, width: 8, height: 8 }, name: 'Box', scope: 'frame' });
+  const t = { ...target, layerId: made.layerId }, frames = made.project.animations[0].frames;
+  const uses = (r, f) => r.project.animations[0].frames[f].cels.find(c => c.layerId === r.layerId).source?.ops.filter(o => o.type === 'use' && o.id === r.key).length || 0;
+  const pasted = pasteObject(made.project, { ...t, frameId: frames[1].id }, copyObject(made.project, t, made.key), { scope: 'animation' });
+  assert.deepEqual([0, 1, 2].map(f => uses(pasted, f)), [1, 1, 1]);
+  const duplicate = pasteObject(made.project, t, copyObject(made.project, t, made.key), { scope: 'animation', offset: 2, fill: false });
+  assert.deepEqual([0, 1, 2].map(f => uses(duplicate, f)), [1, 0, 0]);
+  const group = pasteObject(made.project, { ...t, frameId: frames[2].id }, copyObject(made.project, t, '@group'), { scope: 'animation' });
+  for (const f of group.project.animations[0].frames) assert.ok(f.cels.find(c => c.layerId === group.layerId).pixels.some(v => v >= 0));
 });

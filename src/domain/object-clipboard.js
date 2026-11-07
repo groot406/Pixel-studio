@@ -96,8 +96,10 @@ function addContainer(p, afterId, name, group) {
  * Paste a copied object into the target frame, or every frame of its animation.
  * Instances go into the selected group when it is an unlocked group, otherwise into a new object above the selection.
  * Identical part definitions are reused so the paste stays a shared instance; `independent` always copies the definition.
+ * With `fill`, frames where the object was absent or empty get the copied frame's version, so it appears in every frame;
+ * without it (Duplicate), only frames that had the object get a copy.
  */
-export function pasteObject(project, target, clipboard, { scope = 'animation', independent = false, offset = 0 } = {}) {
+export function pasteObject(project, target, clipboard, { scope = 'animation', independent = false, offset = 0, fill = true } = {}) {
   const clip = readClipboard(clipboard);
   if (!['frame', 'animation'].includes(scope)) throw new Error('Choose current frame or current animation.');
   const p = validateProject(project), { animation, frame } = locate(p, target);
@@ -129,7 +131,7 @@ export function pasteObject(project, target, clipboard, { scope = 'animation', i
     const celOf = f => f.cels.find(c => c.layerId === layer.id);
     const poses = new Map();
     for (const f of frames) {
-      const pose = perFrame ? clip.frames[f.id] : clip.instance;
+      const pose = perFrame ? clip.frames[f.id] || (fill ? clip.instance : null) : clip.instance;
       if (!pose) continue;
       let x = pose.x + offset, y = pose.y + offset;
       const bounds = objectBounds(p, { type: 'instance', instance: { partId: part.id, transform: pose.transform, x, y } });
@@ -147,7 +149,9 @@ export function pasteObject(project, target, clipboard, { scope = 'animation', i
   }
   const layer = addContainer(p, host ? host.id : p.layers.at(-1).id, clip.name, Boolean(clip.group));
   for (const f of frames) {
-    const cel = f.cels.find(c => c.layerId === layer.id), data = perFrame ? clip.frames[f.id] : clip;
+    const own = perFrame ? clip.frames[f.id] : clip;
+    const data = own && (!fill || own === clip || own.pixels.some(v => v >= 0)) ? own : fill ? clip : null;
+    const cel = f.cels.find(c => c.layerId === layer.id);
     if (!data) continue;
     if (keepsSource && data.source) {
       p.version = 3; p.parts ||= [];

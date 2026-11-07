@@ -720,12 +720,12 @@ function copyObjectItem(item,cut=false) {
   } catch(error){toast(error.message);}
 }
 /** Paste the object clipboard next to the selection, in the current animation (or frame) of any project tab. */
-function pasteObjectItem({independent=false,target=objectTarget(selectedObject().layerId),clip=state.objectClipboard,offset=0,scope=state.objectScope,message}={}) {
+function pasteObjectItem({independent=false,target=objectTarget(selectedObject().layerId),clip=state.objectClipboard,offset=0,scope=state.objectScope,fill=true,message}={}) {
   finishDrawing();
   if(!clip){toast('Copy an object first.');return;}
   try {
     mutate(()=>{
-      const result=pasteObject(state.project,target,clip,{scope,independent,offset});
+      const result=pasteObject(state.project,target,clip,{scope,independent,offset,fill});
       state.project=result.project;
       if(target.animationId===currentAnimation().id){state.layerId=result.layerId;state.objectSelection={layerId:result.layerId,key:result.key};if(clip.kind==='instance')state.tool='object';}
     });
@@ -736,7 +736,7 @@ function duplicateObjectItem(item) {
   finishDrawing();
   try {
     const clip=copyObject(state.project,objectTarget(item.layerId),item.key);
-    pasteObjectItem({clip,target:objectTarget(item.layerId),offset:clip.kind==='instance'?2:0,message:`“${clip.name}” duplicated.`});
+    pasteObjectItem({clip,target:objectTarget(item.layerId),offset:clip.kind==='instance'?2:0,fill:false,message:`“${clip.name}” duplicated.`});
   } catch(error){toast(error.message);}
 }
 function copyToAnimationDialog(item) {

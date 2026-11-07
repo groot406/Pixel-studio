@@ -4,7 +4,7 @@ import { decodeAIProject, encodeAIProject } from '../src/formats/pxa.js';
 import { encodePixelProject, decodePixelProject } from '../src/formats/pxs.js';
 import { validateProject, compositeFrame, makeLayeredFrame, blankProject, getAnimationLayers } from '../src/domain/project.js';
 import { copyObject, pasteObject, copyObjects } from '../src/domain/object-clipboard.js';
-import { celObjects, frameObjects, reorderObject, reorderObjectContainer, translateObject, forkObject, updateObject, deleteObject, addObjectContainer, moveObjectToGroup, removeObjectContainer, hitTestObject, objectBounds, placeObject, dropObject, placeObjectContainer, orderObjects, translateObjects, deleteObjects } from '../src/domain/objects.js';
+import { celObjects, frameObjects, reorderObject, reorderObjectContainer, translateObject, forkObject, updateObject, deleteObject, addObjectContainer, moveObjectToGroup, removeObjectContainer, hitTestObject, objectBounds, placeObject, dropObject, placeObjectContainer, orderObjects, translateObjects, deleteObjects, isEmptyNode } from '../src/domain/objects.js';
 import { paintSharedPart, flattenCel } from '../src/domain/parts.js';
 import { createAIRequest, prepareAIResult } from '../src/features/ai/requests.js';
 import { projectFingerprint } from '../src/features/ai/patch-engine.js';
@@ -270,4 +270,17 @@ test('several objects can be ordered, copied, pasted, moved and deleted together
   const deleted=deleteObjects(p,target,[{layerId:'effects',key:'glint'},{layerId:'effects',key:'square'}],'frame');
   assert.ok(!celObjects(deleted.animations[0].frames[0].cels.find(c=>c.layerId==='effects')).some(n=>n.instance));
   assert.ok(celObjects(deleted.animations[0].frames[1].cels.find(c=>c.layerId==='effects')).some(n=>n.key==='glint'));
+});
+
+test('ungrouped containers emptied by delete or move disappear; partly used ones stay',()=>{
+  const p=overlapping(), added=addObjectContainer(p,'effects','Lone',false), at={...target,layerId:added.layerId};
+  const cel=added.project.animations[0].frames[0].cels.find(c=>c.layerId===added.layerId);
+  assert.ok(isEmptyNode(cel,celObjects(cel)[0]));
+  assert.ok(!deleteObject(added.project,at,'pixels-0','frame').layers.some(l=>l.id===added.layerId));
+  const moved=moveObjectToGroup(added.project,target,'square',added.layerId,'animation');
+  const once=deleteObject(moved,at,'square','frame');
+  assert.ok(once.layers.some(l=>l.id===added.layerId));
+  assert.ok(!deleteObject(once,at,'square','animation').layers.some(l=>l.id===added.layerId));
+  const back=moveObjectToGroup(moved,at,'square','effects','animation');
+  assert.ok(!back.layers.some(l=>l.id===added.layerId));
 });

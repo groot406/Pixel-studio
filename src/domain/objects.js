@@ -331,7 +331,20 @@ export function deleteObject(project,target,key,scope='animation') {
     else if (cel.source) cel.source.ops.splice(node.start,node.end-node.start);
     else cel.pixels.fill(-1);
   }
-  return validateProject(p);
+  return pruneEmptyContainer(validateProject(p),layer.id);
+}
+
+/** Remove an ungrouped container once it holds nothing in any frame (the last container always stays). */
+export function pruneEmptyContainer(p,layerId) {
+  const layer=p.layers.find(l=>l.id===layerId);
+  if(!layer || layer.group!==false || layer.locked || p.layers.length<2 || !emptyContainer(p,layerId))return p;
+  return removeObjectContainer(p,layerId);
+}
+
+/** True when a pixels node holds nothing to show: a placeholder or an all-transparent raster cel. */
+export function isEmptyNode(cel,node) {
+  if(node.type!=='pixels')return false;
+  return cel.source?node.end<=node.start:cel.pixels.every(v=>v<0);
 }
 
 export function addObjectContainer(project,afterId,name,group=false) {
@@ -356,7 +369,7 @@ export function moveObjectToGroup(project,target,key,destinationId,scope='animat
     if(dest.source.ops.some(item=>item.type==='use' && item.id===op.id)) throw new Error('The destination already contains an object with this ID. Rename the instance in the file or choose another group.');
     source.source.ops.splice(index,1); dest.source.ops.push(op);
   }
-  return validateProject(p);
+  return pruneEmptyContainer(validateProject(p),layer.id);
 }
 
 export function removeObjectContainer(project,layerId) {
@@ -417,7 +430,7 @@ export function dropObject(project,target,source,anchor,position,scope='animatio
     p=moveObjectToGroup(added.project,at(source.layerId),source.key,added.layerId,scope);layerId=added.layerId;
     if(side==='below')p=placeObjectContainer(p,at(layerId),anchor.layerId,'below',scope);
   }
-  if(layerId!==source.layerId && sourceLayer.group===false && p.layers.length>1 && emptyContainer(p,source.layerId))p=removeObjectContainer(p,source.layerId);
+  if(layerId!==source.layerId)p=pruneEmptyContainer(p,source.layerId);
   return {project:p,layerId,key:source.key};
 }
 

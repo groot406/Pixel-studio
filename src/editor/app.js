@@ -1,7 +1,7 @@
 import { createInPlaceEdit, setInPlaceScope, inPlaceRestriction, inPlaceDirty, inPlacePoint, beginInPlaceStroke, moveInPlaceStroke, finishInPlaceStroke, restoreInPlace, previewInPlaceEdit, prepareInPlaceEdit, PART_EDIT_TOOLS, inPlaceCanvasRect, inPlacePlacement, inPlaceMode, beginInPlaceSelection, moveInPlaceSelection, finishInPlaceSelection, selectAllInPlace, deselectInPlace, nudgeInPlaceSelection, clearInPlaceSelection, copyInPlaceSelection, pasteInPlace } from '../features/objects/in-place-edit.js';
 import { mapPaletteColors, copyObject, copyObjects, pasteObject, objectPixelBounds } from '../domain/object-clipboard.js';
 import { commitRasterEdits, writeCelPixels, cloneArtwork } from '../domain/artwork.js';
-import { celObjects, reorderObject, reorderObjectContainer, updateObject, translateObject, forkObject, deleteObject, addObjectContainer, moveObjectToGroup, removeObjectContainer, objectBounds, hitTestObject, dropObject, resizeObject, frameObjects, orderObjects, translateObjects, deleteObjects, turnObjects, rotateObjects, tiltObjects } from '../domain/objects.js';
+import { celObjects, isEmptyNode, reorderObject, reorderObjectContainer, updateObject, translateObject, forkObject, deleteObject, addObjectContainer, moveObjectToGroup, removeObjectContainer, objectBounds, hitTestObject, dropObject, resizeObject, frameObjects, orderObjects, translateObjects, deleteObjects, turnObjects, rotateObjects, tiltObjects } from '../domain/objects.js';
 import { transformedSize } from '../domain/geometry.js';
 import { resizeBox } from '../domain/resize.js';
 import { renderObjectsPanel } from './objects-panel.js';
@@ -1059,6 +1059,7 @@ function objectAction(action,item) {
   if(action==='split'){splitObjectsDialog(item);return;}
   const target=objectTarget(item.layerId), layer=state.project.layers.find(l=>l.id===item.layerId);
   const node=celObjects(currentFrame().cels.find(c=>c.layerId===item.layerId)).find(n=>n.key===item.key);
+  const wasEmpty=Boolean(node && isEmptyNode(currentFrame().cels.find(c=>c.layerId===item.layerId),node));
   try {
     if(action==='collapse'){if(state.objectSelection?.layerId===layer.id)state.objectSelection={layerId:layer.id,key:'@group'};state.collapsedGroups.has(layer.id)?state.collapsedGroups.delete(layer.id):state.collapsedGroups.add(layer.id);renderLayers();return;}
     if(action==='edit'){editSharedObject(item);return;}
@@ -1075,7 +1076,11 @@ function objectAction(action,item) {
         if(item.group || (layer.group===false && children.length===1))state.project=reorderObjectContainer(state.project,target,direction,state.objectScope);
         else state.project=reorderObject(state.project,target,item.key,direction,state.objectScope);
       } else if(action==='ungroup')layer.group=false;
-      else if(action==='delete')state.project=item.group?removeObjectContainer(state.project,layer.id):deleteObject(state.project,target,item.key,state.objectScope);
+      else if(action==='delete') {
+        state.project=item.group?removeObjectContainer(state.project,layer.id):deleteObject(state.project,target,item.key,state.objectScope);
+        if(!item.group && wasEmpty && state.project.layers.some(l=>l.id===layer.id))
+          throw new Error(state.project.layers.length<2?'This is the last object row; draw on it, or add another object first.':'Nothing to delete in this frame. Set Edit to “All frames” to remove it from every frame.');
+      }
       else if(action==='independent')state.project=forkObject(state.project,target,item.key,state.objectScope);
     });
   } catch(error) {toast(error.message);}

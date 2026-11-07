@@ -1,4 +1,4 @@
-import { frameObjects } from '../domain/objects.js';
+import { frameObjects, isEmptyNode } from '../domain/objects.js';
 import { renderOperations, renderParts } from '../domain/artwork.js';
 
 const escape=value=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -22,7 +22,13 @@ function uses(project) {
 export function renderObjectsPanel({project,animation,frame,selected,selection=[],scope,collapsed,canPaste,onSelect,onAction,onScope,onDrop,paint}) {
   closeMenu();
   const useCount=uses(project);
-  const list=document.getElementById('object-list'), stacks=frameObjects(project,animation,frame), rows=[];
+  const list=document.getElementById('object-list'), rows=[];
+  // Empty placeholder rows inside groups are noise; a lone empty ungrouped row stays (it is the paint target).
+  const stacks=frameObjects(project,animation,frame).map(stack=>{
+    const cel=frame.cels.find(c=>c.layerId===stack.layer.id);
+    const children=stack.grouped?stack.children.filter(node=>!isEmptyNode(cel,node)):stack.children;
+    return {...stack,children,empty:stack.children.every(node=>isEmptyNode(cel,node))};
+  });
   const images=renderParts(project.parts || []);
   const row=(stack,node,group=false)=>{
     const {layer}=stack, instance=node?.instance, key=group?'@group':node.key;
@@ -31,7 +37,7 @@ export function renderObjectsPanel({project,animation,frame,selected,selection=[
     const locked=group?layer.locked:Boolean(layer.locked || instance?.locked);
     const name=group?layer.name:node.type==='pixels' && stack.children.length===1?layer.name:node.name;
     const count=instance?useCount(instance.partId):0;
-    const kind=group?`Group · ${stack.children.length} item${stack.children.length===1?'':'s'}`:instance?(count>1?`Shared part · ${count} uses`:'Part'):node.type==='overrides'?'Local edits':'Pixels';
+    const kind=group?(stack.children.length?`Group · ${stack.children.length} item${stack.children.length===1?'':'s'}`:'Empty group'):instance?(count>1?`Shared part · ${count} uses`:'Part'):node.type==='overrides'?'Local edits':stack.empty?'Empty · draw here or delete':'Pixels';
     const outer=group || (!stack.grouped && stack.children.length===1);
     const index=rows.length; rows.push({layerId:layer.id,key,node,group,outer,locked});
     return `<div class="object-row${group?' object-group':''}${active?' selected':''}${!visible?' is-hidden':''}${!group && stack.grouped?' object-child':''}" data-object-row="${index}" draggable="${!locked}" title="Drag to reorder or move into a group · Shift/Ctrl-click to select several · right-click for more">

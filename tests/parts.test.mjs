@@ -82,7 +82,8 @@ test('rotated and resized objects are edited as their original artwork and keep 
   const m=await import('../src/features/objects/in-place-edit.js');
   const opOf=project=>project.animations.find(a=>a.id===target.animationId).frames.find(f=>f.id===target.frameId).cels.find(c=>c.layerId===target.layerId).source.ops.find(op=>op.id==='glint');
   for(const pose of [{angle:30},{width:8,height:3},{transform:'R90',angle:-45,width:6,height:4}]) {
-    const p=decodeAIProject(sparklePxa);Object.assign(opOf(p),pose);
+    const raw=decodeAIProject(sparklePxa);Object.assign(opOf(raw),pose);
+    const p=validateProject(raw);
     const placed=opOf(p);
     const session=m.createInPlaceEdit(p,{...target,instanceId:'glint'}), label=JSON.stringify(pose);
     assert.equal(session.instance.angle,undefined,label);
@@ -113,5 +114,39 @@ test('rotated and resized objects are edited as their original artwork and keep 
     assert.deepEqual(m.previewInPlaceEdit(grow,true),compositeFrame(applied,applied.animations[0].frames[0]),label);
     assert.equal(grown.angle,placed.angle,label);
     assert.equal(m.inPlacePlacement(grow).angle,placed.angle || 0,label);
+  }
+});
+
+test('“this frame only” edits a rotated object exactly as drawn and bakes it into this placement',async()=>{
+  const m=await import('../src/features/objects/in-place-edit.js');
+  const opOf=project=>project.animations.find(a=>a.id===target.animationId).frames.find(f=>f.id===target.frameId).cels.find(c=>c.layerId===target.layerId).source.ops.find(op=>op.id==='glint');
+  for(const pose of [{angle:30},{transform:'FX',angle:-60,width:9,height:5}]) {
+    const raw=decodeAIProject(sparklePxa);Object.assign(opOf(raw),pose);
+    const p=validateProject(raw);
+    const label=JSON.stringify(pose), frames=project=>project.animations.flatMap(a=>a.frames.filter(f=>f.id!==target.frameId).map(f=>compositeFrame(project,f)));
+    const frame=p.animations.find(a=>a.id===target.animationId).frames.find(f=>f.id===target.frameId), shown=compositeFrame(p,frame);
+    const session=m.createInPlaceEdit(p,{...target,instanceId:'glint'},'frame');
+    assert.equal(m.inPlaceMode(session),'baked',label);
+    assert.equal(m.inPlacePlacement(session),null,label);
+    assert.deepEqual(m.previewInPlaceEdit(session),shown,label);
+    assert.deepEqual(m.previewInPlaceEdit(session,true),shown,label);
+    // Fix one pixel where the frame shows it.
+    const rect=m.inPlaceCanvasRect(session), first=session.pixels.findIndex(v=>v>=0);
+    const at={x:rect.x+first%session.width,y:rect.y+Math.floor(first/session.width)}, lit=at.y*p.width+at.x;
+    assert.equal(shown[lit],session.pixels[first],label);
+    const color=(session.pixels[first]+1)%p.palette.length;
+    const dot=m.beginInPlaceStroke(session,at,{tool:'pencil',color});
+    m.finishInPlaceStroke(session,dot);
+    const preview=m.previewInPlaceEdit(session), next=m.prepareInPlaceEdit(session);
+    assert.equal(preview[lit],color,label);
+    assert.deepEqual(compositeFrame(next,next.animations.find(a=>a.id===target.animationId).frames.find(f=>f.id===target.frameId)),preview,label);
+    const op=opOf(next);
+    assert.ok(op.angle===undefined && op.width===undefined && op.transform==='N',label);
+    assert.deepEqual(frames(next),frames(p),label);
+    // Switching to the shared original with a dirty draft is refused; a clean draft switches.
+    assert.throws(()=>m.setInPlaceScope(session,'shared'),/Apply or cancel/);
+    m.restoreInPlace(session);
+    m.setInPlaceScope(session,'shared');
+    assert.equal(m.inPlaceMode(session),'original',label);
   }
 });

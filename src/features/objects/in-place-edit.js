@@ -1,7 +1,7 @@
 /** Detached object painting. The editor owns gesture lifecycle and the project commit boundary. */
 import { validateProject, compositeFrame, floodFill, linePoints, rectanglePoints, ellipsePoints, MAX_TOTAL_PIXELS, MAX_SIZE } from '../../domain/project.js';
-import { renderParts, renderSource, MAX_PARTS } from '../../domain/artwork.js';
-import { canvasToPartPoint, partToCanvasOffset, transformedSize } from '../../domain/geometry.js';
+import { renderParts, renderSource, pixelSpans, MAX_PARTS } from '../../domain/artwork.js';
+import { canvasToPartPoint, partToCanvasOffset, transformedSize, instanceBox } from '../../domain/geometry.js';
 import { referencesToPart, forkInstance, paintSharedPart, growPart, grownInstance } from '../../domain/parts.js';
 import { brushPoints, snapLineEnd, replaceColor, copyPixels, pastePixels, shadeIndex, ditherCell } from '../../domain/toolbox.js';
 import { moveSelectedPixels } from '../../domain/selection.js';
@@ -18,13 +18,34 @@ export function createInPlaceEdit(project,target,scope='shared') {
   const images=renderParts(sourceProject.parts), image=images.get(instance.partId);
   let previewId='in_place_preview';
   while(images.has(previewId))previewId+='_';
-  const session={sourceProject,target:{...target},frame,instance:editingPose(instance,image),placed:instance,posed:posed(instance),partId:instance.partId,width:image.width,height:image.height,
-    originalWidth:image.width,originalHeight:image.height,left:0,top:0,selection:null,
-    images,previewId,original:[...image.pixels],pixels:[...image.pixels],references:referencesToPart(sourceProject,instance.partId),
-    scope:'shared',undo:[],redo:[],revision:0,preview:null};
+  const session={sourceProject,target:{...target},frame,placed:instance,posed:posed(instance),partId:instance.partId,
+    images,previewId,references:referencesToPart(sourceProject,instance.partId),scope:null,revision:0,preview:null};
   setInPlaceScope(session,scope);
   return session;
 }
+
+/**
+ * Start a fresh draft. Shared edits of a rotated/resized object work on its original artwork; “this frame only”
+ * works on the pixels exactly as the frame shows them (baked), so sampling glitches can be fixed by hand.
+ */
+function loadDraft(session) {
+  const image=session.images.get(session.partId);
+  session.baked=session.posed && session.scope==='frame';
+  let pose=editingPose(session.placed,image), draft=image;
+  if(session.baked) {
+    const box=instanceBox(session.placed,image), pixels=Array(box.width*box.height).fill(-1);
+    for(let y=0;y<box.height;y++) for(let x=0;x<box.width;x++) {
+      const local=canvasToPartPoint(session.placed,image,{x:box.x+x,y:box.y+y});
+      if(local.x>=0 && local.y>=0 && local.x<image.width && local.y<image.height)pixels[y*box.width+x]=image.pixels[local.y*image.width+local.x];
+    }
+    const {angle,width,height,...rest}=session.placed;
+    pose={...rest,x:box.x,y:box.y,transform:'N'};draft={width:box.width,height:box.height,pixels};
+  }
+  Object.assign(session,{instance:pose,width:draft.width,height:draft.height,originalWidth:draft.width,originalHeight:draft.height,
+    left:0,top:0,selection:null,original:[...draft.pixels],pixels:[...draft.pixels],undo:[],redo:[],preview:null,placedPreview:null});
+}
+/** 'baked' (this frame's transformed pixels), 'original' (unposed original artwork) or 'plain'. */
+export function inPlaceMode(session) { return session.baked?'baked':session.posed?'original':'plain'; }
 
 function posed(instance) { return Boolean(instance.angle) || instance.width!==undefined || instance.height!==undefined; }
 /**
@@ -39,14 +60,18 @@ function editingPose(instance,part) {
 }
 /** How the edited object is placed in this frame (shown as a ghost while its original artwork is edited). */
 export function inPlacePlacement(session) {
-  if(!session.posed)return null;
+  if(!session.posed || session.baked)return null;
   const op=grownInstance(session.placed,{width:session.originalWidth,height:session.originalHeight},session,session.left,session.top), box=transformedSize(op,session);
   return {x:op.x,y:op.y,width:box.width,height:box.height,angle:op.angle || 0,resized:op.width!==undefined || op.height!==undefined};
 }
 
 export function setInPlaceScope(session,scope) {
   if(!['shared','frame'].includes(scope))throw new Error('Choose shared artwork or this frame only.');
-  session.scope=scope; session.revision++;
+  const reload=!session.scope || (session.posed && (scope==='frame')!==(session.scope==='frame'));
+  if(reload && session.scope && inPlaceDirty(session))throw new Error('Apply or cancel your edits before switching: this object is drawn from different pixels in each mode.');
+  session.scope=scope;
+  if(reload)loadDraft(session);
+  session.revision++;
 }
 
 export function inPlaceRestriction(session) {
@@ -54,6 +79,7 @@ export function inPlaceRestriction(session) {
     const locked=session.references.filter(ref=>ref.locked || session.sourceProject.layers.find(l=>l.id===ref.layerId).locked);
     return locked.length?`Shared artwork has ${locked.length} locked instance${locked.length===1?'':'s'}. Unlock them or choose “This frame only”.`:null;
   }
+  if(session.baked && (session.width>MAX_SIZE || session.height>MAX_SIZE))return `This rotated object is too large to edit as drawn (parts are at most ${MAX_SIZE} × ${MAX_SIZE}). Edit the original artwork instead.`;
   if(session.references.length>1) {
     if(session.sourceProject.parts.length>=MAX_PARTS)return 'The part library is full. This frame needs an independent part before it can be edited.';
     const stored=session.sourceProject.parts.reduce((n,p)=>n+p.width*p.height,0)+session.width*session.height;
@@ -249,7 +275,7 @@ export function pasteInPlace(session,clipboard,at=null) {
  * rotated/resized object in its editing pose; `placed` shows it as it will look in the frame.
  */
 export function previewInPlaceEdit(session,placed=false) {
-  const cache=placed && session.posed?'placedPreview':'preview';
+  const cache=placed && session.posed && !session.baked?'placedPreview':'preview';
   if(session[cache]?.revision===session.revision)return session[cache].pixels;
   const images=new Map(session.images), key=session.scope==='shared'?session.partId:session.previewId;
   images.set(key,{width:session.width,height:session.height,pixels:session.pixels});
@@ -271,9 +297,22 @@ export function prepareInPlaceEdit(session) {
   const restriction=inPlaceRestriction(session);
   if(restriction)throw new Error(restriction);
   if(!inPlaceDirty(session))return validateProject(session.sourceProject);
+  if(session.baked)return bakeInPlace(session);
   const growth=inPlaceGrowth(session);
   if(session.scope==='shared' || session.references.length===1)return paintSharedPart(growPart(session.sourceProject,session.partId,growth),session.partId,session.pixels);
   const project=forkInstance(session.sourceProject,session.target,session.target.instanceId);
   const instance=project.animations.find(a=>a.id===session.target.animationId).frames.find(f=>f.id===session.target.frameId).cels.find(c=>c.layerId===session.target.layerId).source.ops.find(op=>op.type==='use' && op.id===session.target.instanceId);
   return paintSharedPart(growPart(project,instance.partId,growth),instance.partId,session.pixels);
+}
+
+/** This placement becomes its own part holding the edited pixels, unrotated at its drawn size. */
+function bakeInPlace(session) {
+  const {target}=session, id=target.instanceId;
+  const project=session.references.length>1?forkInstance(session.sourceProject,target,id):validateProject(session.sourceProject);
+  const op=project.animations.find(a=>a.id===target.animationId).frames.find(f=>f.id===target.frameId).cels.find(c=>c.layerId===target.layerId).source.ops.find(op=>op.type==='use' && op.id===id);
+  const part=project.parts.find(part=>part.id===op.partId), pose=inPlaceInstance(session);
+  Object.assign(part,{width:session.width,height:session.height,ops:pixelSpans(session.pixels,session.width)});
+  delete op.angle;delete op.width;delete op.height;
+  Object.assign(op,{x:pose.x,y:pose.y,transform:'N'});
+  return validateProject(project);
 }

@@ -1,4 +1,4 @@
-import { createInPlaceEdit, setInPlaceScope, inPlaceRestriction, inPlaceDirty, inPlacePoint, beginInPlaceStroke, moveInPlaceStroke, finishInPlaceStroke, restoreInPlace, previewInPlaceEdit, prepareInPlaceEdit, PART_EDIT_TOOLS, inPlaceCanvasRect, inPlacePlacement, beginInPlaceSelection, moveInPlaceSelection, finishInPlaceSelection, selectAllInPlace, deselectInPlace, nudgeInPlaceSelection, clearInPlaceSelection, copyInPlaceSelection, pasteInPlace } from '../features/objects/in-place-edit.js';
+import { createInPlaceEdit, setInPlaceScope, inPlaceRestriction, inPlaceDirty, inPlacePoint, beginInPlaceStroke, moveInPlaceStroke, finishInPlaceStroke, restoreInPlace, previewInPlaceEdit, prepareInPlaceEdit, PART_EDIT_TOOLS, inPlaceCanvasRect, inPlacePlacement, inPlaceMode, beginInPlaceSelection, moveInPlaceSelection, finishInPlaceSelection, selectAllInPlace, deselectInPlace, nudgeInPlaceSelection, clearInPlaceSelection, copyInPlaceSelection, pasteInPlace } from '../features/objects/in-place-edit.js';
 import { mapPaletteColors, copyObject, copyObjects, pasteObject, objectPixelBounds } from '../domain/object-clipboard.js';
 import { commitRasterEdits, writeCelPixels, cloneArtwork } from '../domain/artwork.js';
 import { celObjects, reorderObject, reorderObjectContainer, updateObject, translateObject, forkObject, deleteObject, addObjectContainer, moveObjectToGroup, removeObjectContainer, objectBounds, hitTestObject, dropObject, resizeObject, frameObjects, orderObjects, translateObjects, deleteObjects, turnObjects, rotateObjects } from '../domain/objects.js';
@@ -365,8 +365,8 @@ function renderCanvas() {
     context.fillRect(0,y*state.scale,x*state.scale,(bottom-y)*state.scale);context.fillRect(right*state.scale,y*state.scale,canvasWidth-right*state.scale,(bottom-y)*state.scale);
     context.strokeStyle='#285b47';context.lineWidth=1.5;context.setLineDash([5,3]);
     context.strokeRect(outline.x*state.scale+.75,outline.y*state.scale+.75,outline.width*state.scale-1.5,outline.height*state.scale-1.5);context.setLineDash([]);
-    const placement=inPlacePlacement(session);
-    if(placement)drawOriginalCue(context,outline,placement,canvasWidth);
+    const mode=inPlaceMode(session);
+    if(mode!=='plain')drawOriginalCue(context,outline,inPlacePlacement(session),canvasWidth,mode==='baked'?'THIS FRAME, AS DRAWN':'ORIGINAL ARTWORK');
   }
   if (state.grid && state.scale >= 5) {
     context.beginPath();
@@ -774,14 +774,15 @@ function beginCanvasPartEdit(item,partId) {
   } catch(error) {toast(error.message);}
 }
 /** While a rotated/resized object is edited as its original artwork: ghost of its placed pose plus a tag. */
-function drawOriginalCue(context,outline,placement,canvasWidth) {
+function drawOriginalCue(context,outline,placement,canvasWidth,text) {
   const s=state.scale;
+  if(placement) {
   context.save();
   context.translate((placement.x+placement.width/2)*s,(placement.y+placement.height/2)*s);context.rotate(placement.angle*Math.PI/180);
   context.strokeStyle='#ff2d87b0';context.lineWidth=1.5;context.setLineDash([2,4]);
   context.strokeRect(-placement.width*s/2,-placement.height*s/2,placement.width*s,placement.height*s);
   context.restore();
-  const text='ORIGINAL ARTWORK';
+  }
   context.save();context.font='700 10px system-ui, sans-serif';
   const w=context.measureText(text).width+12, h=17;
   const x=Math.max(2,Math.min(canvasWidth-w-2,outline.x*s)), y=outline.y*s>=h+3?outline.y*s-h-3:Math.max(2,outline.y*s+3);
@@ -803,11 +804,12 @@ function renderInPlaceControls() {
   const {session}=edit,dirty=inPlaceDirty(session),restriction=inPlaceRestriction(session);
   for(const element of edit.disabled.keys())element.disabled=true;
   const animation=currentAnimation(),frameIndex=animation.frames.findIndex(f=>f.id===state.frameId);
-  const placement=inPlacePlacement(session);
-  $('in-place-name').textContent=`${placement?'Editing original artwork of':'Editing'} ${session.partId} · ${animation.name}, frame ${frameIndex+1}`;
+  const placement=inPlacePlacement(session), mode=inPlaceMode(session), pose=placementSummary({...session.placed,...transformedSize(session.placed,session.images.get(session.partId)),angle:session.placed.angle || 0,resized:session.placed.width!==undefined || session.placed.height!==undefined});
+  $('in-place-name').textContent=`${{original:'Editing original artwork of',baked:'Fixing pixels of'}[mode] || 'Editing'} ${session.partId} · ${animation.name}, frame ${frameIndex+1}`;
   const impact=session.scope==='shared'?`Updates all ${session.references.length} instance${session.references.length===1?'':'s'}.`:'Only this placement changes; other frames keep their artwork.';
-  const pose=placement?` Shown unrotated at its own size; in this frame it is ${placementSummary(placement)} (pink outline), which is kept.`:'';
-  const text=`${impact}${pose} ${dirty?'Unsaved draft.':'Draw inside the outline.'}`;
+  const note=mode==='original'?` Shown unrotated at its own size; in this frame it is ${placementSummary(placement)} (pink outline), which is kept. Choose “This frame only” to fix the pixels as drawn.`
+    :mode==='baked'?` You edit the pixels exactly as this frame draws them (${pose}). Applying bakes them into this placement: it becomes its own artwork at 0°, other frames keep theirs.`:'';
+  const text=`${mode==='baked'?'':impact}${note} ${dirty?'Unsaved draft.':'Draw inside the outline.'}`.trim();
   if($('in-place-impact').textContent!==text)$('in-place-impact').textContent=text;
   $('in-place-scope').value=session.scope;
   $('in-place-apply').textContent=session.scope==='shared'?`Apply to ${session.references.length} instance${session.references.length===1?'':'s'}`:'Apply to this frame';
@@ -2262,7 +2264,12 @@ function bindEvents() {
   $('redo').onclick = () => state.inPlaceEdit?restoreCanvasPartEdit(true):restore(state.redo,state.undo);
   $('in-place-cancel').onclick=()=>endCanvasPartEdit(false);
   $('in-place-apply').onclick=()=>endCanvasPartEdit(true);
-  $('in-place-scope').onchange=event=>{if(!state.inPlaceEdit)return;finishDrawing();setInPlaceScope(state.inPlaceEdit.session,event.target.value);state.inPlaceEdit.error=null;renderInPlaceControls();renderCanvas();renderPreview();};
+  $('in-place-scope').onchange=event=>{
+    if(!state.inPlaceEdit)return;finishDrawing();
+    try{setInPlaceScope(state.inPlaceEdit.session,event.target.value);state.inPlaceEdit.error=null;}
+    catch(error){toast(error.message);}
+    renderInPlaceControls();renderCanvas();renderPreview();
+  };
   $('toggle-grid').onclick = () => { state.grid = !state.grid; renderTools(); renderCanvas(); };
   $('toggle-onion').onclick = () => { state.onion = !state.onion; renderTools(); renderCanvas(); };
   $('zoom-in').onclick = () => setZoom(state.scale + 2);

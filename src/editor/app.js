@@ -13,6 +13,7 @@ import { renderObjectsPanel } from './objects-panel.js';
 import { initPanelLayout, LAYOUT_KEY } from './panel-layout.js';
 import { initSpacePan } from './space-pan.js';
 import { initWheelZoom } from './wheel-zoom.js';
+import { toolCursor } from './canvas-cursor.js';
 import { initMobileLayout, MOBILE_QUERY } from './mobile-layout.js';
 import { initWorkspaceViews } from './workspace-views.js';
 import { initTabTools, bindTabs, TAB_SHORTCUTS } from './tab-menu.js';
@@ -763,7 +764,7 @@ function renderTools() {
   $('toggle-onion').title = onionSummary();
   $('undo').disabled = !(state.inPlaceEdit?state.inPlaceEdit.session.undo:state.undo).length;
   $('redo').disabled = !(state.inPlaceEdit?state.inPlaceEdit.session.redo:state.redo).length;
-  $('pixel-canvas').style.cursor = state.tool === 'eyedropper' ? 'copy' : currentLayer().locked || !currentLayer().visible ? 'not-allowed' : state.tool==='select' && (state.inPlaceEdit?state.inPlaceEdit.session.selection:state.selection) ? 'grab' : state.tool==='wand' ? 'cell' : 'crosshair';
+  updateCanvasCursor();
   renderTransformControls();
   renderInPlaceControls();
 }
@@ -1806,11 +1807,36 @@ function pointerDown(event) {
   limitStroke(state.drawing);
   renderCanvas(); renderPreview();
 }
+const cursorKeys = {alt:false,command:false};
+let hoverCell = '', hoverObject = false;
+/**
+ * The canvas cursor shows what a click does: the active tool's icon, the picker while Alt (any tool) or ⌘/Ctrl
+ * (drawing tools) is held, a move cursor over objects with the Object tool. Rig and motion modes set their own.
+ */
+function updateCanvasCursor(event) {
+  const canvas = $('pixel-canvas');
+  if (!canvas || $('workbench')?.classList.contains('motion-active')) return;
+  if (event) { cursorKeys.alt = event.altKey; cursorKeys.command = event.metaKey || event.ctrlKey; }
+  const tool = state.tool, drawingTool = PAINT_TOOLS.includes(tool) || tool === 'gradient', layer = currentLayer();
+  if (event?.type === 'pointermove' && tool === 'object' && !state.drawing && !state.inPlaceEdit) {
+    const cell = state.cursor ? `${state.cursor.x},${state.cursor.y}` : '';
+    if (cell !== hoverCell) { hoverCell = cell; hoverObject = Boolean(state.cursor && hitTestObject(state.project,currentAnimation(),currentFrame(),state.cursor.x,state.cursor.y)); }
+  }
+  const selection = state.inPlaceEdit ? state.inPlaceEdit.session.selection : state.selection;
+  const cursor = !state.drawing && (cursorKeys.alt || (cursorKeys.command && drawingTool)) || tool === 'eyedropper' ? toolCursor('eyedropper', 'copy')
+    : tool === 'object' ? (hoverObject && !state.inPlaceEdit ? 'move' : 'default')
+    : tool === 'resize' ? 'default'
+    : !layer.visible || layer.locked ? 'not-allowed'
+    : tool === 'select' && selection ? 'grab'
+    : toolCursor(tool);
+  if (canvas.style.cursor !== cursor) canvas.style.cursor = cursor;
+}
 function pointerMove(event) {
   state.shiftHeld=event.shiftKey;
   const point = canvasPoint(event, !!state.drawing && !unclampedDrawing(state.drawing));
   state.cursor = inside(point) ? point : null;
   $('cursor-position').textContent = state.cursor ? `X ${String(point.x).padStart(2,'0')}   Y ${String(point.y).padStart(2,'0')}` : 'X —   Y —';
+  updateCanvasCursor(event);
   if (state.tool === 'curve' && !state.drawing && curvePointerMove(event)) return;
   const drawing = state.drawing;
   if (drawing && event.pointerId === drawing.pointerId) {
@@ -2872,6 +2898,8 @@ function bindEvents() {
   new ResizeObserver(fitCanvas).observe($('canvas-stage'));
   initSpacePan($('canvas-stage'));
   initWheelZoom($('canvas-stage'),{getScale:()=>state.scale,setZoom,maxZoom});
+  for (const type of ['keydown','keyup']) window.addEventListener(type, event => { if (['Alt','Meta','Control'].includes(event.key)) updateCanvasCursor(event); }, true);
+  window.addEventListener('blur', () => { cursorKeys.alt = cursorKeys.command = false; updateCanvasCursor(); });
   new ResizeObserver(revealActiveTab).observe($('project-tabs'));
 }
 

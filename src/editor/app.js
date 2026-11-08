@@ -940,6 +940,12 @@ function isTextField(el) {
   if (el.closest('textarea,[contenteditable="true"],[contenteditable=""]')) return true;
   return el.tagName === 'INPUT' && TEXT_INPUTS.has((el.getAttribute('type') || '').toLowerCase());
 }
+/** Fields typed in since they got focus: only those keep ⌘/Ctrl Z for their own text undo. */
+const editedFields = new WeakSet();
+document.addEventListener('focusin', event => editedFields.delete(event.target), true);
+document.addEventListener('input', event => editedFields.add(event.target), true);
+/** ⌘/Ctrl Z, ⇧Z or Y in a field with nothing of its own to undo (Safari would reopen a closed tab instead). */
+const editorUndoFromField = (event, key) => (event.ctrlKey || event.metaKey) && !event.altKey && (key === 'z' || key === 'y') && !editedFields.has(event.target);
 function objectTarget(layerId=currentLayer().id) { return {animationId:currentAnimation().id,frameId:currentFrame().id,layerId}; }
 function selectObject(item) {
   finishDrawing();state.layerId=item.layerId;state.objectSelection={layerId:item.layerId,key:item.key};state.objectMulti=null;state.selection=null;
@@ -2750,7 +2756,11 @@ function bindEvents() {
       if (event.key === 'Escape') { event.preventDefault(); finishDrawing(true); renderAll(); }
       return;
     }
-    if ($('modal').open || isTextField(event.target)) return;
+    if ($('modal').open) return;
+    if (isTextField(event.target)) {
+      if (!editorUndoFromField(event, event.key.toLowerCase())) return;
+      event.target.blur();
+    }
     // Selects, checkboxes and sliders keep their own arrow/space keys, but editor shortcuts still work there.
     if (event.target.closest('input,select') && !(event.ctrlKey || event.metaKey) && !['escape','?'].includes(event.key.toLowerCase())) return;
     if (curveKey(event)) return;

@@ -58,6 +58,7 @@ export const SHORTCUTS = [
   { keys: 'O / ⇧ O', action: 'Onion skin on / off · onion settings', group: 'view' },
   { keys: 'Hold Space + drag', action: 'Grab and move the canvas view (or drag with the middle mouse button)', group: 'view' },
   { keys: '+ / −', action: 'Zoom in / out', group: 'view' },
+  { keys: '⌘/Ctrl + scroll', action: 'Zoom at the pointer (also Alt + scroll, or pinch a trackpad)', group: 'view' },
   { keys: '0', action: 'Fit canvas to view', group: 'view' },
   { keys: '⌘/Ctrl + ⌥/Alt + 1–9', action: 'Switch workspace view (Draw, Animate, Rig…; View menu to customise)', group: 'view' },
   { keys: '?', action: 'Help, tours and this shortcut sheet', group: 'view' },

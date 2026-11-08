@@ -1,3 +1,6 @@
+/* No double-tap page zoom anywhere; pinch on the canvas zooms the artwork instead. */
+html { touch-action: manipulation; }
+
 /* Phone layout: the canvas fills the screen; the sidebars open as bottom sheets from a dock. See mobile-layout.js. */
 .mobile-dock, .mobile-sheet-head { display: none; }
 

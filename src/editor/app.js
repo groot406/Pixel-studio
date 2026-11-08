@@ -12,6 +12,7 @@ import { resizeBox } from '../domain/resize.js';
 import { renderObjectsPanel } from './objects-panel.js';
 import { initPanelLayout, LAYOUT_KEY } from './panel-layout.js';
 import { initSpacePan } from './space-pan.js';
+import { initWheelZoom } from './wheel-zoom.js';
 import { initMobileLayout, MOBILE_QUERY } from './mobile-layout.js';
 import { initWorkspaceViews } from './workspace-views.js';
 import { initTabTools, bindTabs, TAB_SHORTCUTS } from './tab-menu.js';
@@ -2816,6 +2817,7 @@ function bindEvents() {
   document.addEventListener('visibilitychange',() => { state.previewTime=0;if(document.hidden){finishDrawing();saveNow();} });
   new ResizeObserver(fitCanvas).observe($('canvas-stage'));
   initSpacePan($('canvas-stage'));
+  initWheelZoom($('canvas-stage'),{getScale:()=>state.scale,setZoom,maxZoom});
   new ResizeObserver(revealActiveTab).observe($('project-tabs'));
 }
 

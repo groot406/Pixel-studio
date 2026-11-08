@@ -19,7 +19,7 @@ export function initEffectsPanel(deps) {
   for (const effect of EFFECTS) d.$(`effect-${effect}`).onclick = () => effectDialog(effect);
 }
 
-function blockedReason() {
+export function blockedReason() {
   const { state } = d, layer = d.currentLayer();
   if (state.inPlaceEdit) return 'Finish editing the object first.';
   if (!layer.visible) return `Show “${layer.name}” to use effects.`;
@@ -27,7 +27,7 @@ function blockedReason() {
   if (!d.canEditPixels()) return 'Unlock the objects in this container first.';
   return '';
 }
-function scopeText() {
+export function scopeText() {
   const { state } = d, layer = d.currentLayer(), frames = d.currentAnimation().frames.length;
   return `“${layer.name}”${state.selection ? ', inside the selection,' : ''} in ${state.objectScope === 'animation' && frames > 1 ? `all ${frames} frames` : 'this frame'}`;
 }

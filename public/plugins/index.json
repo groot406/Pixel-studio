@@ -1,0 +1,10 @@
+{
+  "plugins": [
+    { "file": "drop-shadow.js", "name": "Drop shadow", "description": "Hard one-colour pixel shadow behind the art.", "kind": "Effect" },
+    { "file": "noise-grain.js", "name": "Noise / grain dither", "description": "Film grain from neighbouring darker and lighter shades.", "kind": "Effect" },
+    { "file": "outline-glow.js", "name": "Outline glow", "description": "Bright inner ring and a soft, dithered outer ring.", "kind": "Effect" },
+    { "file": "palette-cycle.js", "name": "Palette cycle animation", "description": "Colour-cycling loop for water, fire and magic; adds frames.", "kind": "Animation" },
+    { "file": "gameboy.js", "name": "Game Boy palette", "description": "DMG green palette preset and a remap command.", "kind": "Palette" },
+    { "file": "prompt-skills.js", "name": "Prompt skills: RPG character, Platformer hero, Item icon, Tileset", "description": "Ready-made presets for the AI prompt builder.", "kind": "Prompt skills" }
+  ]
+}

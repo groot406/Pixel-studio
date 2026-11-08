@@ -93,6 +93,57 @@ A PXA 2 proposal offers **Refine with visual preview**: one optional additional 
 
 Use **Copy prompt** and **Paste AI result** for a manual workflow. Include the final completion comment from the prompt. The local bridge uses the model selected in the dialog and the existing ChatGPT login; it does not use API keys or fall back to API billing. See the retained [local edition guide](docs/upstream/local-edition.md) for setup details.
 
+## Generate with an image model
+
+General image models only *look* like pixel art: their "pixels" are blurry, uneven blocks. **Generate with an image model** (Import dialog, or the button under the intro of **Start with an idea**) writes a pixel-art prompt for you (subject, size, view, style preset, outline, your palette as a hex list, a flat key-colour background) and turns each result into real pixels: the pixel grid is detected, the key colour removed, the sprite trimmed and every pixel mapped perceptually (OKLab, optional dithering) onto your palette or a new one. Pick a variation and apply it as a new project, layer, frame or pixel object, or ask for a sprite sheet of up to 8 frames and get frames or a new animation. **Redraw the current frame** sends your frame as a reference. Applying is one Undo step.
+
+Providers:
+
+- **Local edition** (`npm start`): the local server calls OpenAI (`gpt-image-1`) or Google Gemini (`gemini-2.5-flash-image`). Set `OPENAI_API_KEY` and/or `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) before starting, or create `~/.pixelstudio/keys.json` with `{"openai": "sk-…", "gemini": "…"}`. Keys stay on your machine and never reach the browser. Image calls are billed to that API account.
+- **Web build**: paste your own API key in the dialog. It is kept in memory only, unless you tick **Remember on this device** (stored in this browser's localStorage — anyone with access to this browser profile can read it). Requests go straight from your browser to the provider.
+- **Any chatbot** (free): **Copy prompt**, paste it into ChatGPT, Gemini or another image chatbot, then paste (⌘V), drop or upload the resulting image into the dialog.
+
+The Image import dialog uses the same clean-up and can also map onto the **current palette**. Results depend on the model: if no grid is found, switch the sizing to *Pixelate* or type a pixel size. Gemini cannot return transparent backgrounds, so magenta is used as the key colour. Layers, frames and objects always use the project palette and never add colours.
+
+## Plugins and prompt skills
+
+**Plugins & skills** (the puzzle-piece button in the header) installs small JavaScript plugins that add pixel effects, frame/selection/animation/project commands, palettes and **prompt skills**. Install them from the bundled **Gallery** (Drop shadow, Noise / grain dither, Outline glow, Palette cycle animation, Game Boy palette, and a prompt-skill pack: RPG character, Platformer hero, Item icon, Tileset), from a `.js` file (pick or drop it), from pasted code, or from a URL (web build only: the local edition's security policy only connects to its own server, so download the file instead). Before anything outside the gallery is installed you see its manifest, permissions and code, with a reminder to only install plugins you trust. Installed plugins are kept in this browser (IndexedDB) and can be disabled, updated or uninstalled.
+
+Plugin effects and commands appear under **Effects → Plugins** and in the command palette (**⌘/Ctrl K**), which also searches the editor's own buttons. They respect the edit scope, the selection and locked objects like the built-in effects, and every run is one Undo step. Prompt skills appear as **Prompt skill** in the AI prompt builder: they add expert instructions to the prompt and can fill in the size and animation list.
+
+Each plugin runs in its own Web Worker with no page access, and network APIs are stubbed out. It only receives copies of the pixels it works on, and everything it returns is validated (sizes, palette indices, at most 64 colours, frame and pixel limits) before it touches your project; runs that take longer than 5 seconds are stopped. The **Write your own** tab shows the API and copies a ready-made prompt that lets any chatbot write a plugin for you. Full reference: [docs/plugins.md](docs/plugins.md) (generated from `src/plugins/api-doc.js` by `node scripts/sync-plugin-docs.mjs`).
+
+## Use Pixel Studio from AI agents (MCP, CLI, skills)
+
+Claude (Desktop and Code), GitHub Copilot, Cursor, OpenAI Codex and other agents can draw, animate and export sprites with Pixel Studio — headless, from a checkout of this repository (Node.js 20+, no dependencies). In the app, **Help → Docs → Connect an AI agent** shows ready-to-copy configuration with your paths.
+
+- **MCP server** (`node local/cli.mjs mcp [--root DIR]`, or `npm run mcp`): stdio Model Context Protocol server with tools to read the PXA 2 guide, create/read/validate/write projects, render PNG previews the agent can look at, pixelize images, apply rig templates (walk, run, jump, idle, wave, hover) and palettes, and export PNG, sprite sheets and GIFs. Files are confined to the workspace root (default: the current folder). Tool reference: [docs/mcp.md](docs/mcp.md).
+- **Live editor bridge**: while Pixel Studio Local runs (`npm start`) and the editor is open, `editor_get_project` reads the current tab (PXA 2 + preview) and `editor_apply_project` proposes a change — the first edit in a session asks you to **Allow**, and each edit is one Undo step. An **AI agent connected** chip shows in the header while an agent is active.
+- **CLI** (`pixelstudio` after `npm link`, or `node local/cli.mjs`): `info`, `validate`, `render <file> -o out.png [--frame n] [--scale n] [--strip]`, `convert <in> <out>`, `pixelize <image.png> -o out.pxa [--colors 16]`, `export <file> --sheet|--gif -o …`, `mcp`, `skills install`, `serve`.
+- **Agent skills** (`npm run skills`, or `node local/cli.mjs skills install [--target claude|copilot|codex|cursor|all] [--project]`): installs `skills/pixel-studio` (PXA 2 workflow and pixel-art rules, with the format reference) and `skills/pixel-studio-animate` (rigging, templates, timing) into `~/.claude/skills`, `~/.copilot/skills`, `~/.agents/skills` (Codex) and `~/.cursor/skills` — or `.claude/skills`, `.github/skills`, `.agents/skills`, `.cursor/skills` + `.cursor/rules/pixel-studio.mdc` with `--project` — and prints the MCP snippets.
+
+Connect a client (replace the path with your checkout; `node local/cli.mjs skills config` prints these with absolute paths):
+
+```sh
+claude mcp add pixelstudio -- node /path/to/Pixel-studio/local/cli.mjs mcp          # Claude Code
+```
+
+```jsonc
+// Claude Desktop: claude_desktop_config.json · Cursor: ~/.cursor/mcp.json
+{ "mcpServers": { "pixelstudio": { "command": "node", "args": ["/path/to/Pixel-studio/local/cli.mjs", "mcp", "--root", "/Users/me/PixelStudio"] } } }
+// VS Code / GitHub Copilot: .vscode/mcp.json
+{ "servers": { "pixelstudio": { "type": "stdio", "command": "node", "args": ["/path/to/Pixel-studio/local/cli.mjs", "mcp", "--root", "${workspaceFolder}"] } } }
+```
+
+```toml
+# OpenAI Codex: ~/.codex/config.toml
+[mcp_servers.pixelstudio]
+command = "node"
+args = ["/path/to/Pixel-studio/local/cli.mjs", "mcp"]
+```
+
+Chat assistants without MCP (ChatGPT, Gemini…) can still write PXA 2 from the [format guide](public/pxa-v2-format.txt); the site also serves [`llms.txt`](public/llms.txt).
+
 ## Reusable artwork
 
 The **Parts** section in the side panel shows every reusable part as a thumbnail: **drag one onto the canvas** to place it there, or click it to open the **Part library**. The library is a visual browser (search, sort by name, use or size) showing each part's size, colours, number of copies and the animations and frames that use it. From there you can place it (in every frame or only this frame, following the Edit switch), edit its shared artwork, rename it (all copies follow) or delete it once unused. New parts come from a selection (Ctrl/⌘ G). Regular drawing tools write local overrides. Moving an instance rebuilds the cel without leaving trails. Shared edits update its instances; local overrides remain at their canvas coordinates.
@@ -199,10 +250,13 @@ src/
   formats/        PXA text, PXS binary, spritesheets, PNG/APNG, GIF, ZIP and export metadata
   storage/        IndexedDB workspace and memory fallback
   features/ai/    Prompt creation, edit validation, patch engine, review dialog
+  plugins/        Plugin manifest/result validation, worker sandbox, registry, manager dialog, command palette
   editor/app.js   Editor state, DOM wiring, rendering, history and save ordering
   editor/*.js     Panels and tools wired from app.js (objects, parts, maths tools, tours & help…)
-public/           Original HTML, styles, icons, format guide and samples
-local/            Loopback HTTP service and Codex app-server adapter
+public/           Original HTML, styles, icons, format guide, samples and gallery plugins (public/plugins/)
+local/            Loopback HTTP service, Codex adapter, MCP server, CLI, headless core and editor bridge
+src/bridge/       Browser side of the agent bridge and the "Connect an AI agent" dialog
+skills/           Agent skills (SKILL.md) installed by `pixelstudio skills install`
 scripts/          Build, source watching, syntax checks and benchmarks (`npm run bench`)
 tests/           Behavioral tests and deterministic protocol fixtures
 patches/          Original supplied patch archive

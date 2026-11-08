@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
 import { createLocalServer } from './server.mjs';
+import { defaultBridgeDirectory } from './bridge.mjs';
 import { buildSite } from '../scripts/build.mjs';
 import { watchSite } from '../scripts/watch.mjs';
 
@@ -47,13 +48,13 @@ try {
   if (Number(process.versions.node.split('.')[0]) < 20) throw new Error('Pixel Studio Local requires Node.js 20 or newer.');
   const selected = options(process.argv.slice(2));
   if (selected.help) {
-    process.stdout.write('Pixel Studio Local\n\nnode local/start.mjs [--port 4317] [--open] [--dev]\n\nUses your local Codex ChatGPT login. Run codex login if needed.\n');
+    process.stdout.write('Pixel Studio Local\n\nnode local/start.mjs [--port 4317] [--open] [--dev]\n\nUses your local Codex ChatGPT login. Run codex login if needed.\nImage generation (Generate with an image model) reads OPENAI_API_KEY and GEMINI_API_KEY\n(or GOOGLE_API_KEY) from the environment, or {"openai","gemini"} from ~/.pixelstudio/keys.json.\nKeys stay on this machine and are never sent to the browser.\n');
   } else {
     await buildSite();
-    app = createLocalServer();
+    app = createLocalServer({ bridgeDirectory: defaultBridgeDirectory() });
     const url = await app.listen(selected.port);
     if (selected.dev) stopWatching = watchSite();
-    process.stdout.write(`\nPixel Studio Local\n${url}\n\nAI editing uses your local Codex ChatGPT login.\nRun codex login in Terminal if the app asks you to connect.\nPress Ctrl+C to stop.\n\n`);
+    process.stdout.write(`\nPixel Studio Local\n${url}\n\nAI editing uses your local Codex ChatGPT login.\nRun codex login in Terminal if the app asks you to connect.\nImage models use OPENAI_API_KEY / GEMINI_API_KEY or ~/.pixelstudio/keys.json.\nPress Ctrl+C to stop.\n\n`);
     process.once('SIGINT', stop);
     process.once('SIGTERM', stop);
     if (selected.open) openBrowser(url);

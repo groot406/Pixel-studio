@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "description": "A pixel-art animation editor with personal local Codex editing",
+  "bin": {
+    "pixelstudio": "local/cli.mjs"
+  },
   "engines": {
     "node": ">=20"
   },
@@ -15,6 +18,8 @@
     "check": "node scripts/check.mjs && npm test && npm run build",
     "benchmark": "node scripts/benchmark-pxa.mjs",
     "bench": "node --expose-gc scripts/bench.mjs",
-    "formats": "node scripts/sync-format-guides.mjs"
+    "formats": "node scripts/sync-format-guides.mjs",
+    "mcp": "node local/cli.mjs mcp",
+    "skills": "node local/cli.mjs skills install"
   }
 }

@@ -54,6 +54,7 @@ export function validatePromptConfig(config) {
   const height = wholeNumber(config.height, 'Canvas height', 1, MAX_SIZE);
   const { palette, maxColors } = readPalette(config);
   const style = config.style === undefined ? '' : text(config.style, 'Additional art direction', 2000, false);
+  const skill = readSkill(config.skill);
   if (!Array.isArray(config.animations) || config.animations.length < 1 || config.animations.length > MAX_ANIMATIONS) {
     throw new Error(`Add 1–${MAX_ANIMATIONS} animations to the plan.`);
   }
@@ -81,9 +82,17 @@ export function validatePromptConfig(config) {
   }
   return {
     formatVersion, name, description, width, height, paletteMode: config.paletteMode, maxColors, palette, animations, style,
-    totalFrames, maxLayers: Math.min(MAX_LAYERS, Math.floor(MAX_TOTAL_PIXELS / pixelsPerLayer)),
+    totalFrames, maxLayers: Math.min(MAX_LAYERS, Math.floor(MAX_TOTAL_PIXELS / pixelsPerLayer)), ...(skill ? { skill } : {}),
   };
 }
+
+/** Optional prompt skill (a plugin preset): { title, instructions } added as expert guidance. */
+function readSkill(skill) {
+  if (skill === undefined || skill === null) return null;
+  if (!object(skill)) throw new Error('Prompt skill must have a title and instructions.');
+  return { title: text(skill.title, 'Prompt skill title', 60), instructions: text(skill.instructions, 'Prompt skill instructions', 4000) };
+}
+const skillSection = plan => plan.skill ? `\n\nPROMPT SKILL — ${plan.skill.title}\n${plan.skill.instructions}` : '';
 
 function quote(value) {
   return JSON.stringify(value).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
@@ -96,7 +105,7 @@ export function buildCreationPrompt(config) {
     ? `Use this exact fixed palette, in this exact slot order. Do not add, remove, reorder, or change colors:\nPAL ${plan.palette.join(' ')}`
     : `Choose a cohesive palette of 1–${plan.maxColors} opaque colors for this artwork. Write those colors as six-digit hex values on the PAL line and use that same palette for every frame. Transparency does not use a palette slot.`;
   if (plan.formatVersion === 2) return `Create finished pixel art: ${plan.description}
-${plan.style ? `Art direction: ${plan.style}` : ''}
+${plan.style ? `Art direction: ${plan.style}` : ''}${skillSection(plan)}
 Return a complete PXA 2 document only, ending with END. No Markdown or placeholders.
 SIZE ${plan.width} ${plan.height}
 NAME ${quote(plan.name)}
@@ -119,7 +128,7 @@ ${PXA2_GUIDE}
 Return exactly one complete PXA 1 document, without Markdown fences, explanation, or an image. Create the actual artwork as pixel data, not an empty template.
 
 ARTWORK BRIEF
-${plan.description}${plan.style ? `\n\nADDITIONAL ART DIRECTION\n${plan.style}` : ''}
+${plan.description}${plan.style ? `\n\nADDITIONAL ART DIRECTION\n${plan.style}` : ''}${skillSection(plan)}
 
 PROJECT REQUIREMENTS
 Use this exact project name and canvas size:

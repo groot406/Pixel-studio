@@ -3,7 +3,10 @@ import { mapPaletteColors, copyObjects, pasteObject, objectPixelBounds } from '.
 import { commitRasterEdits, writeCelPixels, cloneArtwork } from '../domain/artwork.js';
 import { celObjects, isEmptyNode, reorderObject, reorderObjectContainer, updateObject, translateObject, forkObject, deleteObject, addObjectContainer, moveObjectToGroup, removeObjectContainer, objectBounds, hitTestObject, dropObject, resizeObject, frameObjects, orderObjects, translateObjects, deleteObjects, turnObjects, rotateObjects, tiltObjects } from '../domain/objects.js';
 import { transformedSize } from '../domain/geometry.js';
-import { detectGrid, edgeProfiles, pixelize, averageDownscale } from '../domain/pixelize.js';
+import { detectGrid, edgeProfiles } from '../domain/pixelize.js';
+import { placeRgba, cleanImage, quantizeImage } from '../domain/image-pipeline.js';
+import { indicesToRgba } from '../domain/palette-map.js';
+import { initAiImage, openAiImageDialog } from './ai-image-dialog.js';
 import { hexToRgb } from '../domain/colour.js';
 import { resizeBox } from '../domain/resize.js';
 import { renderObjectsPanel } from './objects-panel.js';
@@ -43,6 +46,10 @@ import { initSafety, findRecoverable, showRecovery, writeJournal, clearJournal, 
 import { TOOL_KEYS } from './onboarding.js';
 import { initOnboarding, offerTour } from './tour.js';
 import { initHelpCenter, openHelpCenter } from './help-center.js';
+import { initPlugins, renderPluginPanel, pluginRegistry } from '../plugins/editor.js';
+import { initPluginManager, openPluginManager } from '../plugins/manager-dialog.js';
+import { initCommandPalette } from '../plugins/command-palette.js';
+import { initEditorBridge } from '../bridge/editor-bridge.js';
 import { initVersions, versionsDialog, saveVersion, versionBefore, noteChange, autoSnapshot } from './versions-dialog.js';
 
 const $ = (id) => document.getElementById(id);
@@ -1268,7 +1275,7 @@ function renderAll() {
   syncMotionMode();
   syncRigMode();
   if (document.activeElement !== $('project-name')) $('project-name').value = state.project.name;
-  renderProjectTabs();renderPanelState();renderTools(); renderPalette(); renderTimeline(); renderAnimations(); renderLayers(); renderSelection(); renderCanvas(); renderPreview(); renderPlaybackControls();renderInPlaceControls();renderEditScope();renderAnimatePanel();renderEffectsPanel();
+  renderProjectTabs();renderPanelState();renderTools(); renderPalette(); renderTimeline(); renderAnimations(); renderLayers(); renderSelection(); renderCanvas(); renderPreview(); renderPlaybackControls();renderInPlaceControls();renderEditScope();renderAnimatePanel();renderEffectsPanel();renderPluginPanel();
 }
 /**
  * The edit scope switch in the canvas toolbar. Normally it chooses between every frame of the current
@@ -1899,7 +1906,7 @@ function openDialog(title, content, eyebrow = 'PIXEL STUDIO') {
   if (!$('modal').open) $('modal').showModal();
 }
 function promptBuilderDialog(initial) {
-  openPromptBuilder({project:state.project,documentId:state.documentId,openDialog,openImport:importAITextDialog,toast,initial});
+  openPromptBuilder({project:state.project,documentId:state.documentId,openDialog,openImport:importAITextDialog,openImageGenerator:openAiImageDialog,toast,initial,skills:pluginRegistry()?.promptSkills()||[]});
 }
 function aiEditDialog() {
   if (finishDrawing()) renderAll();
@@ -2016,11 +2023,12 @@ function newProjectDialog({welcome=false}={}) {
   $('new-project-name').select();
 }
 function importDialog() {
-  openDialog('Bring your pixels in', `<p class="modal-body-text">Pick up a project, paste AI pixel data, or slice a whole animation sheet.</p><div class="import-choices"><button class="choice-card" id="choose-data">${icon('file')}<span><strong>Pixel data file</strong><small>AI text .pxa, compact .pxs, or legacy .pixel.json.</small></span>${icon('chevron')}</button><button class="choice-card" id="choose-ai-text">${icon('select')}<span><strong>Paste AI pixel data</strong><small>Turn an AI response into editable pixels and animations.</small></span>${icon('chevron')}</button><button class="choice-card" id="choose-png">${icon('image')}<span><strong>Image</strong><small>PNG, JPG or WebP. Cleans up AI and upscaled pixel art automatically. Or paste with ⌘V.</small></span>${icon('chevron')}</button><button class="choice-card" id="choose-sheet">${icon('grid')}<span><strong>Spritesheet PNG</strong><small>Rows become animations. Columns become frames.</small></span>${icon('chevron')}</button></div>${skipEmptyControl('import-skip-empty')}<p class="helper-text">Fully transparent frames and empty animation rows are skipped. Uncheck to preserve intentional blank frames. Artwork on hidden layers is kept in pixel data.</p><div class="notice">Everything is edited in your browser. Your images and project files are not uploaded.</div>`, 'IMPORT');
+  openDialog('Bring your pixels in', `<p class="modal-body-text">Pick up a project, paste AI pixel data, or slice a whole animation sheet.</p><div class="import-choices"><button class="choice-card" id="choose-data">${icon('file')}<span><strong>Pixel data file</strong><small>AI text .pxa, compact .pxs, or legacy .pixel.json.</small></span>${icon('chevron')}</button><button class="choice-card" id="choose-ai-text">${icon('select')}<span><strong>Paste AI pixel data</strong><small>Turn an AI response into editable pixels and animations.</small></span>${icon('chevron')}</button><button class="choice-card" id="choose-png">${icon('image')}<span><strong>Image</strong><small>PNG, JPG or WebP. Cleans up AI and upscaled pixel art automatically. Or paste with ⌘V.</small></span>${icon('chevron')}</button><button class="choice-card" id="choose-ai-image">${icon('spark')}<span><strong>Generate with an image model</strong><small>Describe a sprite; OpenAI, Gemini or any chatbot draws it and it is cleaned into real pixels.</small></span>${icon('chevron')}</button><button class="choice-card" id="choose-sheet">${icon('grid')}<span><strong>Spritesheet PNG</strong><small>Rows become animations. Columns become frames.</small></span>${icon('chevron')}</button></div>${skipEmptyControl('import-skip-empty')}<p class="helper-text">Fully transparent frames and empty animation rows are skipped. Uncheck to preserve intentional blank frames. Artwork on hidden layers is kept in pixel data.</p><div class="notice">Everything is edited in your browser. Your images and project files are not uploaded.</div>`, 'IMPORT');
   bindSkipEmpty('import-skip-empty');
   $('choose-data').onclick = () => { $('modal').close(); $('data-file-input').click(); };
   $('choose-ai-text').onclick = importAITextDialog;
   $('choose-png').onclick = () => { $('modal').close(); $('png-file-input').click(); };
+  $('choose-ai-image').onclick = openAiImageDialog;
   $('choose-sheet').onclick = () => { $('modal').close(); $('sheet-file-input').click(); };
 }
 function skipEmptyControl(id) {
@@ -2138,20 +2146,6 @@ function imageRgba(image) {
   context.drawImage(image, 0, 0);
   return context.getImageData(0, 0, canvas.width, canvas.height).data;
 }
-/** Place an RGBA image centred on a canvas; shrink with sharp nearest-neighbour when it does not fit. */
-function placeRgba(source, sourceWidth, sourceHeight, canvasWidth, canvasHeight, fit) {
-  const ratio = fit ? Math.min(1, canvasWidth / sourceWidth, canvasHeight / sourceHeight) : 1;
-  const width = Math.max(1, Math.round(sourceWidth * ratio)), height = Math.max(1, Math.round(sourceHeight * ratio));
-  const left = Math.floor((canvasWidth - width) / 2), top = Math.floor((canvasHeight - height) / 2);
-  const out = new Uint8ClampedArray(canvasWidth * canvasHeight * 4);
-  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
-    const tx = left + x, ty = top + y;
-    if (tx < 0 || ty < 0 || tx >= canvasWidth || ty >= canvasHeight) continue;
-    const sx = Math.min(sourceWidth - 1, Math.floor(x / ratio)), sy = Math.min(sourceHeight - 1, Math.floor(y / ratio));
-    out.set(source.subarray((sy * sourceWidth + sx) * 4, (sy * sourceWidth + sx) * 4 + 4), (ty * canvasWidth + tx) * 4);
-  }
-  return out;
-}
 async function importPng(file) {
   try {
     const image = await decodeImage(file);
@@ -2163,22 +2157,16 @@ async function importPng(file) {
     const defaultSizing = detected.scale > 1 ? 'detect' : small ? 'actual' : 'average';
     const sizeOption = (value, label) => `<option value="${value}"${defaultSizing === value ? ' selected' : ''}>${label}</option>`;
     const colorChoices = [8,16,32,MAX_COLORS];
-    openDialog('Make it real pixel art', `<p class="modal-body-text">${escapeHTML(file.name || 'Pasted image')} · ${sourceWidth} × ${sourceHeight} pixels</p><div class="png-import-preview"><canvas id="png-import-canvas"></canvas><span id="png-detect-note" class="png-detect-note"></span></div><label class="field"><span class="field-label">Import into</span><select id="png-destination"><option value="project">New project · use the image colors</option><option value="frame">New frame · on the selected layer</option><option value="layer">New layer · in the current frame</option></select></label><label class="field"><span class="field-label">Image sizing</span><select id="png-sizing">${sizeOption('detect','Clean up AI or upscaled pixel art · detect the pixel grid')}${sizeOption('average','Pixelate a photo or painting · average down')}${sizeOption('fit','Fit inside the canvas · sharp nearest-neighbor scaling')}${sizeOption('actual','Keep original pixels · center and crop if needed')}</select></label><div id="png-cleanup" class="form-grid png-cleanup"><label class="field" id="png-scale-field"><span class="field-label">Pixel size (image pixels)</span><input id="png-scale" type="number" min="1" max="64" step="0.01" value="${detected.scale > 1 ? +detected.scale.toFixed(2) : 8}"></label><label class="field" id="png-target-field"><span class="field-label">Longest side (pixels)</span><input id="png-target" type="number" min="4" max="${MAX_SIZE}" step="1" value="${Math.min(64, MAX_SIZE)}"></label><label class="field" id="png-colors-field"><span class="field-label">Colors</span><select id="png-colors">${colorChoices.map(n=>`<option value="${n}"${n===16?' selected':''}>${n} colors</option>`).join('')}</select></label><label class="check-row"><input id="png-remove-bg" type="checkbox"${hasAlpha ? '' : ' checked'}> Remove background</label><label class="check-row"><input id="png-trim" type="checkbox" checked> Trim empty space</label></div><div id="png-dimensions">${dimensionFields('png',Math.min(sourceWidth,MAX_SIZE),Math.min(sourceHeight,MAX_SIZE))}</div>${skipEmptyControl('png-skip-empty')}<p class="helper-text" id="png-help"></p><p id="png-import-error" class="sheet-error" role="alert" hidden></p><div class="modal-actions"><button id="cancel-png" class="button">Cancel</button><button id="confirm-png" class="button primary">Import image</button></div>`, 'IMAGE IMPORT');
+    openDialog('Make it real pixel art', `<p class="modal-body-text">${escapeHTML(file.name || 'Pasted image')} · ${sourceWidth} × ${sourceHeight} pixels</p><div class="png-import-preview"><canvas id="png-import-canvas"></canvas><span id="png-detect-note" class="png-detect-note"></span></div><label class="field"><span class="field-label">Import into</span><select id="png-destination"><option value="project">New project · use the image colors</option><option value="frame">New frame · on the selected layer</option><option value="layer">New layer · in the current frame</option></select></label><label class="field"><span class="field-label">Image sizing</span><select id="png-sizing">${sizeOption('detect','Clean up AI or upscaled pixel art · detect the pixel grid')}${sizeOption('average','Pixelate a photo or painting · average down')}${sizeOption('fit','Fit inside the canvas · sharp nearest-neighbor scaling')}${sizeOption('actual','Keep original pixels · center and crop if needed')}</select></label><div id="png-cleanup" class="form-grid png-cleanup"><label class="field" id="png-scale-field"><span class="field-label">Pixel size (image pixels)</span><input id="png-scale" type="number" min="1" max="64" step="0.01" value="${detected.scale > 1 ? +detected.scale.toFixed(2) : 8}"></label><label class="field" id="png-target-field"><span class="field-label">Longest side (pixels)</span><input id="png-target" type="number" min="4" max="${MAX_SIZE}" step="1" value="${Math.min(64, MAX_SIZE)}"></label><label class="field" id="png-colors-field"><span class="field-label">Colors</span><select id="png-colors"><option value="palette">Use current palette</option>${colorChoices.map(n=>`<option value="${n}"${n===16?' selected':''}>${n} colors</option>`).join('')}</select></label><label class="check-row"><input id="png-remove-bg" type="checkbox"${hasAlpha ? '' : ' checked'}> Remove background</label><label class="check-row"><input id="png-trim" type="checkbox" checked> Trim empty space</label></div><label class="check-row"><input id="png-dither" type="checkbox"> Dither when mapping colors</label><div id="png-dimensions">${dimensionFields('png',Math.min(sourceWidth,MAX_SIZE),Math.min(sourceHeight,MAX_SIZE))}</div>${skipEmptyControl('png-skip-empty')}<p class="helper-text" id="png-help"></p><p id="png-import-error" class="sheet-error" role="alert" hidden></p><div class="modal-actions"><button id="cancel-png" class="button">Cancel</button><button id="confirm-png" class="button primary">Import image</button></div>`, 'IMAGE IMPORT');
     bindSkipEmpty('png-skip-empty');
-    let rgba, canvasSize, cleaned = null, cleanKey = '', autoSize = true;
+    let rgba, quantized, canvasSize, cleaned = null, cleanKey = '', autoSize = true;
     const cleanup = () => {
       const mode = $('png-sizing').value;
       if (mode !== 'detect' && mode !== 'average') return null;
       const scale = Number($('png-scale').value), target = Number($('png-target').value);
       const key = [mode, scale, target, $('png-remove-bg').checked, $('png-trim').checked].join('|');
       if (key === cleanKey) return cleaned;
-      const grid = mode === 'detect' ? (Math.abs(scale - detected.scale) < 0.005 ? detected : detectGrid(source, sourceWidth, sourceHeight, {profiles, scale: Math.max(1, scale)})) : null;
-      const averageTarget = Math.max(4, Math.min(MAX_SIZE, Math.round(target) || 64));
-      const ratio = averageTarget / Math.max(sourceWidth, sourceHeight);
-      const pre = mode === 'average' ? averageDownscale(source, sourceWidth, sourceHeight, Math.max(1, Math.round(sourceWidth * ratio)), Math.max(1, Math.round(sourceHeight * ratio))) : null;
-      cleaned = pre
-        ? pixelize(pre.rgba, pre.width, pre.height, {mode:'none', background:$('png-remove-bg').checked, trim:$('png-trim').checked})
-        : pixelize(source, sourceWidth, sourceHeight, {mode:'detect', grid, background:$('png-remove-bg').checked, trim:$('png-trim').checked, maxSize:MAX_SIZE});
+      cleaned = cleanImage(source, sourceWidth, sourceHeight, {mode, scale: Math.max(1, scale), target, profiles, detected, background:$('png-remove-bg').checked, trim:$('png-trim').checked, maxSize:MAX_SIZE});
       cleanKey = key;
       return cleaned;
     };
@@ -2213,15 +2201,12 @@ async function importPng(file) {
           rgba = context.getImageData(0,0,canvasWidth,canvasHeight).data;
         }
       }
-      if (destination === 'project' && $('png-colors').value) {
-        const palette = paletteFromRgba(rgba, Math.min(MAX_COLORS, Number($('png-colors').value) || MAX_COLORS));
-        const pixels = mapRgbaToPalette(rgba, palette, canvasWidth, canvasHeight), colors = palette.map(hexToRgb);
-        rgba = new Uint8ClampedArray(rgba.length);
-        pixels.forEach((index, i) => { if (index >= 0) rgba.set([...colors[index], 255], i * 4); });
-      }
+      // New layers and frames, or "Use current palette", map perceptually (OKLab) onto the project palette.
+      const usePalette = destination !== 'project' || $('png-colors').value === 'palette';
+      quantized = quantizeImage(rgba, canvasWidth, canvasHeight, {colors: usePalette ? 'palette' : Math.min(MAX_COLORS, Number($('png-colors').value) || MAX_COLORS), palette: state.project.palette, dither: $('png-dither').checked});
       const canvas = $('png-import-canvas');
       canvas.width = canvasWidth; canvas.height = canvasHeight;
-      canvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(rgba), canvasWidth, canvasHeight), 0, 0);
+      canvas.getContext('2d').putImageData(new ImageData(indicesToRgba(quantized.pixels, quantized.palette), canvasWidth, canvasHeight), 0, 0);
       const note = $('png-detect-note');
       note.textContent = mode === 'detect'
         ? (result?.grid?.scale > 1 ? `Grid: ${+result.grid.scale.toFixed(2)} px per pixel · ${result.width} × ${result.height}${detected.scale > 1 && result.grid === detected ? ` · ${Math.round(Math.min(1, detected.confidence * 1.4) * 100)}% sure` : ''}` : 'No pixel grid found · try Pixelate, or type a pixel size')
@@ -2232,14 +2217,13 @@ async function importPng(file) {
     };
     bindDimensionFields('png',() => { autoSize = false; updatePreview(); });
     $('png-destination').onchange = updatePreview;
-    for (const id of ['png-sizing','png-colors','png-remove-bg','png-trim']) $(id).onchange = () => { if (id === 'png-sizing') autoSize = true; updatePreview(); };
+    for (const id of ['png-sizing','png-colors','png-remove-bg','png-trim','png-dither']) $(id).onchange = () => { if (id === 'png-sizing') autoSize = true; updatePreview(); };
     for (const id of ['png-scale','png-target']) $(id).oninput = () => { autoSize = true; updatePreview(); };
     $('cancel-png').onclick = () => $('modal').close();
     $('confirm-png').onclick = () => {
       try {
         const {width,height} = canvasSize, destination=$('png-destination').value;
-        const palette=destination==='project' ? paletteFromRgba(rgba,Math.min(MAX_COLORS,Number($('png-colors').value)||MAX_COLORS)) : state.project.palette;
-        const pixels=mapRgbaToPalette(rgba,palette,width,height);
+        const {palette,pixels}=quantized;
         const baseName=(file.name || '').replace(/\.(png|jpe?g|webp|gif)$/i,'').slice(0,80);
         if (state.importSkipEmpty && pixels.every(color=>color<0)) throw new Error('This image is fully transparent at this size. Nothing was imported. Uncheck “Skip empty frames” to keep it.');
         if (destination === 'frame') {
@@ -2466,6 +2450,9 @@ function bindEvents() {
   const mathsDeps={state,$,icon,escapeHTML,mutate,snapshot,remember,versionBefore,renderAll,renderCanvas,renderPreview,renderTools,toast,openDialog,paintSprite,finishDrawing,drawPoints,
     currentAnimation,currentFrame,currentLayer,selectedObject,selectedItems,transformItems,resizableObject,objectTarget,canEditPixels,canvasPixels,canvasPosition,normalizeSelection,selectObject,selectFrameAt,addFrame,undo:()=>restore(state.undo,state.redo)};
   initToolExtras(mathsDeps);initObjectPose(mathsDeps);initMotionModes(mathsDeps);initRigMode(mathsDeps);initAnimatePanel(mathsDeps);initMotionAsk(mathsDeps);initTimeline(mathsDeps);initOnion(mathsDeps);initEffectsPanel(mathsDeps);initPaletteTools(mathsDeps);initPaletteStudio(mathsDeps);
+  initAiImage({...mathsDeps,replaceProject,insertLayer,canAddFrame,canAddLayer,decodeImage,imageRgba});
+  const pluginDeps={...mathsDeps,openPluginManager:tab=>openPluginManager(tab),openPromptBuilder:promptBuilderDialog};
+  initPluginManager(pluginDeps);initPlugins(pluginDeps);initCommandPalette(pluginDeps);
   // Holding Shift previews the straight line a pencil or eraser click will draw.
   const trackShift=event=>{if(state.shiftHeld!==event.shiftKey){state.shiftHeld=event.shiftKey;if(state.cursor)renderCanvas();}};
   window.addEventListener('keydown',trackShift);window.addEventListener('keyup',trackShift);
@@ -2620,6 +2607,7 @@ function bindEvents() {
   $('import-button').onclick = importDialog;
   $('export-button').onclick = exportDialog;
   $('help-button').onclick = () => openHelpCenter('tours');
+  $('plugins-button').onclick = () => openPluginManager();
   $('shortcuts-button').onclick = () => openHelpCenter('shortcuts');
   $('account-button').onclick = accountDialog;
   $('close-modal').onclick = () => $('modal').close();
@@ -2770,6 +2758,12 @@ async function init() {
   if(new URLSearchParams(location.search).has('perf'))globalThis.pixelStudioPerf={state,renderAll,renderCanvas,renderTimeline,renderLayers,renderPreview,snapshot,remember,selectFrameAt,saveNow};
   initPanelLayout({onLayout:()=>requestAnimationFrame(()=>fitCanvas())});
   initOnboarding({state,$,escapeHTML,toast});initHelpCenter({state,$,escapeHTML,toast,openDialog});
+  initEditorBridge({toast,openDialog,escapeHTML,getProject:()=>({project:state.project,animationId:currentAnimation().id,frameId:currentFrame().id}),
+    applyProject(project,{mode,message}){
+      if(mode==='new-tab'){replaceProject(project,message||'Opened a project from your AI agent.');return 'Opened in a new editor tab.';}
+      const clean=validateProject(project);versionBefore('Before AI agent edit');
+      mutate(()=>{state.project=clean;state.selection=null;state.previewTime=0;});
+      toast(message?`AI agent: ${message} (Undo restores the previous artwork.)`:'AI agent edit applied. Undo restores the previous artwork.');return 'Applied in the editor as one undo step.';}});
   requestAnimationFrame(() => { fitCanvas(); requestAnimationFrame(animationTick); });
   // First visit: offer examples and a blank canvas; the panda sample stays open behind it.
   if(!session && !localStorage.getItem(STORAGE_KEY) && state.samples.length)newProjectDialog({welcome:true});

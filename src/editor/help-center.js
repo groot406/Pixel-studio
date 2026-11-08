@@ -56,7 +56,7 @@ function renderNew() {
   d.$('help-pane-new').innerHTML = `<ul class="help-news">${WHATS_NEW.map(n => `<li><strong>${d.escapeHTML(n.title)}</strong><p>${d.escapeHTML(n.text)}</p>${n.tour ? `<button type="button" class="text-button" data-tour="${n.tour}">Show me →</button>` : ''}</li>`).join('')}</ul>`;
 }
 function renderDocs() {
-  d.$('help-pane-docs').innerHTML = `<p class="modal-body-text">The README covers every feature in depth.</p><ul class="help-docs">${DOCS.map(([label, anchor]) => `<li><a href="${DOCS_URL}${anchor}" target="_blank" rel="noopener">${d.escapeHTML(label)} ↗</a></li>`).join('')}<li><a href="${DOCS_URL}/blob/main/docs/architecture.md" target="_blank" rel="noopener">Architecture (for developers) ↗</a></li></ul>`;
+  d.$('help-pane-docs').innerHTML = `<p class="modal-body-text">The README covers every feature in depth.</p><ul class="help-docs">${DOCS.map(([label, anchor]) => `<li><a href="${DOCS_URL}${anchor}" target="_blank" rel="noopener">${d.escapeHTML(label)} ↗</a></li>`).join('')}<li><a href="${DOCS_URL}/blob/main/docs/architecture.md" target="_blank" rel="noopener">Architecture (for developers) ↗</a></li></ul><p class="modal-body-text">Use Pixel Studio from Claude, GitHub Copilot, Cursor or Codex (MCP, CLI and agent skills).</p><button type="button" class="button small" data-connect-agent>Connect an AI agent…</button>`;
 }
 
 /* Rich tooltips: one shared bubble; each tipped element's title moves to data-native-title so only one tooltip shows. */

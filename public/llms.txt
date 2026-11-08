@@ -1,0 +1,26 @@
+# Pixel Studio
+
+> Pixel Studio is a free, dependency-free pixel-art and sprite-animation editor that runs in the browser. Projects are plain-text PXA 2 documents that language models can read and write directly; Pixel Studio Local adds an MCP server, a CLI and a live bridge so AI agents can create, render and export sprites.
+
+Formats:
+- PXA 2 (`.pxa`, text): palette, layers, reusable parts (objects with flip/rotate/resize/skew/3D-turn transforms), animations with frames, skeleton bones and poses. Starts with `PXA 2`, ends with `END`.
+- PXA 1 (legacy text raster format), `.pxs` (compact binary), `.pixel.json` (full JSON project).
+- Exports: PNG, PNG sequence, sprite sheet (+ Aseprite-style JSON), GIF, APNG.
+
+## Guides
+
+- [PXA 2 format guide](./pxa-v2-format.txt): the complete grammar; read before writing PXA.
+- [PXA 1 format guide](./pxa-format.txt): the legacy raster text format.
+- [Sample projects](./samples/index.json): e.g. [Golden key with reusable parts](./samples/key-v2.pxa), [rigged stick puppet](./samples/puppet.pxa).
+
+## AI agents
+
+- MCP server (stdio): `node local/cli.mjs mcp --root <folder>` in a checkout of https://github.com/groot406/Pixel-studio. Tools: pixel_guide, create_project, project_info, read_project, validate_pxa, write_project, render_png, image_to_pixels, apply_template, set_palette, export, list_palette_presets, editor_status, editor_get_project, editor_apply_project, editor_open_file.
+- CLI: `pixelstudio info|validate|render|convert|pixelize|export|mcp|skills|serve`.
+- Agent skills: `node local/cli.mjs skills install` (Claude Code, GitHub Copilot, Codex, Cursor).
+- Reference: https://github.com/groot406/Pixel-studio/blob/main/docs/mcp.md
+
+## Optional
+
+- [README](https://github.com/groot406/Pixel-studio#readme)
+- [Architecture](https://github.com/groot406/Pixel-studio/blob/main/docs/architecture.md)

@@ -34,7 +34,11 @@ function promptFileName(name) {
 }
 
 /** Build a new-art prompt without reading or changing any existing pixels. */
-export function openPromptBuilder({ project, documentId, openDialog, openImport, toast, initial }) {
+/**
+ * `skills` (optional): prompt skills from plugins, [{ key, title, description, instructions, pluginName, animations?, width?, height? }].
+ * The chosen skill's instructions are added to the prompt; its animations and size fill in the plan.
+ */
+export function openPromptBuilder({ project, documentId, openDialog, openImport, openImageGenerator, toast, initial, skills = [] }) {
   const key = documentId || 'current';
   const draft = initial
     ? { ...freshDraft(project), ...copy(initial) }
@@ -46,6 +50,7 @@ export function openPromptBuilder({ project, documentId, openDialog, openImport,
     <form id="prompt-builder-form" class="prompt-builder" novalidate>
       <div class="prompt-builder-body">
         <p class="prompt-intro">Describe new pixel art and plan its animations. Your prompt includes the complete PXA format guide, so you can start without an example.</p>
+        ${openImageGenerator ? '<button type="button" class="button prompt-image-model" id="prompt-image-model">Or draw it with an image model (OpenAI, Gemini or any chatbot) →</button>' : ''}
         <div class="prompt-brief-grid">
           <label class="field"><span class="field-label">Project name</span><input id="prompt-name" maxlength="120" required autocomplete="off"></label>
           <label class="field prompt-description-field"><span class="field-label">What would you like to create?</span><textarea id="prompt-description" rows="3" maxlength="6000" required placeholder="A tiny pirate with a red coat and a curved sword, viewed from above…"></textarea></label>
@@ -57,6 +62,7 @@ export function openPromptBuilder({ project, documentId, openDialog, openImport,
           <label class="field prompt-color-limit" id="prompt-color-limit-field"><span class="field-label">Max. colors</span><input id="prompt-max-colors" type="number" min="1" max="64" step="1" required inputmode="numeric"></label>
         </div>
         <label class="field"><span class="field-label">PXA format</span><select id="prompt-format-version"><option value="2">PXA 2 · reusable parts and shapes</option><option value="1">PXA 1 · legacy pixel data</option></select></label>
+        ${skills.length ? `<label class="field prompt-skill-field"><span class="field-label">Prompt skill · from plugins</span><select id="prompt-skill"><option value="">None</option>${skills.map(skill => `<option value="${escapeHTML(skill.key)}" title="From ${escapeHTML(skill.pluginName)}">${escapeHTML(skill.title)}</option>`).join('')}</select></label><p id="prompt-skill-help" class="prompt-section-help" hidden></p>` : ''}
         <div id="prompt-current-palette" class="prompt-current-palette" hidden>
           <div class="prompt-palette-swatches" aria-hidden="true">${draft.palette.map(color => `<span style="--prompt-color:${escapeHTML(color)}" title="${escapeHTML(color.toUpperCase())}"></span>`).join('')}</div>
           <p>${draft.palette.length} fixed colors from “${escapeHTML(project.name)}”, in their existing order. The artwork is not included.</p>
@@ -101,10 +107,13 @@ export function openPromptBuilder({ project, documentId, openDialog, openImport,
     paletteMode: 'prompt-palette-mode', maxColors: 'prompt-max-colors', style: 'prompt-style',
   };
   for (const [property, id] of Object.entries(fields)) $(id).value = draft[property];
+  const chosenSkill = () => skills.find(skill => skill.key === draft.skill) || null;
+  if ($('prompt-skill')) $('prompt-skill').value = chosenSkill() ? draft.skill : '';
   let showErrors = false;
 
   function readDraft() {
     for (const [property, id] of Object.entries(fields)) draft[property] = $(id).value;
+    if ($('prompt-skill')) draft.skill = $('prompt-skill').value;
     draft.animations = [...list.children].map(row => ({
       name: row.querySelector('.prompt-animation-name').value,
       frameCount: row.querySelector('.prompt-animation-frames').value,
@@ -117,6 +126,7 @@ export function openPromptBuilder({ project, documentId, openDialog, openImport,
     return {
       ...draft, formatVersion:Number(draft.formatVersion), width: Number(draft.width), height: Number(draft.height), maxColors: Number(draft.maxColors),
       animations: draft.animations.map(animation => ({ ...animation, frameCount: Number(animation.frameCount), fps: Number(animation.fps) })),
+      skill: chosenSkill() ? { title: chosenSkill().title, instructions: chosenSkill().instructions } : undefined,
     };
   }
 
@@ -172,6 +182,17 @@ export function openPromptBuilder({ project, documentId, openDialog, openImport,
     return text;
   }
 
+  $('prompt-skill')?.addEventListener('change', () => {
+    readDraft();
+    const skill = chosenSkill();
+    $('prompt-skill-help').hidden = !skill;
+    $('prompt-skill-help').textContent = skill?.description || '';
+    if (!skill || (!skill.animations && !skill.width && !skill.height)) return;
+    if (skill.animations) draft.animations = copy(skill.animations);
+    for (const property of ['width', 'height']) if (skill[property]) { draft[property] = skill[property]; $(fields[property]).value = skill[property]; }
+    renderRows();
+    toast(`“${skill.title}” filled in its size and animations. Everything stays editable.`);
+  });
   form.addEventListener('input', update);
   form.addEventListener('change', update);
   list.addEventListener('click', event => {
@@ -247,6 +268,9 @@ export function openPromptBuilder({ project, documentId, openDialog, openImport,
     toast('Prompt downloaded as a text file.');
   };
   $('prompt-paste-result').onclick = () => { readDraft(); openImport(); };
+  if (openImageGenerator) $('prompt-image-model').onclick = () => { readDraft(); openImageGenerator(); };
   renderRows(); update();
+  if (initial?.skill && chosenSkill()) $('prompt-skill').dispatchEvent(new Event('change', { bubbles: true }));
+  else if (chosenSkill()) { $('prompt-skill-help').hidden = !chosenSkill().description; $('prompt-skill-help').textContent = chosenSkill().description; }
   $('prompt-description').focus();
 }

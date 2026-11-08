@@ -41,3 +41,11 @@ export const PALETTE_PRESETS = Object.freeze([
   P('1bit-monitor-glow', '1-bit Monitor Glow', 'Polyducks', ['retro'], '222323 f0f6f0'),
   P('1bit', '1-bit black & white', '', ['retro'], '000000 ffffff'),
 ]);
+
+let extraPresets = Object.freeze([]);
+/** Palettes registered by plugins (tag 'plugin'), shown after the built-in presets. */
+export function setExtraPalettes(list) {
+  extraPresets = Object.freeze(list.map(({ id, name, author = '', colours }) => Object.freeze({ id, name, author, tags: Object.freeze(['plugin']), colours: Object.freeze([...colours]) })));
+}
+/** Built-in presets followed by plugin palettes. */
+export const allPalettePresets = () => (extraPresets.length ? [...PALETTE_PRESETS, ...extraPresets] : PALETTE_PRESETS);

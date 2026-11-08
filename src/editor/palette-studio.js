@@ -8,13 +8,13 @@ import { compositeFrame } from '../domain/project.js';
 import { hexToOklch, oklchToHex, shadingRamp, nearestIndexMap } from '../domain/colour.js';
 import { HARMONIES, harmonyHues, harmonyPalette, complementColour, neutralColour, tintsShadesTones, sortPaletteIndices, similarColours,
   lightnessGaps, mergeColours, usedPaletteIndices, replacePalette, removePaletteColour, removeUnusedColours, reorderPalette } from '../domain/palette-theory.js';
-import { PALETTE_PRESETS } from '../domain/palette-presets.js';
+import { allPalettePresets } from '../domain/palette-presets.js';
 
 let d, menu = null;
 const C_MAX = 0.32, HEX = /^#?[0-9a-f]{6}$/i;
 const TABS = [['harmony', 'Harmonies', 'spark'], ['shades', 'Shades & tints', 'ramp'], ['presets', 'Popular palettes', 'grid'], ['analyse', 'Analyse', 'shade']];
 const SIZES = [['all', 'All'], ['8', '≤ 8'], ['16', '9–16'], ['32', '17–32'], ['64', '33–64']];
-const TAGS = [['', 'Any style'], ['gameboy', 'Game Boy'], ['retro', 'Retro hardware'], ['general', 'Artist palettes']];
+const TAGS = [['', 'Any style'], ['gameboy', 'Game Boy'], ['retro', 'Retro hardware'], ['general', 'Artist palettes'], ['plugin', 'From plugins']];
 const ui = { tab: 'harmony', lch: [0.62, 0.15, 35], kind: 'complementary', spread: 0, steps: 5, hueShift: 20, span: 0.6,
   shade: null, shSteps: 7, shHue: 24, shSpan: 0.7, shDrop: 0.35, query: '', size: 'all', tag: '', preset: 'pico-8', similar: 0.04, rowOn: {} };
 const FORMAT = { steps: v => v, hueShift: v => `${v}°`, span: v => `${Math.round(v * 100)}%`, spread: v => `${v}°`, shSteps: v => v, shHue: v => `${v}°`,
@@ -100,7 +100,7 @@ function currentRows() {
       row('neutral', 'Neutrals', [0.25, 0.5, 0.75, 1].map(a => neutralColour(base, a)), false)];
   }
   if (ui.tab === 'presets') {
-    const preset = PALETTE_PRESETS.find(p => p.id === ui.preset);
+    const preset = allPalettePresets().find(p => p.id === ui.preset);
     if (!preset) return [];
     const width = Math.min(8, preset.colours.length);
     return Array.from({ length: Math.ceil(preset.colours.length / width) }, (_, i) => row(`${preset.id}-${i}`, preset.colours.length > width ? `${i * width + 1}–${Math.min(preset.colours.length, i * width + width)}` : `${preset.colours.length} colours`, preset.colours.slice(i * width, i * width + width)));
@@ -136,8 +136,8 @@ function shadesTab() {
 
 function presetsTab() {
   const q = ui.query.trim().toLowerCase(), limit = ui.size === 'all' ? null : Number(ui.size), lower = { 8: 0, 16: 8, 32: 16, 64: 32 }[ui.size] ?? 0;
-  const list = PALETTE_PRESETS.filter(p => (!q || `${p.name} ${p.author}`.toLowerCase().includes(q)) && (!limit || (p.colours.length <= limit && p.colours.length > lower)) && (!ui.tag || p.tags.includes(ui.tag)));
-  const preset = PALETTE_PRESETS.find(p => p.id === ui.preset);
+  const list = allPalettePresets().filter(p => (!q || `${p.name} ${p.author}`.toLowerCase().includes(q)) && (!limit || (p.colours.length <= limit && p.colours.length > lower)) && (!ui.tag || p.tags.includes(ui.tag)));
+  const preset = allPalettePresets().find(p => p.id === ui.preset);
   return `<div class="ps-preset-tools"><label class="sr-only" for="ps-search">Search palettes</label><input id="ps-search" type="search" class="ps-search" placeholder="Search palettes or authors" value="${d.escapeHTML(ui.query)}">
     <div class="ps-chips" role="radiogroup" aria-label="Palette size">${SIZES.map(([v, l]) => `<button type="button" class="ps-chip-button" role="radio" data-size="${v}" aria-checked="${ui.size === v}">${l}</button>`).join('')}</div>
     <label class="sr-only" for="ps-tag">Style</label><select id="ps-tag" class="ps-select">${TAGS.map(([v, l]) => `<option value="${v}"${ui.tag === v ? ' selected' : ''}>${l}</option>`).join('')}</select></div>
@@ -193,7 +193,7 @@ function onClick(event) {
 }
 const focusAgain = selector => d.$('ps-main').querySelector(selector)?.focus();
 function renderDetail() {
-  const preset = PALETTE_PRESETS.find(p => p.id === ui.preset), detail = d.$('ps-main').querySelector('.ps-preset-detail');
+  const preset = allPalettePresets().find(p => p.id === ui.preset), detail = d.$('ps-main').querySelector('.ps-preset-detail');
   detail.querySelector('.ps-title').textContent = preset.name;
   detail.querySelector('.ps-hint').innerHTML = `${preset.author ? `By ${d.escapeHTML(preset.author)} · ` : ''}via lospec.com. Click a swatch to add just that colour; <strong>Replace palette</strong> recolours your artwork with its nearest colours.`;
   refresh();

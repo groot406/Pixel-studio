@@ -17,6 +17,9 @@
   <link rel="stylesheet" href="./src/editor/export-dialog.css">
   <link rel="stylesheet" href="./src/editor/tour.css">
   <link rel="stylesheet" href="./src/editor/timeline.css">
+  <link rel="stylesheet" href="./src/plugins/plugins.css">
+  <link rel="stylesheet" href="./src/editor/ai-image.css">
+  <link rel="stylesheet" href="./src/bridge/bridge.css">
 </head>
 <body>
   <svg class="icon-defs" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
@@ -67,6 +70,7 @@
     <symbol id="i-left" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></symbol>
     <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
     <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9 9a3 3 0 0 1 6 0c0 2-3 2-3 4M12 17h.01"/></symbol>
+    <symbol id="i-plugin" viewBox="0 0 24 24"><path d="M10 4.5a2 2 0 0 1 4 0V6h4v4h-1.5a2 2 0 0 0 0 4H18v4h-4v-1.5a2 2 0 0 0-4 0V18H6v-4h1.5a2 2 0 0 0 0-4H6V6h4z"/></symbol>
     <symbol id="i-fit" viewBox="0 0 24 24"><path d="M9 3H3v6M15 3h6v6M3 15v6h6M21 15v6h-6"/></symbol>
     <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8" cy="8" r="1"/><path d="m3 17 6-6 4 4 3-3 5 5"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
@@ -110,7 +114,7 @@
   <header class="app-header">
     <a class="brand" href="./" aria-label="Pixel Studio home"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span>pixel<span class="brand-light">studio</span><small>MAKE SOMETHING LITTLE.</small></span></a>
     <div class="project-info"><label class="sr-only" for="project-name">Project name</label><input id="project-name" value="Panda adventurer" maxlength="80" spellcheck="false"><button type="button" id="save-status" class="save-status" data-state="saved"><i></i> Saved on this device</button></div>
-    <div class="header-actions"><button id="help-button" class="icon-button" title="Help, tours and shortcuts" aria-label="Help, tours and shortcuts"><svg><use href="#i-help"/></svg></button><button id="new-project" class="button subtle" aria-label="New project"><svg><use href="#i-plus"/></svg><span>New</span></button><button id="import-button" class="button" aria-label="Import"><svg><use href="#i-import"/></svg><span>Import</span></button><button id="export-button" class="button primary" aria-label="Export"><svg><use href="#i-export"/></svg><span>Export</span></button><button id="prompt-builder-button" class="button prompt-builder-entry" title="Build an AI prompt" aria-label="Build an AI prompt"><svg aria-hidden="true"><use href="#i-spark"/></svg><span>AI prompt</span></button><button id="ai-edit-button" class="button ai-edit-entry" title="Edit artwork with AI" aria-label="Edit artwork with AI"><svg aria-hidden="true"><use href="#i-pencil"/></svg><span>AI edit</span></button></div>
+    <div class="header-actions"><button id="help-button" class="icon-button" title="Help, tours and shortcuts" aria-label="Help, tours and shortcuts"><svg><use href="#i-help"/></svg></button><button id="plugins-button" class="icon-button" title="Plugins &amp; skills (⌘/Ctrl K: command palette)" aria-label="Plugins and skills"><svg><use href="#i-plugin"/></svg></button><button id="new-project" class="button subtle" aria-label="New project"><svg><use href="#i-plus"/></svg><span>New</span></button><button id="import-button" class="button" aria-label="Import"><svg><use href="#i-import"/></svg><span>Import</span></button><button id="export-button" class="button primary" aria-label="Export"><svg><use href="#i-export"/></svg><span>Export</span></button><button id="prompt-builder-button" class="button prompt-builder-entry" title="Build an AI prompt" aria-label="Build an AI prompt"><svg aria-hidden="true"><use href="#i-spark"/></svg><span>AI prompt</span></button><button id="ai-edit-button" class="button ai-edit-entry" title="Edit artwork with AI" aria-label="Edit artwork with AI"><svg aria-hidden="true"><use href="#i-pencil"/></svg><span>AI edit</span></button></div>
   </header>
 
   <nav class="project-tabs-bar" aria-label="Workspace">
@@ -324,6 +328,7 @@
           <button id="effect-check" class="object-action" type="button" aria-pressed="false" aria-controls="cleanup-results"><svg aria-hidden="true"><use href="#i-inspect"/></svg><span class="object-action-copy"><strong>Pixel cleanup</strong><small>Find strays, corners, jaggies, banding</small></span></button>
         </div>
         <div id="cleanup-results" class="cleanup-results" hidden></div>
+        <div id="plugin-effects" class="plugin-effects" aria-label="Plugin effects and commands"></div>
       </details>
       <details class="animations-section panel-section" data-panel="animations" open>
         <summary class="section-heading"><h2>ANIMATIONS <span id="animation-count" class="inline-count">3</span></h2><svg class="panel-chevron" aria-hidden="true"><use href="#i-chevron"/></svg></summary>

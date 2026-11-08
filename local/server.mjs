@@ -5,6 +5,12 @@ import { extname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CodexClient, LocalAIError, publicError } from './codex-client.mjs';
 import { MAX_PROMPT_BYTES, MAX_PREVIEW_BYTES, MAX_PREVIEW_COUNT, readPreviewImages, isPixelPrompt } from './pixel-request.mjs';
+import { createImageClient } from './image-client.mjs';
+import { createImageRoutes } from './image-routes.mjs';
+import { createBridge } from './bridge.mjs';
+
+/** How an MCP client launches this checkout's agent server (shown by the in-app "Connect an AI agent" dialog). */
+const MCP_COMMAND = Object.freeze({ command: process.execPath, args: [fileURLToPath(new URL('./cli.mjs', import.meta.url)), 'mcp'] });
 
 const MAX_BODY_BYTES = MAX_PROMPT_BYTES + Math.ceil(MAX_PREVIEW_BYTES * MAX_PREVIEW_COUNT * 4 / 3) + 64 * 1024;
 const TYPES = {
@@ -57,10 +63,13 @@ async function readJson(request) {
 
 /** Loopback-only local application. clientFactory is an in-process test seam,
  * never an environment setting or a browser-controlled parameter. */
-export function createLocalServer({ distDirectory = fileURLToPath(new URL('../dist/', import.meta.url)), clientFactory = () => new CodexClient() } = {}) {
+export function createLocalServer({ distDirectory = fileURLToPath(new URL('../dist/', import.meta.url)), clientFactory = () => new CodexClient(), imageClientFactory = () => createImageClient(), bridgeDirectory = null } = {}) {
   const csrfToken = randomBytes(32).toString('hex');
+  // bridgeDirectory: where bridge.json is published for agent processes (start.mjs: ~/.pixelstudio; null = not published).
+  const bridge = createBridge(bridgeDirectory ? { directory: bridgeDirectory } : {});
   const clients = new Set();
   const controllers = new Set();
+  const images = createImageRoutes({ clientFactory: imageClientFactory, csrfToken, controllers, checkToken: value => matchesToken(value, csrfToken), isClosing: () => closing });
   let active = false;
   let statusPromise;
   let lastStatus;
@@ -161,7 +170,7 @@ export function createLocalServer({ distDirectory = fileURLToPath(new URL('../di
     response.setHeader('Referrer-Policy', 'no-referrer');
     response.setHeader('X-Frame-Options', 'DENY');
     response.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
-    response.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'");
+    response.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; font-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'");
     try {
       if (closing) throw new LocalAIError('SHUTTING_DOWN', 'Pixel Studio is closing.', 503);
       const origin = checkOrigin(request);
@@ -172,7 +181,7 @@ export function createLocalServer({ distDirectory = fileURLToPath(new URL('../di
         const connection = await status();
         if (response.destroyed) return;
         response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        response.end(JSON.stringify({ local: true, ...connection, csrfToken, busy: active }));
+        response.end(JSON.stringify({ local: true, ...connection, csrfToken, busy: active, bridge: true, mcpCommand: MCP_COMMAND }));
         return;
       }
       if (url.pathname === '/api/local-ai/edit') {
@@ -180,6 +189,9 @@ export function createLocalServer({ distDirectory = fileURLToPath(new URL('../di
         await generate(request, response);
         return;
       }
+      if (url.pathname === '/api/image/status') { await images.status(request, response); return; }
+      if (url.pathname === '/api/image/generate') { await images.generate(request, response); return; }
+      if (await bridge.handle(request, response, url, csrfToken)) return;
       if (url.pathname.startsWith('/api/')) throw new LocalAIError('NOT_FOUND', 'Unknown local endpoint.', 404);
       if (!['GET', 'HEAD'].includes(request.method)) throw new LocalAIError('METHOD_NOT_ALLOWED', 'Use GET to open Pixel Studio.', 405);
       await staticFile(url.pathname, request, response);
@@ -200,11 +212,15 @@ export function createLocalServer({ distDirectory = fileURLToPath(new URL('../di
         server.once('error', reject);
         server.listen(port, '127.0.0.1', () => { server.removeListener('error', reject); resolveListen(); });
       });
+      if (bridgeDirectory) await bridge.publish(server.address().port);
       return `http://127.0.0.1:${server.address().port}/`;
     },
+    bridge,
     async close() {
       if (closing) return;
       closing = true;
+      bridge.close();
+      await bridge.unpublish();
       for (const controller of controllers) controller.abort();
       await Promise.allSettled([...clients].map(client => client.close()));
       server.closeAllConnections();

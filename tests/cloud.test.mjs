@@ -8,6 +8,7 @@ import { chatCredits, refreshCredits, spendCredits, creditBalance, subscriptionG
 import { openStore } from '../cloud/store.mjs';
 import { createBilling } from '../cloud/billing.mjs';
 import { createCloudServer } from '../cloud/server.mjs';
+import { createMailer } from '../cloud/mailer.mjs';
 
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGBgAAAABQABpfZFQAAAAABJRU5ErkJggg==';
 const SECRET = 'whsec_test';
@@ -234,4 +235,15 @@ test('cloud projects are per user and limited by plan', async t => {
   await s.signIn('other@example.com');
   assert.equal((await s.call('/api/cloud/projects/proj-aaa1')).status, 404);
   assert.equal((await (await s.call('/api/cloud/projects')).json()).projects.length, 0);
+});
+
+test('a refused sign-in email logs the link in development and fails in production', async () => {
+  const refused = async () => new Response('{"message":"testing domain restriction"}', { status: 403 });
+  const logs = [];
+  const dev = createMailer({ config: { resendApiKey: 're_test', mailFrom: 'a@b.c', production: false }, fetchImpl: refused, log: line => logs.push(line) });
+  await dev.sendSignIn('me@example.com', 'http://localhost/verify?token=x');
+  assert.ok(logs.some(line => line.includes('403') && line.includes('testing domain restriction')));
+  assert.ok(logs.some(line => line.includes('http://localhost/verify?token=x')));
+  const prod = createMailer({ config: { resendApiKey: 're_test', mailFrom: 'a@b.c', production: true }, fetchImpl: refused, log: () => {} });
+  await assert.rejects(prod.sendSignIn('me@example.com', 'https://x/verify'), { code: 'MAIL_FAILED' });
 });

@@ -27,8 +27,13 @@ export function createMailer({ config, fetchImpl = globalThis.fetch, log = conso
           method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.resendApiKey}` },
           body: JSON.stringify({ from: config.mailFrom, to: [email], ...message }),
         });
-      } catch { response = null; }
-      if (!response?.ok) throw new CloudError('MAIL_FAILED', 'The sign-in email could not be sent. Try again in a moment.', 502);
+      } catch (error) { response = { ok: false, status: 0, text: async () => error.message }; }
+      if (response.ok) return;
+      const reason = await response.text().catch(() => '');
+      log(`[pixel-studio-cloud] Resend refused the sign-in email for ${email} (${response.status}): ${reason.slice(0, 300)}`);
+      // The resend.dev test sender only reaches the Resend account owner, so keep local sign-in usable.
+      if (!config.production) { log(`[pixel-studio-cloud] sign-in link for ${email}: ${link}`); return; }
+      throw new CloudError('MAIL_FAILED', 'The sign-in email could not be sent. Try again in a moment.', 502);
     },
   };
 }

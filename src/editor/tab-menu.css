@@ -1,0 +1,26 @@
+/* Project tab management: unsaved dot, drag to reorder, all-tabs button and the shared context menu. */
+.project-tab-select { display: flex; align-items: center; gap: 6px; }
+.project-tab-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-tab-dirty { flex: 0 0 6px; width: 6px; height: 6px; border-radius: 50%; background: #d08a2e; }
+.project-tab-close { opacity: .55; }
+.project-tab:hover .project-tab-close, .project-tab.active .project-tab-close, .project-tab-close:focus-visible { opacity: 1; }
+.project-tab.dragging { opacity: .45; }
+body.is-dragging-tab, body.is-dragging-tab * { cursor: grabbing !important; user-select: none; }
+.tab-drop-line { position: fixed; z-index: 120; width: 3px; border-radius: 2px; background: var(--green); box-shadow: 0 0 0 2px rgba(255,255,255,.8); pointer-events: none; }
+.project-tabs-bar .tab-list-button { flex: 0 0 28px; width: 28px; height: 32px; padding: 7px; color: #52684d; }
+
+.context-menu { position: fixed; z-index: 200; min-width: 220px; max-width: 320px; padding: 5px; overflow-y: auto; border: 1px solid #d6dfcc; border-radius: 9px; background: #fff; box-shadow: 0 14px 34px rgba(25, 40, 20, .18), 0 2px 6px rgba(25, 40, 20, .08); font-size: 12px; animation: context-in .09s ease-out; }
+@keyframes context-in { from { opacity: 0; transform: translateY(-3px); } }
+.context-item { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 30px; padding: 5px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--ink, #1f2a1b); font: inherit; text-align: left; cursor: pointer; }
+.context-item:hover, .context-item:focus-visible, .context-item:focus { outline: none; background: #edf3e5; }
+.context-item[aria-disabled="true"] { opacity: .42; cursor: default; background: transparent; }
+.context-item.danger:not([aria-disabled]):hover, .context-item.danger:focus { background: #fbecea; color: #9b2d20; }
+.context-icon { display: inline-flex; flex: 0 0 16px; width: 16px; height: 16px; color: #5e6f55; }
+.context-icon svg { width: 15px; height: 15px; }
+.context-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.context-item[aria-checked="true"] .context-label { font-weight: 650; color: var(--green); }
+.context-dot { flex: 0 0 6px; width: 6px; height: 6px; border-radius: 50%; background: #d08a2e; }
+.context-item kbd { flex: 0 0 auto; padding: 1px 5px; border: 1px solid #dfe6d7; border-radius: 4px; background: #f6f8f2; color: #6c7c64; font: 600 10px/1.5 ui-monospace, monospace; }
+.context-sep { height: 1px; margin: 4px 6px; background: #e3e9dc; }
+.context-heading { padding: 6px 8px 4px; color: #74846b; font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.project-tabs-bar .tab-list-button svg { transform: rotate(90deg); }

@@ -5,6 +5,10 @@
 import { pluginPaletteCommands } from './editor.js';
 
 let d, dialog = null;
+const extraSources = [];
+
+/** Let editor modules add commands (e.g. workspace views); `source()` returns palette items. */
+export function registerCommandSource(source) { extraSources.push(source); }
 const SOURCES = [
   ['.header-actions button, .project-tabs-bar > button', 'App'],
   ['[data-tool]', 'Tool'],
@@ -34,6 +38,7 @@ export function commandItems() {
     ...builtIns(),
     { key: 'plugins-manager', title: 'Plugins & skills', description: 'Install, enable and write plugins', group: 'App', disabled: '', run: () => d.openPluginManager() },
     ...pluginPaletteCommands().map(c => ({ ...c, group: 'Plugin' })),
+    ...extraSources.flatMap(source => source()),
   ];
 }
 

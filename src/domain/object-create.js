@@ -3,6 +3,7 @@ import { validateProject, insertProjectLayer, removeProjectLayer, uid, MAX_LAYER
 import { sourceForCel, pixelSpans, renderOperations, hasLockedInstances } from './artwork.js';
 import { celObjects } from './objects.js';
 import { findIslands } from './toolbox.js';
+import { assertEditScope, scopeFrames } from './frame-scope.js';
 
 /** A part ID derived from a display name, e.g. "Left eye" → "left-eye". */
 export function partIdFromName(name) {
@@ -55,7 +56,7 @@ function erase(cel, indices, width) {
  * source (or `destinationId` when given). An ungrouped source left empty everywhere is removed.
  */
 export function createObjectFromPixels(project, target, { rect, mask, name = 'Object', scope = 'frame', destinationId } = {}) {
-  if (!['frame', 'animation'].includes(scope)) throw new Error('Choose this frame or every frame.');
+  assertEditScope(scope);
   const p = validateProject(project);
   const animation = p.animations.find(a => a.id === target.animationId), frame = animation?.frames.find(f => f.id === target.frameId);
   const layer = p.layers.find(l => l.id === target.layerId);
@@ -68,7 +69,7 @@ export function createObjectFromPixels(project, target, { rect, mask, name = 'Ob
     for (let yy = y; yy < y + height; yy++) for (let xx = x; xx < x + width; xx++) area.push(yy * p.width + xx);
   }
   if (!area.length || area.some(i => !Number.isInteger(i) || i < 0 || i >= p.width * p.height)) throw new Error('Select an area inside the canvas.');
-  const frames = scope === 'animation' ? animation.frames : [frame];
+  const frames = scopeFrames(animation, frame, scope);
   const label = String(name).trim().slice(0, 80) || 'Object';
   p.version = 3; p.parts ||= [];
   const baseId = partIdFromName(label), variants = new Map(), placements = [];

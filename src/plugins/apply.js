@@ -33,12 +33,12 @@ export function selectionToMask(selection, width, height) {
 export function pixelFrames(project, { animationId, frameId, layerId, editScope = 'frame' }) {
   const { animation } = locate(project, animationId, layerId), frames = [];
   let skipped = 0;
-  const list = editScope === 'animation' ? animation.frames : animation.frames.filter(f => f.id === frameId);
+  const list = editScope === 'animation' ? animation.frames : Array.isArray(editScope) ? animation.frames.filter(f => f.id === frameId || editScope.includes(f.id)) : animation.frames.filter(f => f.id === frameId);
   if (!list.length) throw new Error('This frame no longer exists.');
   for (const frame of list) {
     const cel = celOf(frame, layerId);
     if (hasLockedInstances(cel)) {
-      if (editScope !== 'animation') throw new Error('Unlock objects in this container first.');
+      if (editScope === 'frame') throw new Error('Unlock objects in this container first.');
       skipped++; continue;
     }
     frames.push({ id: frame.id, index: animation.frames.indexOf(frame), pixels: cel.pixels });

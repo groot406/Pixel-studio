@@ -11,10 +11,14 @@ import { hexToRgb } from '../domain/colour.js';
 import { resizeBox } from '../domain/resize.js';
 import { renderObjectsPanel } from './objects-panel.js';
 import { initPanelLayout } from './panel-layout.js';
+import { initWorkspaceViews } from './workspace-views.js';
+import { initTabTools, bindTabs, TAB_SHORTCUTS } from './tab-menu.js';
+import { editScope, editFrameIds, editScopeText } from './edit-scope.js';
+import { nextActiveTab, moveTab as moveTabIds, pushClosed } from '../domain/tabs.js';
 import { openSharedPartEditor } from './shared-part-editor.js';
 import { hasLockedInstances } from '../domain/artwork.js';
 import { openPartLibrary, renderPartsStrip, PART_DRAG_TYPE } from './part-library.js';
-import { placePartInFrames } from '../domain/parts.js';
+import { placePartInFrames, frameRanges } from '../domain/parts.js';
 import { PXA2_GUIDE } from '../formats/pxa-v2.js';
 import { MAX_SIZE, MAX_TOTAL_PIXELS, MAX_COLORS, MAX_LAYERS, uid, getAnimationLayers, insertProjectLayer, makeLayeredFrame, getLayerPixels, compositeFrame, stripEmptyFrames, blankProject, validateProject, linePoints, rectanglePoints, ellipsePoints, floodFill, paletteFromRgba, mapRgbaToPalette, resizePixels, nearestColor } from '../domain/project.js';
 import { inspectSheet, sliceSpritesheet, validateSheetMetadata } from '../formats/spritesheet.js';
@@ -92,7 +96,7 @@ const state = {
   cursor: null, drawing: null, selection: null, lastPaint: null, shiftHeld: false, swap: false, swapFirst: null,
   brushSize: 1, brushShape: 'square', symmetry: 'none', pixelPerfect: false, antialias: false, wandMode: 'shape', resizeMode: 'free', transformScope: 'frame', clipboard: null, objectClipboard: null, objectMulti: null, lastClipboard: 'pixels',
   undo: [], redo: [], samples: [], sampleData: new Map(), saveTimer: null, storageAvailable: true, importSkipEmpty: true,
-  documents: new Map(), openIds: [], documentId: null, panels: {tools:false,details:false}, panelSections: {}, sessionSaveError: false,
+  documents: new Map(), openIds: [], closedTabs: [], documentId: null, panels: {tools:false,details:false}, panelSections: {}, sessionSaveError: false,
 };
 let toastTimer;
 let projectStore;
@@ -239,6 +243,11 @@ function renderSaveStatus() {
     :['saved','Saved on this device','Saved on this device. Click for version history'];
   status.dataset.state=mode; status.title=title;
   status.innerHTML=`<i></i> ${text}`;
+  for (const button of $('project-tabs').querySelectorAll('[data-document]')) {
+    const dirty=!isTabSaved(button.dataset.document), dot=button.querySelector('.project-tab-dirty');
+    if (dirty && !dot) button.insertAdjacentHTML('beforeend','<i class="project-tab-dirty" aria-label="unsaved changes"></i>');
+    else if (!dirty) dot?.remove();
+  }
 }
 function revealActiveTab() {
   const tabList=$('project-tabs'),selected=tabList.querySelector('[aria-selected="true"]');
@@ -253,7 +262,7 @@ function renderProjectTabs() {
   tabList.innerHTML=state.openIds.map(id=>{
     const document=state.documents.get(id),active=id===state.documentId;
     const safeId=escapeHTML(id);
-    return `<div class="project-tab${active?' active':''}" role="presentation"><button class="project-tab-select" id="project-tab-${safeId}" role="tab" aria-controls="workbench" aria-selected="${active}" tabindex="${active?0:-1}" data-document="${safeId}" title="${escapeHTML(document.project.name)}"><span class="project-tab-name">${escapeHTML(document.project.name)}</span></button><button class="project-tab-close" data-close-document="${safeId}" title="Close tab · keep saved on this device" aria-label="Close ${escapeHTML(document.project.name)}">${icon('close')}</button></div>`;
+    return `<div class="project-tab${active?' active':''}" role="presentation"><button class="project-tab-select" id="project-tab-${safeId}" role="tab" aria-controls="workbench" aria-selected="${active}" tabindex="${active?0:-1}" data-document="${safeId}" title="${escapeHTML(document.project.name)}"><span class="project-tab-name">${escapeHTML(document.project.name)}</span>${isTabSaved(id)?'':'<i class="project-tab-dirty" aria-label="unsaved changes"></i>'}</button><button class="project-tab-close" data-close-document="${safeId}" title="Close tab · keep saved on this device" aria-label="Close ${escapeHTML(document.project.name)}">${icon('close')}</button></div>`;
   }).join('');
   tabList.scrollLeft=scroll;
   if (renderedDocumentId!==state.documentId) {
@@ -261,29 +270,81 @@ function renderProjectTabs() {
     renderedDocumentId=state.documentId;
   }
   tabList.querySelectorAll('[data-document]').forEach(button=>button.onclick=()=>{switchDocument(button.dataset.document);$(`project-tab-${state.documentId}`)?.focus({preventScroll:true});});
-  tabList.querySelectorAll('[data-close-document]').forEach(button=>button.onclick=()=>closeDocument(button.dataset.closeDocument));
+  tabList.querySelectorAll('[data-close-document]').forEach(button=>button.onclick=()=>closeDocuments([button.dataset.closeDocument]));
+  bindTabs(tabList);
   $('workbench').setAttribute('aria-labelledby',`project-tab-${state.documentId}`);
 }
-async function closeDocument(id) {
+function isTabSaved(id) { const document=state.documents.get(id); return !!document && (document.savedRevision===document.revision || (document.savedRevision===-1 && document.revision===0)) && !document.saveError; }
+function tabName(id) { return state.documents.get(id)?.project.name || 'Untitled sprite'; }
+/** Save and close several tabs at once (one toast). A tab that fails to save, or changes while saving, stays open. */
+async function closeDocuments(ids) {
+  ids=ids.filter(id=>state.documents.has(id));
+  if (!ids.length) return;
+  if (state.inPlaceEdit && ids.includes(state.documentId)) {toast('Apply or cancel the canvas object edit before closing this tab.');return;}
   finishDrawing(); syncDocument();
-  const document=state.documents.get(id);
-  if (!document || document.closing) return;
-  document.closing=true;
-  const revision=document.revision;
-  const saved=await persistDocument(document);
-  document.closing=false;
-  if (!saved || !projectStore.available) {toast('This project could not be saved. Export its data before closing.');return;}
-  if (id===state.documentId) {finishDrawing();syncDocument();}
-  if (revision!==document.revision) {toast('The project changed while saving. Close the tab again to keep the latest changes.');return;}
-  const index=state.openIds.indexOf(id),wasActive=id===state.documentId;
-  state.openIds=state.openIds.filter(openId=>openId!==id);
-  state.documents.delete(id);
+  const results=await Promise.all(ids.map(async id=>{
+    const document=state.documents.get(id);
+    if (!document || document.closing) return null;
+    document.closing=true;
+    const revision=document.revision, saved=await persistDocument(document);
+    document.closing=false;
+    if (id===state.documentId) syncDocument();
+    return saved && projectStore.available && revision===document.revision ? id : null;
+  }));
+  const closed=results.filter(Boolean), kept=ids.length-closed.length;
+  if (!closed.length) {toast(ids.length===1?'This project could not be saved. Export its data before closing.':'These projects could not be saved. Export their data before closing.');return;}
+  const names=closed.map(tabName), next=nextActiveTab(state.openIds,state.documentId,closed);
+  state.openIds=state.openIds.filter(id=>!closed.includes(id));
+  for (const id of closed) state.documents.delete(id);
+  state.closedTabs=pushClosed(state.closedTabs,closed);
   if (!state.openIds.length) {
     const fresh=makeDocument(blankProject('Untitled sprite'));
     state.documents.set(fresh.id,fresh);state.openIds.push(fresh.id);activateDocument(fresh.id);scheduleSave();saveNow();
-  } else if (wasActive) activateDocument(state.openIds[Math.min(index,state.openIds.length-1)]);
+  } else if (next!==state.documentId) activateDocument(next);
   else renderProjectTabs();
-  persistSession(); toast('Tab closed. Reopen it from Saved projects.');
+  persistSession();
+  const what=closed.length===1?`Closed “${names[0]}”`:`Closed ${closed.length} tabs`;
+  toast(`${what}. ${kept?`${kept} could not be saved and stayed open. `:''}Reopen with ${TAB_SHORTCUTS.reopen}.`);
+}
+async function reopenClosedTab() {
+  while (state.closedTabs.length) {
+    const id=state.closedTabs.at(-1);
+    state.closedTabs=state.closedTabs.slice(0,-1);
+    if (state.documents.has(id)) continue;
+    const saved=await projectStore?.getDocument(id).catch(()=>null);
+    if (!saved || state.documents.has(id)) continue;
+    const document=makeDocument(saved.project,saved);document.savedRevision=0;
+    state.documents.set(id,document);state.openIds.push(id);
+    switchDocument(id);persistSession();toast(`Reopened “${saved.project.name}”.`);
+    return true;
+  }
+  toast('No closed tabs to reopen. Older work is in Saved projects.');
+  return false;
+}
+function duplicateTab(id) {
+  if (state.inPlaceEdit) {toast('Apply or cancel the canvas object edit first.');return;}
+  syncDocument();
+  const source=state.documents.get(id);
+  if (!source) return;
+  const project=cloneProject(source.project);
+  project.name=`${project.name} copy`.slice(0,80);
+  finishDrawing(); saveNow();
+  const document=makeDocument(project,{animationId:source.animationId,frameId:source.frameId,layerId:source.layerId});
+  state.documents.set(document.id,document);
+  state.openIds.splice(state.openIds.indexOf(id)+1,0,document.id);
+  activateDocument(document.id);scheduleSave();saveNow();persistSession();
+  toast(`Opened “${project.name}” in a new tab.`);
+}
+function moveTab(id, index) {
+  const next=moveTabIds(state.openIds,id,index);
+  if (next.join()===state.openIds.join()) return;
+  state.openIds=next;renderProjectTabs();persistSession();
+}
+function renameTab(id) {
+  if (id!==state.documentId) switchDocument(id);
+  if (state.documentId!==id) return;
+  const input=$('project-name');
+  input.focus();input.select();
 }
 /** Open (or switch to) a project and replace its artwork with recovered work as one undoable change. */
 async function restoreRecovered(id, project) {
@@ -321,6 +382,7 @@ async function savedProjectsDialog() {
     });
   } catch { $('modal-content').innerHTML='<p class="modal-body-text">Saved projects are unavailable in this browser. Keep your work by exporting pixel data.</p>'; }
 }
+let workspaceViews=null;
 function renderPanelState() {
   for (const [name,id] of [['tools','toggle-tools-panel'],['details','toggle-details-panel']]) {
     $('workbench').classList.toggle(`${name}-collapsed`,state.panels[name]);
@@ -604,7 +666,7 @@ function stepResize(kind) {
     const {width,height}=transformedSize({...node.instance,width:undefined,height:undefined},part);
     next={x:box.x+Math.floor((box.width-width)/2),y:box.y+box.height-height,width,height};
   } else next=resizeBox(box,'n',0,kind==='squash'?1:-1,{keepArea:true,area:part.width*part.height});
-  try{mutate(()=>{state.project=resizeObject(state.project,object.target,object.item.key,next,state.objectScope);});renderAll();}
+  try{mutate(()=>{state.project=resizeObject(state.project,object.target,object.item.key,next,editScope(state));});renderAll();}
   catch(error){toast(error.message);}
 }
 /** Placed objects among the selection, which turn, flip and rotate apply to. */
@@ -617,7 +679,7 @@ function transformItems() {
 function turnSelection(turn,items=transformItems()) {
   finishDrawing();
   if(!items.length){toast('Select an object to turn or flip.');return;}
-  try{mutate(()=>{state.project=turnObjects(state.project,objectTarget(),items,turn,state.objectScope);});}
+  try{mutate(()=>{state.project=turnObjects(state.project,objectTarget(),items,turn,editScope(state));});}
   catch(error){toast(error.message);}
 }
 /** Set the free angle of the primary object (others turn by the same amount); 0 also resets every selected object. */
@@ -626,8 +688,8 @@ function setObjectAngle(angle) {
   const items=transformItems(), object=resizableObject();
   if(!items.length || !Number.isFinite(angle))return;
   try{mutate(()=>{
-    if(angle===0)for(const item of items){const op=celObjects(currentFrame().cels.find(c=>c.layerId===item.layerId)).find(n=>n.key===item.key).instance;if(op.angle)state.project=rotateObjects(state.project,objectTarget(),[item],-op.angle,state.objectScope);}
-    else state.project=rotateObjects(state.project,objectTarget(),items,Math.round(angle)-(object?.node.instance.angle || 0),state.objectScope);
+    if(angle===0)for(const item of items){const op=celObjects(currentFrame().cels.find(c=>c.layerId===item.layerId)).find(n=>n.key===item.key).instance;if(op.angle)state.project=rotateObjects(state.project,objectTarget(),[item],-op.angle,editScope(state));}
+    else state.project=rotateObjects(state.project,objectTarget(),items,Math.round(angle)-(object?.node.instance.angle || 0),editScope(state));
   });}catch(error){toast(error.message);}
 }
 /** Canvas coordinates with sub-pixel precision, for rotation. */
@@ -653,7 +715,7 @@ function moveTilt(drawing,event) {
   // One degree per screen pixel; dragging the front down brings the top toward you (negative tip).
   let delta=sideways?{x:0,y:Math.round(dx)}:{x:-Math.round(dy),y:0};
   if(event.shiftKey){const axis=sideways?'y':'x';delta[axis]=Math.round((drawing.start[axis]+delta[axis])/15)*15-drawing.start[axis];}
-  try{state.project=tiltObjects(drawing.before.project,drawing.target,drawing.items,delta,state.objectScope);renderResizeOptions();}
+  try{state.project=tiltObjects(drawing.before.project,drawing.target,drawing.items,delta,editScope(state));renderResizeOptions();}
   catch(error){$('cursor-position').textContent=error.message;}
   const now=delta.x+drawing.start.x, turn=delta.y+drawing.start.y, wrap=v=>((((v%360)+540)%360)-180) || 0;
   $('cursor-position').textContent=sideways?`Turn ↔ ${wrap(turn)}°`:`Tip ↕ ${wrap(now)}°`;
@@ -686,8 +748,8 @@ function renderTools() {
   $('symmetry-mode').value=state.symmetry;
   $('filled-shape').checked=state.filled;
   renderToolExtras();
-  const everyFrame=state.objectScope==='animation' && currentAnimation().frames.length>1 && (PAINT_TOOLS.includes(state.tool) || ['object','resize','gradient'].includes(state.tool));
-  $('tool-status').textContent = TOOL_NAMES[state.tool] + (sized?` · ${state.brushSize}px`:'') + (state.filled && shaped ? ' · filled' : '') + (state.tool==='gradient'?` · ${gradientStatus()}`:'') + (state.tileMode?' · tile':'') + (everyFrame?' · all frames':'');
+  const scopeText=editScopeText(state,currentAnimation()), everyFrame=scopeText!=='this frame' && (PAINT_TOOLS.includes(state.tool) || ['object','resize','gradient'].includes(state.tool));
+  $('tool-status').textContent = TOOL_NAMES[state.tool] + (sized?` · ${state.brushSize}px`:'') + (state.filled && shaped ? ' · filled' : '') + (state.tool==='gradient'?` · ${gradientStatus()}`:'') + (state.tileMode?' · tile':'') + (everyFrame?` · ${scopeText.replace(/^all \d+ /,'all ')}`:'');
   for (const [id, active] of [['toggle-grid',state.grid],['toggle-onion',state.onion]]) {
     $(id).classList.toggle('active', active);
     $(id).setAttribute('aria-pressed', active);
@@ -1010,7 +1072,7 @@ function canvasPartKey(event,key) {
 /** Where Place puts a part follows the Edit scope switch: every frame of the animation, or only this one. */
 function partPlacementFrames() {
   const animation=currentAnimation();
-  return state.objectScope==='animation'?animation.frames.map(f=>f.id):[state.frameId];
+  return editFrameIds(state,animation);
 }
 function partPlaceLabel() {
   const n=partPlacementFrames().length;
@@ -1048,7 +1110,7 @@ function dropObjectRow(source,anchor,position) {
   finishDrawing();
   try {
     mutate(()=>{
-      const result=dropObject(state.project,objectTarget(source.layerId),source,anchor,position,state.objectScope);
+      const result=dropObject(state.project,objectTarget(source.layerId),source,anchor,position,editScope(state));
       state.project=result.project;state.layerId=result.layerId;state.objectSelection={layerId:result.layerId,key:result.key};
       if(position==='into')state.collapsedGroups.delete(anchor.layerId);
     });
@@ -1064,7 +1126,7 @@ function copyObjectItem(item,cut=false) {
   } catch(error){toast(error.message);}
 }
 /** Paste the object clipboard next to the selection, in the current animation (or frame) of any project tab. */
-function pasteObjectItem({independent=false,target=objectTarget(selectedObject().layerId),clip=state.objectClipboard,offset=0,scope=state.objectScope,fill=true,message}={}) {
+function pasteObjectItem({independent=false,target=objectTarget(selectedObject().layerId),clip=state.objectClipboard,offset=0,scope=editScope(state),fill=true,message}={}) {
   finishDrawing();
   if(!clip){toast('Copy an object first.');return;}
   try {
@@ -1073,7 +1135,7 @@ function pasteObjectItem({independent=false,target=objectTarget(selectedObject()
       state.project=result.project;
       if(target.animationId===currentAnimation().id){setObjectSelection(result.items);if(clip.kind!=='container')state.tool='object';}
     });
-    toast(message || `“${clip.name}” pasted${independent?' as an independent copy':''}${scope==='animation'?' into every frame of this animation':''}.`);
+    toast(message || `“${clip.name}” pasted${independent?' as an independent copy':''}${scope==='animation'?' into every frame of this animation':Array.isArray(scope)?` into ${scope.length} selected frames`:''}.`);
   } catch(error){toast(error.message);}
 }
 function duplicateObjectItem(item) {
@@ -1109,7 +1171,7 @@ function objectAction(action,item) {
   if(turn){turnSelection(turn,itemsFor(item));return;}
   if(action==='delete' && itemsFor(item).length>1) {
     const items=itemsFor(item);
-    try{mutate(()=>{state.project=deleteObjects(state.project,objectTarget(item.layerId),items,state.objectScope);state.objectSelection=null;state.objectMulti=null;});toast(`${items.length} objects deleted.`);}
+    try{mutate(()=>{state.project=deleteObjects(state.project,objectTarget(item.layerId),items,editScope(state));state.objectSelection=null;state.objectMulti=null;});toast(`${items.length} objects deleted.`);}
     catch(error){toast(error.message);}
     return;
   }
@@ -1127,18 +1189,18 @@ function objectAction(action,item) {
       if(action==='visibility' || action==='lock') {
         const field=action==='visibility'?'visible':'locked';
         if(item.group || !node?.instance || (layer.group===false && ((field==='visible' && !layer.visible) || (field==='locked' && layer.locked))))layer[field]=!layer[field];
-        else state.project=updateObject(state.project,target,item.key,{[field]:field==='visible'?node.instance.visible===false:!node.instance.locked},state.objectScope);
+        else state.project=updateObject(state.project,target,item.key,{[field]:field==='visible'?node.instance.visible===false:!node.instance.locked},editScope(state));
       } else if(action==='up' || action==='down') {
         const direction=action==='up'?1:-1, children=celObjects(currentFrame().cels.find(c=>c.layerId===layer.id));
-        if(item.group || (layer.group===false && children.length===1))state.project=reorderObjectContainer(state.project,target,direction,state.objectScope);
-        else state.project=reorderObject(state.project,target,item.key,direction,state.objectScope);
+        if(item.group || (layer.group===false && children.length===1))state.project=reorderObjectContainer(state.project,target,direction,editScope(state));
+        else state.project=reorderObject(state.project,target,item.key,direction,editScope(state));
       } else if(action==='ungroup')layer.group=false;
       else if(action==='delete') {
-        state.project=item.group?removeObjectContainer(state.project,layer.id):deleteObject(state.project,target,item.key,state.objectScope);
+        state.project=item.group?removeObjectContainer(state.project,layer.id):deleteObject(state.project,target,item.key,editScope(state));
         if(!item.group && wasEmpty && state.project.layers.some(l=>l.id===layer.id))
           throw new Error(state.project.layers.length<2?'This is the last object row; draw on it, or add another object first.':'Nothing to delete in this frame. Set Edit to “All frames” to remove it from every frame.');
       }
-      else if(action==='independent')state.project=forkObject(state.project,target,item.key,state.objectScope);
+      else if(action==='independent')state.project=forkObject(state.project,target,item.key,editScope(state));
     });
   } catch(error) {toast(error.message);}
 }
@@ -1179,7 +1241,7 @@ function convertToObject(item) {
       const target=objectTarget(item.layerId), cel=currentFrame().cels.find(c=>c.layerId===item.layerId), node=celObjects(cel).find(n=>n.key===item.key);
       // Grouped pixels can sit under instances, so only that node's own pixels are converted.
       const mask=cel.source?pixelIslands(state.project,target,node.key).flatMap(island=>island.indices):undefined;
-      result=createObjectFromPixels(state.project,target,{mask,name,scope:state.objectScope==='animation' && !cel.source?'animation':'frame'});
+      result=createObjectFromPixels(state.project,target,{mask,name,scope:state.objectScope!=='frame' && !cel.source?editScope(state):'frame'});
       state.project=result.project;state.layerId=result.layerId;state.objectSelection={layerId:result.layerId,key:result.key};state.tool='object';
       // When the original pixel row was fully converted it is gone, so the object can take its name.
       if(layer.group===false && !state.project.layers.some(l=>l.id===item.layerId))state.project.layers.find(l=>l.id===result.layerId).name=name;
@@ -1217,15 +1279,15 @@ function renameObjectDialog(item,node) {
   const layer=state.project.layers.find(l=>l.id===item.layerId), name=node?.instance?node.name:layer.name;
   openDialog('Rename object',`<form id="object-name-form"><label class="field"><span class="field-label">Name</span><input id="object-name-input" value="${escapeHTML(name)}" maxlength="80" required></label><div class="modal-actions"><button type="submit" class="button primary">Save name</button></div></form>`);
   $('object-name-form').onsubmit=event=>{event.preventDefault();const name=$('object-name-input').value.trim();if(!name)return;
-    try{mutate(()=>{if(node?.instance)state.project=updateObject(state.project,objectTarget(item.layerId),item.key,{name},state.objectScope);else layer.name=name;});$('modal').close();}catch(error){toast(error.message);}};
+    try{mutate(()=>{if(node?.instance)state.project=updateObject(state.project,objectTarget(item.layerId),item.key,{name},editScope(state));else layer.name=name;});$('modal').close();}catch(error){toast(error.message);}};
 }
 function moveObjectGroupDialog(item) {
   const groups=state.project.layers.filter(l=>l.id!==item.layerId && !l.locked);
-  openDialog('Move object',`<form id="object-group-form"><label class="field"><span class="field-label">Destination</span><select id="object-group-destination"><option value="@root">Ungrouped · new object stack</option>${groups.map(l=>`<option value="${escapeHTML(l.id)}">${escapeHTML(l.name)}${l.group===false?' · ungrouped':''}</option>`).join('')}</select></label><p class="helper-text">Moves this instance in ${state.objectScope==='animation'?'every frame of the current animation where it appears':'the current frame'}. Pixel overrides stay in their original group.</p><div class="modal-actions"><button class="button primary" type="submit">Move object</button></div></form>`);
+  openDialog('Move object',`<form id="object-group-form"><label class="field"><span class="field-label">Destination</span><select id="object-group-destination"><option value="@root">Ungrouped · new object stack</option>${groups.map(l=>`<option value="${escapeHTML(l.id)}">${escapeHTML(l.name)}${l.group===false?' · ungrouped':''}</option>`).join('')}</select></label><p class="helper-text">Moves this instance in ${editScope(state)==='frame'?'the current frame':`${editScopeText(state,currentAnimation())} where it appears`}. Pixel overrides stay in their original group.</p><div class="modal-actions"><button class="button primary" type="submit">Move object</button></div></form>`);
   $('object-group-form').onsubmit=event=>{event.preventDefault();try{mutate(()=>{
     let destination=$('object-group-destination').value;
     if(destination==='@root'){const added=addObjectContainer(state.project,item.layerId,'Objects',false);state.project=added.project;destination=added.layerId;}
-    state.project=moveObjectToGroup(state.project,objectTarget(item.layerId),item.key,destination,state.objectScope);state.layerId=destination;state.objectSelection={layerId:destination,key:item.key};
+    state.project=moveObjectToGroup(state.project,objectTarget(item.layerId),item.key,destination,editScope(state));state.layerId=destination;state.objectSelection={layerId:destination,key:item.key};
   });$('modal').close();}catch(error){toast(error.message);}};
 }
 function uniqueLayerName(base) {
@@ -1285,29 +1347,37 @@ function renderAll() {
  */
 function renderEditScope() {
   const animation=currentAnimation(), index=animation.frames.findIndex(f=>f.id===state.frameId), session=state.inPlaceEdit?.session;
-  const frameOnly=session?session.scope==='frame':state.objectScope==='frame';
-  const copies=session?.references.length || 0;
+  const mode=session?(session.scope==='frame'?'frame':'wide'):state.objectScope==='frame'?'frame':state.objectScope==='selected'?'selected':'wide';
+  const copies=session?.references.length || 0, picked=editFrameIds({...state,objectScope:'selected'},animation);
   $('edit-scope-wide-label').textContent=session?'All copies':'All frames';
   $('edit-scope-wide-detail').textContent=session?`${copies} instance${copies===1?'':'s'}`:`${animation.name} · ${animation.frames.length}`;
   $('edit-scope-frame-detail').textContent=`Frame ${index+1}`;
+  $('edit-scope-selected-detail').textContent=picked.length>1?`${picked.length} frames · ${frameRanges(picked.map(id=>animation.frames.findIndex(f=>f.id===id)))}`:'Pick in timeline';
+  const titles={
+    wide:session?`Change the shared artwork: every copy of ${session.partId} updates`:`Drawing and object changes repeat in all ${animation.frames.length} frames of ${animation.name}`,
+    frame:session?'Change only this placement, in this frame (you can fix pixels a rotation drew badly)':`Drawing and object changes affect only frame ${index+1}`,
+    selected:picked.length>1?`Drawing and object changes repeat in the ${picked.length} frames selected in the timeline`:'Shift- or Ctrl/⌘-click frames in the timeline to choose which frames your edits change',
+  };
   for(const button of $('edit-scope').querySelectorAll('[data-scope]')) {
-    const on=(button.dataset.scope==='frame')===frameOnly;
-    button.classList.toggle('active',on);button.setAttribute('aria-checked',String(on));button.tabIndex=on?0:-1;
-    button.title=button.dataset.scope==='frame'
-      ?(session?'Change only this placement, in this frame (you can fix pixels a rotation drew badly)':`Drawing and object changes affect only frame ${index+1}`)
-      :(session?`Change the shared artwork: every copy of ${session.partId} updates`:`Drawing and object changes repeat in all ${animation.frames.length} frames of ${animation.name}`);
+    const scope=button.dataset.scope, on=scope===mode;
+    button.hidden=scope==='selected' && !!session;
+    button.classList.toggle('active',on);button.classList.toggle('waiting',scope==='selected' && picked.length<2);
+    button.setAttribute('aria-checked',String(on));button.tabIndex=on?0:-1;button.title=titles[scope];
   }
-  $('workbench').classList.toggle('scope-frame',frameOnly);
+  $('workbench').classList.toggle('scope-frame',mode==='frame' || (mode==='selected' && picked.length<2));
+  $('workbench').classList.toggle('scope-selected',mode==='selected' && picked.length>1);
 }
-function setEditScope(frameOnly) {
+const EDIT_SCOPES=['wide','frame','selected'];
+function setEditScope(mode) {
   finishDrawing();
   if(state.inPlaceEdit) {
-    try{setInPlaceScope(state.inPlaceEdit.session,frameOnly?'frame':'shared');state.inPlaceEdit.error=null;}
+    try{setInPlaceScope(state.inPlaceEdit.session,mode==='frame'?'frame':'shared');state.inPlaceEdit.error=null;}
     catch(error){toast(error.message);}
     renderInPlaceControls();renderCanvas();renderPreview();
   } else {
-    state.objectScope=frameOnly?'frame':'animation';
-    renderLayers();renderTools();
+    state.objectScope=mode==='frame'?'frame':mode==='selected'?'selected':'animation';
+    if(mode==='selected' && editScope(state)==='frame')toast('Shift- or Ctrl/⌘-click frames in the timeline to choose which frames your edits change.');
+    renderLayers();renderTools();renderTimeline();renderAnimatePanel?.();
   }
   renderEditScope();
 }
@@ -1694,18 +1764,18 @@ function pointerMove(event) {
       renderInPlaceControls();
     } else if(drawing.tool==='resize') {
       const raw=canvasPoint(event), box=resizeBox(drawing.box,drawing.handle,raw.x-drawing.origin.x,raw.y-drawing.origin.y,{keepArea:state.resizeMode==='area',keepRatio:event.shiftKey,area:drawing.area});
-      try{state.project=resizeObject(drawing.before.project,drawing.target,drawing.key,box,state.objectScope);renderResizeOptions();}
+      try{state.project=resizeObject(drawing.before.project,drawing.target,drawing.key,box,editScope(state));renderResizeOptions();}
       catch(error){$('cursor-position').textContent=error.message;}
     } else if(drawing.tool==='rotate') {
       const at=canvasPosition(event);
       let delta=Math.round((Math.atan2(at.y-drawing.centre.y,at.x-drawing.centre.x)-drawing.start)*180/Math.PI);
       if(event.shiftKey)delta=Math.round((drawing.startAngle+delta)/15)*15-drawing.startAngle;
-      try{state.project=rotateObjects(drawing.before.project,drawing.target,drawing.items,delta,state.objectScope);renderResizeOptions();}
+      try{state.project=rotateObjects(drawing.before.project,drawing.target,drawing.items,delta,editScope(state));renderResizeOptions();}
       catch(error){$('cursor-position').textContent=error.message;}
     } else if(drawing.tool==='tilt') {
       moveTilt(drawing,event);
     } else if(drawing.tool==='object') {
-      try{state.project=drawing.items?translateObjects(drawing.before.project,drawing.target,drawing.items,point.x-drawing.origin.x,point.y-drawing.origin.y,state.objectScope).project:(drawing.pixels?translatePixelObject:translateObject)(drawing.before.project,drawing.target,drawing.key,point.x-drawing.origin.x,point.y-drawing.origin.y,state.objectScope);}
+      try{state.project=drawing.items?translateObjects(drawing.before.project,drawing.target,drawing.items,point.x-drawing.origin.x,point.y-drawing.origin.y,editScope(state)).project:(drawing.pixels?translatePixelObject:translateObject)(drawing.before.project,drawing.target,drawing.key,point.x-drawing.origin.x,point.y-drawing.origin.y,editScope(state));}
       catch(error){$('cursor-position').textContent=error.message;}
     } else if (drawing.tool==='select') {
       updateSelection(point);
@@ -1756,10 +1826,11 @@ function pointerEnd(event) {
 }
 /** With the Edit switch on All frames, a finished paint stroke changes the same pixels in every frame of the animation. Returns frames skipped because of locked objects. */
 function repeatStrokeInAnimation(drawing) {
-  if(state.objectScope!=='animation' || !PAINT_TOOLS.includes(drawing.tool) || !drawing.cel)return 0;
-  const {width,height,palette}=state.project;
+  if(editScope(state)==='frame' || !PAINT_TOOLS.includes(drawing.tool) || !drawing.cel)return 0;
+  const {width,height,palette}=state.project, inScope=new Set(editFrameIds(state,currentAnimation()));
   let skipped=0;
   for(const frame of currentAnimation().frames) {
+    if(!inScope.has(frame.id))continue;
     const cel=frame.cels.find(c=>c.layerId===drawing.cel.layerId);
     if(!cel || cel===drawing.cel)continue;
     if(hasLockedInstances(cel)){skipped++;continue;}
@@ -2493,7 +2564,7 @@ function bindEvents() {
     switchDocument(state.openIds[target]);$(`project-tab-${state.documentId}`)?.focus();
   });
   for(const [name,id] of [['tools','toggle-tools-panel'],['details','toggle-details-panel']]) $(id).onclick=()=>{
-    state.panels[name]=!state.panels[name];renderPanelState();persistSession();requestAnimationFrame(fitCanvas);
+    state.panels[name]=!state.panels[name];renderPanelState();persistSession();requestAnimationFrame(fitCanvas);workspaceViews?.afterLayout();
   };
   document.querySelectorAll('details[data-panel]').forEach(panel=>{
     if(typeof state.panelSections[panel.dataset.panel]==='boolean')panel.open=state.panelSections[panel.dataset.panel];
@@ -2554,11 +2625,14 @@ function bindEvents() {
   $('redo').onclick = () => state.inPlaceEdit?restoreCanvasPartEdit(true):restore(state.redo,state.undo);
   $('in-place-cancel').onclick=()=>endCanvasPartEdit(false);
   $('in-place-apply').onclick=()=>endCanvasPartEdit(true);
-  for(const button of $('edit-scope').querySelectorAll('[data-scope]'))button.onclick=()=>setEditScope(button.dataset.scope==='frame');
+  for(const button of $('edit-scope').querySelectorAll('[data-scope]'))button.onclick=()=>setEditScope(button.dataset.scope);
   $('edit-scope').addEventListener('keydown',event=>{
     if(!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(event.key))return;
-    event.preventDefault();const frameOnly=['ArrowRight','ArrowDown'].includes(event.key);
-    setEditScope(frameOnly);$('edit-scope').querySelector(`[data-scope="${frameOnly?'frame':'wide'}"]`).focus();
+    event.preventDefault();
+    const modes=EDIT_SCOPES.filter(mode=>!$('edit-scope').querySelector(`[data-scope="${mode}"]`).hidden);
+    const at=modes.indexOf(event.target.closest('[data-scope]')?.dataset.scope), step=['ArrowRight','ArrowDown'].includes(event.key)?1:-1;
+    const mode=modes[(Math.max(0,at)+step+modes.length)%modes.length];
+    setEditScope(mode);$('edit-scope').querySelector(`[data-scope="${mode}"]`).focus();
   });
   $('toggle-grid').onclick = () => { state.grid = !state.grid; renderTools(); renderCanvas(); };
   $('toggle-onion').onclick = () => { state.onion = !state.onion; renderTools(); renderCanvas(); };
@@ -2685,10 +2759,10 @@ function bindEvents() {
       const item=selectedObject(), node=celObjects(currentFrame().cels.find(c=>c.layerId===item.layerId)).find(n=>n.key===item.key);
       const delta={arrowleft:[-1,0],arrowright:[1,0],arrowup:[0,-1],arrowdown:[0,1]}[key];
       const many=selectedItems().length>1;
-      if(delta && many){event.preventDefault();const step=event.shiftKey?8:1;try{mutate(()=>{state.project=translateObjects(state.project,objectTarget(),selectedItems(),delta[0]*step,delta[1]*step,state.objectScope).project;});}catch(error){toast(error.message);}return;}
+      if(delta && many){event.preventDefault();const step=event.shiftKey?8:1;try{mutate(()=>{state.project=translateObjects(state.project,objectTarget(),selectedItems(),delta[0]*step,delta[1]*step,editScope(state)).project;});}catch(error){toast(error.message);}return;}
       if((key==='delete' || key==='backspace') && many){event.preventDefault();objectAction('delete',item);return;}
       if(state.tool==='resize' && (key===',' || key==='.')){event.preventDefault();turnSelection(key===','?'R270':'R90');return;}
-      if(delta && (node?.instance || node?.type==='pixels')){event.preventDefault();const step=event.shiftKey?8:1;try{mutate(()=>{state.project=(node.instance?translateObject:translatePixelObject)(state.project,objectTarget(item.layerId),item.key,delta[0]*step,delta[1]*step,state.objectScope);});}catch(error){toast(error.message);}return;}
+      if(delta && (node?.instance || node?.type==='pixels')){event.preventDefault();const step=event.shiftKey?8:1;try{mutate(()=>{state.project=(node.instance?translateObject:translatePixelObject)(state.project,objectTarget(item.layerId),item.key,delta[0]*step,delta[1]*step,editScope(state));});}catch(error){toast(error.message);}return;}
       if(key==='enter' && node?.instance && !many){event.preventDefault();editSharedObject(item);return;}
       if((key==='delete' || key==='backspace') && node?.instance){event.preventDefault();objectAction('delete',{...item,node});return;}
     }
@@ -2776,7 +2850,12 @@ async function init() {
   findRecoverable().then(found=>{if(found.length)showRecovery(found);}).catch(()=>{});
   // `?perf` exposes editor internals to scripts/profile-browser.mjs.
   if(new URLSearchParams(location.search).has('perf'))globalThis.pixelStudioPerf={state,renderAll,renderCanvas,renderTimeline,renderLayers,renderPreview,snapshot,remember,selectFrameAt,saveNow};
-  initPanelLayout({onLayout:()=>requestAnimationFrame(()=>fitCanvas())});
+  let panelLayout=null;
+  workspaceViews=initWorkspaceViews({state,toast,icon,escapeHTML,layout:()=>panelLayout,
+    setSidebars:({tools,details})=>{state.panels={tools:!!tools,details:!!details};renderPanelState();persistSession();requestAnimationFrame(fitCanvas);}});
+  initTabTools({state,toast,icon,escapeHTML,name:tabName,isSaved:isTabSaved,switchDocument,closeDocuments,reopenClosedTab,duplicateTab,renameTab,moveTab});
+  panelLayout=initPanelLayout({onLayout:()=>{requestAnimationFrame(()=>fitCanvas());workspaceViews?.afterLayout();}});
+  workspaceViews.afterLayout();
   initOnboarding({state,$,escapeHTML,toast});initHelpCenter({state,$,escapeHTML,toast,openDialog});
   initEditorBridge({toast,openDialog,escapeHTML,getProject:()=>({project:state.project,animationId:currentAnimation().id,frameId:currentFrame().id}),
     applyProject(project,{mode,message}){

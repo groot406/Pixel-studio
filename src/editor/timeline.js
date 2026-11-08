@@ -157,7 +157,8 @@ function select(id, event) {
     sel = new Set(list.slice(Math.min(a, b), Math.max(a, b) + 1).map(f => f.id));
   } else if (event.ctrlKey || event.metaKey) {
     if (sel.has(id) && sel.size > 1) { sel.delete(id); id = sel.has(st().frameId) ? st().frameId : [...sel][0]; } else { sel.add(id); anchor = id; }
-  } else { sel = new Set([id]); anchor = id; }
+  } else if (!(st().objectScope === 'selected' && sel.has(id) && sel.size > 1)) { sel = new Set([id]); anchor = id; }
+  // With the Edit switch on Selected, clicking a picked frame just moves to it so you can edit the picked frames one by one.
   d.selectFrameAt(list.findIndex(f => f.id === id));
 }
 

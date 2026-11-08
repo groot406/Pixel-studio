@@ -4,6 +4,7 @@
  * in the Edit scope; sliders preview live and commit one undo step on release.
  */
 import { setObjectEffects } from '../domain/objects.js';
+import { editScope, editFrameIds, editScopeText } from './edit-scope.js';
 import { instancePivot, pivotUnder, withPivot, DEFAULT_PERSPECTIVE } from '../domain/geometry.js';
 
 let d, live = null, pivotDrag = null;
@@ -79,7 +80,7 @@ function preview(changes) {
   if (!pose) return;
   live ||= d.snapshot();
   try {
-    d.state.project = setObjectEffects(live.project, pose.target, pose.items, changes, d.state.objectScope);
+    d.state.project = setObjectEffects(live.project, pose.target, pose.items, changes, editScope(d.state));
     d.$('pose-scope').classList.remove('error');
     d.renderCanvas(); d.renderPreview();
   } catch (error) { d.state.project = live.project; showError(error); }
@@ -93,7 +94,7 @@ function commit(changes) {
 function apply(changes) {
   const pose = poseTarget();
   if (!pose) return;
-  try { d.mutate(() => { d.state.project = setObjectEffects(d.state.project, pose.target, pose.items, changes, d.state.objectScope); }); d.renderAll(); }
+  try { d.mutate(() => { d.state.project = setObjectEffects(d.state.project, pose.target, pose.items, changes, editScope(d.state)); }); d.renderAll(); }
   catch (error) { showError(error); d.renderAll(); }
 }
 function showError(error) { d.toast(error.message); }
@@ -124,7 +125,7 @@ export function renderObjectPose() {
   $('pose-tilt-reset').disabled = flat;
   $('pose-sampling').value = op.sampling || 'nearest';
   const frames = d.currentAnimation().frames.length;
-  $('pose-scope').textContent = `${count > 1 ? 'Applies to each selected object' : 'Applies'} ${state.objectScope === 'animation' && frames > 1 ? 'in every frame' : 'in this frame only'} (Edit switch above the canvas).`;
+  $('pose-scope').textContent = `${count > 1 ? 'Applies to each selected object' : 'Applies'} in ${editScopeText(state, d.currentAnimation())} (Edit switch above the canvas).`;
 }
 
 function renderDeformParams(kind, deform) {
@@ -159,12 +160,12 @@ export function renderPivotMarker() {
  * transform turns around shifts the art by (I − M)·Δ, which the position undoes (to the nearest whole pixel).
  */
 function pivotProject(project, pose, pivot) {
-  const { state } = d, scope = state.objectScope;
+  const { state } = d, scope = editScope(state), inScope = new Set(editFrameIds(state, state.project.animations.find(a => a.id === pose.target.animationId)));
   const next = setObjectEffects(project, pose.target, pose.items, { pivot }, scope);
   const keys = new Set(pose.items.map(item => `${item.layerId}:${item.key}`));
   const before = project.animations.find(a => a.id === pose.target.animationId), after = next.animations.find(a => a.id === pose.target.animationId);
   after.frames.forEach((frame, index) => {
-    if (scope === 'frame' && frame.id !== pose.target.frameId) return;
+    if (!inScope.has(frame.id)) return;
     for (const cel of frame.cels) for (const op of cel.source?.ops || []) {
       if (op.type !== 'use' || !keys.has(`${cel.layerId}:${op.id}`) || (!op.angle && !op.skew && !op.tilt)) continue;
       const old = before.frames[index].cels.find(c => c.layerId === cel.layerId).source.ops.find(o => o.type === 'use' && o.id === op.id);

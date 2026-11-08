@@ -8,6 +8,7 @@ import {
   rigDescriptor, detectRoles, ROLES, POSE_CLIP_FORMAT,
 } from '../domain/poses.js';
 import { TEMPLATES, generateTemplate } from '../domain/templates.js';
+import { editScopeText } from './edit-scope.js';
 import { placed, subtree } from '../domain/skeleton.js';
 import { instanceBox } from '../domain/geometry.js';
 import { compositeFrame } from '../domain/project.js';
@@ -48,7 +49,7 @@ export function libraryHTML() {
   const p = st().project, poses = p.poses || [], list = a.characters(), who = a.character();
   const button = a.button, chips = a.chips, toggle = a.toggle;
   const cards = poses.map(pose => `<li class="rig-card" data-pose="${pose.id}">
-      <button type="button" class="rig-card-apply" data-act="pose-apply" data-pose="${pose.id}" title="Apply “${esc(pose.name)}” to ${st().objectScope === 'frame' ? 'this frame' : 'every frame'}"><canvas data-thumb="${pose.id}" aria-hidden="true"></canvas></button>
+      <button type="button" class="rig-card-apply" data-act="pose-apply" data-pose="${pose.id}" title="Apply “${esc(pose.name)}” to ${editScopeText(st(), st().project.animations.find(a => a.id === st().animationId))}"><canvas data-thumb="${pose.id}" aria-hidden="true"></canvas></button>
       <input type="text" class="rig-name" value="${esc(pose.name)}" maxlength="60" data-pose="${pose.id}" data-field="pose-name" aria-label="Pose name">
       <span class="rig-card-tools"><button type="button" class="rig-mini" data-act="pose-mirror" data-pose="${pose.id}" title="Apply mirrored (left ↔ right)" aria-label="Apply ${esc(pose.name)} mirrored">${d().icon('flip-h')}</button><button type="button" class="rig-mini" data-act="pose-delete" data-pose="${pose.id}" title="Delete this pose" aria-label="Delete ${esc(pose.name)}">${d().icon('trash')}</button></span></li>`).join('');
   return `<div class="rig-library">

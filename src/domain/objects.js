@@ -5,6 +5,7 @@ import { cloneArtwork, sourceForCel, renderParts, hasLockedInstances, renderOper
 import { linePoints, ellipsePoints, instancePixel, instanceSize, instanceBox, transformedSize, swapsAxes, composeTransform, transformPoint } from './geometry.js';
 import { nextPartId } from './parts.js';
 import { boneDescendants, relPose, layoutFrame } from './skeleton.js';
+import { assertEditScope, scopeFrames } from './frame-scope.js';
 
 export function celObjects(cel) {
   if (!cel.source) return [{key:'pixels',type:'pixels',name:'Pixels',start:0,end:0}];
@@ -32,11 +33,11 @@ export function frameObjects(project,animation,frame) {
 }
 
 function context(project,target,scope) {
-  if (!['frame','animation'].includes(scope)) throw new Error('Choose current frame or current animation.');
+  assertEditScope(scope);
   const p=validateProject(project), animation=p.animations.find(a=>a.id===target.animationId);
   const layer=p.layers.find(l=>l.id===target.layerId), frame=animation?.frames.find(f=>f.id===target.frameId);
   if (!layer || !frame) throw new Error('This object no longer exists.');
-  return {p,animation,layer,frame,frames:scope==='animation'?animation.frames:[frame]};
+  return {p,animation,layer,frame,frames:scopeFrames(animation,frame,scope)};
 }
 function unlocked(layer,node) {
   if (layer.locked || node?.instance?.locked) throw new Error('Unlock this object or its group first.');
@@ -53,7 +54,7 @@ export function reorderObjectContainer(project,target,direction,scope='animation
   if(scope==='animation') {
     for(const f of frames) if(f.layerOrder)f.layerOrder=swap([...f.layerOrder]);
     animation.layerOrder=swap(getAnimationLayers(p,animation).map(l=>l.id));
-  } else frame.layerOrder=swap(order);
+  } else for(const f of frames)f.layerOrder=swap(f===frame?order:getAnimationLayers(p,animation,f).map(l=>l.id));
   return validateProject(p);
 }
 
@@ -93,7 +94,7 @@ export function placeObjectContainer(project,target,anchorLayerId,position,scope
   if(scope==='animation') {
     for(const f of frames) if(f.layerOrder)f.layerOrder=place([...f.layerOrder]);
     animation.layerOrder=place(getAnimationLayers(p,animation).map(l=>l.id));
-  } else frame.layerOrder=place(getAnimationLayers(p,animation,frame).map(l=>l.id));
+  } else for(const f of frames)f.layerOrder=place(getAnimationLayers(p,animation,f).map(l=>l.id));
   return validateProject(p);
 }
 

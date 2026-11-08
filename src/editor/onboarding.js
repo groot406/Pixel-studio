@@ -45,6 +45,8 @@ export const SHORTCUTS = [
   { keys: '⇧ + drag', action: 'Square, circle or 45° line', group: 'editing' },
   { keys: '⌘/Ctrl + K', action: 'Command palette: search actions and plugin commands', group: 'editing' },
   { keys: '⌘/Ctrl + J', action: 'Assistant: ask about or change the project in chat', group: 'editing' },
+  { keys: '⌥/Alt + W · ⌥/Alt + ⇧ W', action: 'Close tab · close other tabs (right-click a tab for more)', group: 'editing' },
+  { keys: '⌥/Alt + ⇧ T', action: 'Reopen the last closed tab', group: 'editing' },
   { keys: '← / →', action: 'Previous / next frame', group: 'frames' },
   { keys: 'D', action: 'Duplicate frame (all selected frames)', group: 'frames' },
   { keys: 'M', action: 'Mark frame: key → breakdown → in-between → none', group: 'frames' },
@@ -56,6 +58,7 @@ export const SHORTCUTS = [
   { keys: 'O / ⇧ O', action: 'Onion skin on / off · onion settings', group: 'view' },
   { keys: '+ / −', action: 'Zoom in / out', group: 'view' },
   { keys: '0', action: 'Fit canvas to view', group: 'view' },
+  { keys: '⌘/Ctrl + ⌥/Alt + 1–9', action: 'Switch workspace view (Draw, Animate, Rig…; View menu to customise)', group: 'view' },
   { keys: '?', action: 'Help, tours and this shortcut sheet', group: 'view' },
   { keys: 'J', action: 'Skeleton mode on / off', group: 'modes' },
   { keys: 'Q', action: 'Describe a motion: “wave twice”, “bounce 3 times”', group: 'modes' },
@@ -92,7 +95,7 @@ export const TOURS = [
     { target: '.tool-grid', title: 'Toolbox', demo: 'pencil', text: 'Every tool has a one-key shortcut in its corner. Hover a tool for a quick demo; its options (size, mirror, anti-alias…) appear underneath.' },
     { target: '.palette-section', title: 'Colour palette', demo: 'palette', text: 'Click a swatch to paint with it. Editing a colour recolours it in every frame; right-click a swatch for more, or open Palette studio.' },
     { target: '.timeline', title: 'Frames', demo: 'frames', text: 'Frames play left to right, each with its own duration. D duplicates, ← → step. In the Timing view drag a frame’s edge to retime it; right-click to ease or mark keys.' },
-    { target: '#edit-scope', title: 'The Edit switch', demo: 'scope', text: 'All frames repeats your strokes and object moves in every frame of this animation; This frame keeps them to the selected frame.' },
+    { target: '#edit-scope', title: 'The Edit switch', demo: 'scope', text: 'All frames repeats strokes and object moves in every frame; This frame keeps them to this one; Selected uses the frames you Shift/Ctrl-click in the timeline.' },
     { target: '.objects-section', title: 'Objects', demo: 'move', text: 'Artwork lives in objects. With the Object tool (V), click one to select it and drag to move it; double-click to edit its pixels in place.' },
     { target: '.preview-section', title: 'Live preview', demo: 'preview', text: 'Your animation plays here while you draw. Switch animations under the preview, change the FPS, or press Space to pause.' },
     { target: '#save-status', title: 'Autosave & history', text: 'Work saves itself on this device; this status shows when. Click it (or History) to save named versions and restore older ones.' },
@@ -106,7 +109,7 @@ export const TOURS = [
     { target: '.parts-section', title: 'Parts', demo: 'move', text: 'Parts are reusable artwork. Drag one onto the canvas to place another copy; editing a part updates every copy.' },
     { target: '#manage-parts', fallback: '#open-part-library', title: 'Part library', text: 'Browse every part, place it in this frame or the whole animation, and rotate or flip placed copies.' },
     { target: '[data-tool="resize"]', title: 'Transform (K)', demo: 'transform', text: 'Resize, squash and stretch, rotate (Shift snaps to 15°) and 3D-turn objects with handles; , and . turn 90°. The shared artwork never changes.' },
-    { target: '#edit-scope', title: 'Where changes land', demo: 'scope', text: 'Object moves and transforms follow the Edit switch: every frame of the animation, or this frame only.' },
+    { target: '#edit-scope', title: 'Where changes land', demo: 'scope', text: 'Object moves and transforms follow the Edit switch: every frame of the animation, this frame only, or the frames selected in the timeline.' },
   ] },
   { id: 'animate', title: 'Animate (motion modes)', summary: 'Moves, bounces, follow-through, waves and smears', steps: [
     { target: '.animate-section', title: 'Animate panel', text: 'Pick a motion, then work right on the canvas. The rows unlock once the frame has a placed object (drag one in from Parts).' },
@@ -170,6 +173,7 @@ export const TIPS = [
   { sel: '#colour-cycle', name: 'Colour cycle', demo: 'cycle', text: 'Animate a colour ramp across frames: water, fire, glowing lights.' },
   { sel: '#edit-scope [data-scope="wide"]', name: 'Edit: all frames', demo: 'scope', text: null },
   { sel: '#edit-scope [data-scope="frame"]', name: 'Edit: this frame', demo: 'scope', text: null },
+  { sel: '#edit-scope [data-scope="selected"]', name: 'Edit: selected frames', demo: 'scope', text: 'Strokes and object changes repeat in the frames selected in the timeline (Shift/Ctrl-click frames).' },
   { sel: '#help-button', name: 'Help & tours', keys: '?', text: 'Guided tours, every shortcut, what’s new and the docs.' },
   { sel: '#export-button', name: 'Export', text: 'PNG, sprite sheet, GIF/APNG, or editable .pxa / .pxs files.' },
   { sel: '#import-button', name: 'Import', text: 'Open .pxa, .pxs or JSON projects, PNG images and sprite sheets.' },
@@ -197,7 +201,7 @@ export const HINTS = {
   'palette-studio': { title: 'Palette studio', text: 'Each tab builds colours a different way. Nothing changes your palette until you add or replace colours.' },
   curve: { title: 'Curve tool', text: 'Drag from start to end, then drag the line to bend it (or its round handles). Enter applies, Esc cancels.' },
   floating: { title: 'Floating panel', text: 'Drag the title bar to move it and any edge to resize it. ⇲ docks it back into the sidebar.' },
-  'edit-scope': { title: 'Edit switch', text: 'All frames repeats strokes and object moves in every frame of this animation; This frame changes only the selected frame.' },
+  'edit-scope': { title: 'Edit switch', text: 'All frames repeats strokes and object moves in every frame of this animation; This frame changes only the current frame; Selected changes the frames picked in the timeline.' },
 };
 
 export const WHATS_NEW = [

@@ -4,6 +4,7 @@
  * The maths lives in src/domain/effects.js and pixel-fx.js; this module owns their options UI and previews.
  */
 import { applyGradient, applyPixelEffect, gradientStops, strokePoints, toolLinePoints, tileSeams } from '../domain/effects.js';
+import { editScope, editScopeText } from './edit-scope.js';
 import { gradientFill, applyMask, wrapPoint } from '../domain/pixel-fx.js';
 import { rampFromPalette } from '../domain/colour.js';
 import { brushPoints, snapLineEnd } from '../domain/toolbox.js';
@@ -188,7 +189,7 @@ function rectMask(rect, width, height) {
 function finishGradient(drawing) {
   const { state } = d, { width, height } = state.project;
   if (drawing.end.x === drawing.origin.x && drawing.end.y === drawing.origin.y) { state.project = drawing.before.project; d.toast('Drag across the canvas to set the gradient’s direction and length.'); return; }
-  const target = { ...d.objectTarget(), scope: state.objectScope, ...(state.gradient.region === 'mask' ? selectionTarget(state.selection, width, height) : {}) };
+  const target = { ...d.objectTarget(), scope: editScope(state), ...(state.gradient.region === 'mask' ? selectionTarget(state.selection, width, height) : {}) };
   const result = applyGradient(drawing.before.project, target, gradientOptions(drawing, drawing.end));
   state.project = result.project;
   if (result.skipped) d.toast(`Gradient applied except in ${result.skipped} frame${result.skipped === 1 ? '' : 's'} with locked objects.`);
@@ -273,7 +274,7 @@ function offsetHalf() {
   if (!d.canEditPixels()) { d.toast('Show and unlock this pixel object to offset it.'); return; }
   try {
     let skipped = 0;
-    d.mutate(() => { const result = applyPixelEffect(state.project, { ...d.objectTarget(), scope: state.objectScope }, 'offsetWrap', {}); state.project = result.project; skipped = result.skipped; });
-    d.toast(`Offset by half the canvas${state.objectScope === 'animation' ? ' in every frame' : ''}. The seams are now in the middle.${skipped ? ` ${skipped} frame${skipped === 1 ? '' : 's'} with locked objects skipped.` : ''}`);
+    d.mutate(() => { const result = applyPixelEffect(state.project, { ...d.objectTarget(), scope: editScope(state) }, 'offsetWrap', {}); state.project = result.project; skipped = result.skipped; });
+    d.toast(`Offset by half the canvas${editScope(state) === 'frame' ? '' : ` in ${editScopeText(state, d.currentAnimation())}`}. The seams are now in the middle.${skipped ? ` ${skipped} frame${skipped === 1 ? '' : 's'} with locked objects skipped.` : ''}`);
   } catch (error) { d.toast(error.message); }
 }

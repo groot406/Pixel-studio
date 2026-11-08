@@ -1,6 +1,7 @@
 /** Resizable sidebars/timeline and floating (popped-out) panel sections. Layout is remembered per browser. */
 export const LAYOUT_KEY='pixel-studio.layout.v1';
-export const SIZE_LIMITS={tools:[180,440],details:[200,480],timeline:[120,520]};
+import { SIZE_LIMITS } from '../domain/workspace-view.js';
+export { SIZE_LIMITS };
 const FLOAT_MIN={width:200,height:120};
 
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
@@ -210,5 +211,12 @@ export function initPanelLayout({onLayout=()=>{},narrow=()=>matchMedia('(max-wid
     const section=sections.find(s=>s.dataset.panel===name);
     if(section)popOut(section,rect);
   }
-  return {setTimelineCollapsed,timelineCollapsed:()=>layout.timelineCollapsed,popOut:name=>{const s=sections.find(x=>x.dataset.panel===name);if(s)popOut(s);},dock,floating:()=>[...floats.keys()],splitters};
+  return {
+    setTimelineCollapsed,timelineCollapsed:()=>layout.timelineCollapsed,
+    popOut:(name,rect=null)=>{const s=sections.find(x=>x.dataset.panel===name);if(s && !s.hidden && !narrow())popOut(s,rect);},
+    dock,floating:()=>[...floats.keys()],floatRects:()=>structuredClone(layout.floating),
+    sizes:()=>({...layout.sizes}),
+    setSizes:sizes=>{layout.sizes={};for(const [name,value] of Object.entries(sizes || {}))if(name in SIZE_LIMITS)layout.sizes[name]=value;applySizes();save();onLayout();},
+    splitters,
+  };
 }

@@ -11,6 +11,7 @@ import { resolveParams, validateResult } from './validate.js';
 import { pixelFrames, applyPixelResults, applyAnimationResult, applyProjectResult, selectionToMask } from './apply.js';
 import { blockedReason, scopeText } from '../editor/effects-panel.js';
 import { selectionTarget } from '../editor/tool-extras.js';
+import { editScope as resolveEditScope } from '../editor/edit-scope.js';
 import { compositeFrame } from '../domain/project.js';
 import { setExtraPalettes } from '../domain/palette-presets.js';
 import { encodeAIProject } from '../formats/pxa.js';
@@ -193,7 +194,7 @@ async function commit(action, values, showError = d.toast) {
   const { state } = d, documentId = state.documentId, before = JSON.stringify(state.project);
   busy = true; renderPluginPanel();
   try {
-    const result = await compute(action, values, state.project, state.objectScope === 'animation' ? 'animation' : 'frame');
+    const result = await compute(action, values, state.project, resolveEditScope(state));
     if (state.documentId !== documentId || JSON.stringify(state.project) !== before) throw new Error('The project changed while the plugin ran. Run it again.');
     if (action.scope === 'project') d.versionBefore(`Before plugin: ${action.title}`);
     d.mutate(() => { state.project = result.project; if (action.scope === 'project') state.selection = null; });

@@ -907,12 +907,12 @@ textarea.ai-text-input::placeholder { color: #7b8872; }
 .outline-layers { border: 0; padding: 0; margin: 8px 0 0; display: flex; flex-wrap: wrap; gap: 2px 14px; }
 .outline-layers legend { margin-bottom: 4px; }
 .outline-form section[hidden] { display: none; }
-.left-panel .palette-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; margin-bottom: 10px; }
-.left-panel .swatch { min-width: 0; height: 30px; }
-.left-panel .color-editor { height: 36px; }
-.left-panel .palette-actions { margin-top: 7px; gap: 6px; }
-.left-panel .palette-actions .button { min-height: 32px; font-size: 11px; }
-.left-panel #palette-help { margin-top: 8px; font-size: 11px; line-height: 1.5; }
+.palette-section .palette-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; margin-bottom: 10px; }
+.palette-section .swatch { min-width: 0; height: 30px; }
+.palette-section .color-editor { height: 36px; }
+.palette-section .palette-actions { margin-top: 7px; gap: 6px; }
+.palette-section .palette-actions .button { min-height: 32px; font-size: 11px; }
+.palette-section #palette-help { margin-top: 8px; font-size: 11px; line-height: 1.5; }
 .transform-scope { flex-direction: row; align-items: center; gap: 8px; }
 .transform-scope > span { flex: 0 0 40px; }
 .transform-scope select { flex: 1 1 auto; width: auto; }
@@ -1000,11 +1000,11 @@ textarea.ai-text-input::placeholder { color: #7b8872; }
   .tool-options #filled-row input { width: 18px; height: 18px; }
   .shape-hint { font-size: 11px; }
   #magic-outline.outline-action { min-height: 44px; padding: 9px 12px; font-size: 12px; }
-  .left-panel .palette-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 7px; }
-  .left-panel .swatch { min-width: 0; height: 44px; }
-  .left-panel .color-editor { height: 50px; }
-  .left-panel .palette-actions .button { min-height: 44px; font-size: 12px; }
-  .left-panel #palette-help { font-size: 12px; }
+  .palette-section .palette-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 7px; }
+  .palette-section .swatch { min-width: 0; height: 44px; }
+  .palette-section .color-editor { height: 50px; }
+  .palette-section .palette-actions .button { min-height: 44px; font-size: 12px; }
+  .palette-section #palette-help { font-size: 12px; }
   .transform-scope > span { flex-basis: 48px; }
   .transform-buttons .button { justify-content: center; min-height: 44px; padding: 8px 10px; font-size: 12px; }
   .transform-buttons .button svg { width: 17px; height: 17px; }
@@ -1049,7 +1049,7 @@ textarea.ai-text-input::placeholder { color: #7b8872; }
   .left-panel { padding-right: 14px; padding-left: 14px; }
   .tools-section .tool { gap: 5px; padding-right: 4px; padding-left: 4px; }
   .tools-section .tool span { font-size: 11px; }
-  .left-panel .palette-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .palette-section .palette-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .selection-buttons { gap: 3px; }
   .selection-buttons .icon-button { width: 36px; height: 40px; padding: 9px; }
   .selection-buttons .button { padding-right: 9px; padding-left: 9px; }
@@ -1327,6 +1327,11 @@ body.is-resizing-panels { cursor: col-resize; }
 .edit-scope-option[data-scope="wide"].active { border-color: var(--green); background: var(--green); color: #fff; }
 .edit-scope-option[data-scope="frame"].active { border-color: #d98a12; background: #fff4df; color: #8a4f00; }
 .workbench.scope-frame .canvas-stage { box-shadow: inset 0 0 0 3px #f0a531; }
+.edit-scope-option[hidden] { display: none; }
+.edit-scope-option[data-scope="selected"].active { border-color: #6f5bd0; background: #f0edff; color: #47379c; }
+.edit-scope-option[data-scope="selected"].waiting:not(.active) { opacity: .7; }
+.workbench.scope-selected .canvas-stage { box-shadow: inset 0 0 0 3px #8b78e6; }
+.workbench.scope-selected .frame-card.picked { outline: 2px solid #8b78e6; outline-offset: 1px; }
 @media (max-width: 1100px) { .edit-scope-label { display: none; } .edit-scope-copy small { display: none; } .edit-scope-option { height: 32px; } }
 @media (max-width: 540px) { .edit-scope-option { padding: 0 8px; gap: 5px; } .edit-scope-copy strong { font-size: 11px; } }
 

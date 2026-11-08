@@ -5,6 +5,7 @@
  * candidate as one undo step, Esc cancels. IK poses and smears commit as they go (undoable); Enter/Esc finish them.
  */
 import { tweenObject, tweenToPose, bounceInPlace, autoSquashStretch, springFollow, ikLimb, setPivotAt, limbJoints, smearFrame, canInsertFrames, motionPath } from '../domain/animate.js';
+import { editScope, editScopeText } from './edit-scope.js';
 import { ease, solveTwoBone } from '../domain/motion.js';
 import { instanceBox, instancePivot, instancePixel } from '../domain/geometry.js';
 import { frameObjects } from '../domain/objects.js';
@@ -21,6 +22,8 @@ const imageCache = new WeakMap(), rigs = [];
 
 const st = () => d.state;
 const animation = () => d.currentAnimation();
+/** IK in 'all' mode: every frame, or the frames picked in the timeline when the Edit switch is on Selected. */
+const ikFrames = () => { const s = editScope(d.state); return Array.isArray(s) ? s : undefined; };
 const same = (a, b) => Boolean(a && b) && a.layerId === b.layerId && a.key === b.key;
 const opIn = (frame, item) => frame?.cels.find(c => c.layerId === item.layerId)?.source?.ops.find(op => op.type === 'use' && op.id === item.key);
 const frameIn = (project, id) => project?.animations.find(a => a.id === st().animationId)?.frames.find(f => f.id === id);
@@ -317,7 +320,7 @@ const MODES = {
   ik: {
     title: 'IK limb', icon: 'ik', anyItem: true,
     init() {
-      m.all = st().objectScope === 'animation'; m.bend = null;
+      m.all = st().objectScope !== 'frame'; m.bend = null;
       const selected = selectedInstance(), rig = rigs.find(r => (!selected || same(r.upper, selected) || same(r.lower, selected)) && here(r.upper) && here(r.lower));
       Object.assign(m, rig ? { step: 'pose', upper: rig.upper, lower: rig.lower } : { step: 'shoulder', upper: null, lower: null });
     },
@@ -335,7 +338,7 @@ const MODES = {
         ${button('rerig', 'Re-rig', { title: 'Choose the shoulder and elbow again' })}`;
     },
     param(name, value) { if (name === 'all') { m.all = Boolean(value); return true; } },
-    compute: () => { m.info = m.step === 'pose' ? (m.all ? 'Poses every frame showing both parts' : `Poses frame ${frameNo(st().frameId)} only`) : ''; return null; },
+    compute: () => { m.info = m.step === 'pose' ? (m.all ? (st().objectScope === 'selected' ? `Poses ${editScopeText(st(), animation())} showing both parts` : 'Poses every frame showing both parts') : `Poses frame ${frameNo(st().frameId)} only`) : ''; return null; },
     joints: () => limbJoints(st().project, { animationId: animation().id, frameId: st().frameId, layerId: m.upper.layerId, upperId: m.upper.key, lowerId: m.lower.key, lowerLayerId: m.lower.layerId }),
     overlay(c) {
       if (m.step !== 'pose') {
@@ -375,7 +378,7 @@ const MODES = {
     },
     move(p) {
       try {
-        st().project = ikLimb(m.drag.before.project, { animationId: animation().id, layerId: m.upper.layerId, upperId: m.upper.key, lowerId: m.lower.key, lowerLayerId: m.lower.layerId, frameIds: m.all ? undefined : [st().frameId], target: p, bend: m.bend }).project;
+        st().project = ikLimb(m.drag.before.project, { animationId: animation().id, layerId: m.upper.layerId, upperId: m.upper.key, lowerId: m.lower.key, lowerLayerId: m.lower.layerId, frameIds: m.all ? ikFrames() : [st().frameId], target: p, bend: m.bend }).project;
       } catch (error) { st().project = m.drag.before.project; m.drag = null; d.toast(error.message); }
       schedule();
     },
@@ -565,7 +568,7 @@ function act(name) {
     const j = MODES.ik.joints();
     if (!j) return;
     m.bend = -(m.bend ?? nearestBend(j, j.hand));
-    try { d.mutate(() => { state.project = ikLimb(state.project, { animationId: animation().id, layerId: m.upper.layerId, upperId: m.upper.key, lowerId: m.lower.key, lowerLayerId: m.lower.layerId, frameIds: m.all ? undefined : [state.frameId], target: j.hand, bend: m.bend }).project; }); }
+    try { d.mutate(() => { state.project = ikLimb(state.project, { animationId: animation().id, layerId: m.upper.layerId, upperId: m.upper.key, lowerId: m.lower.key, lowerLayerId: m.lower.layerId, frameIds: m.all ? ikFrames() : [state.frameId], target: j.hand, bend: m.bend }).project; }); }
     catch (error) { d.toast(error.message); }
   }
 }

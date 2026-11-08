@@ -4,6 +4,7 @@ import { cloneArtwork, sourceForCel, renderOperations, renderParts } from './art
 import { celObjects, objectBounds, orderObjects } from './objects.js';
 import { nextPartId } from './parts.js';
 import { instancePose } from './geometry.js';
+import { assertEditScope, scopeFrames } from './frame-scope.js';
 
 export const OBJECT_CLIPBOARD_FORMAT = 'pixel-studio-object';
 
@@ -175,9 +176,9 @@ export function pasteBones(project, bones, placed) {
 }
 function pasteOne(project, target, clipboard, { scope = 'animation', independent = false, offset = 0, fill = true, intoGroup = true } = {}) {
   const clip = readClipboard(clipboard);
-  if (!['frame', 'animation'].includes(scope)) throw new Error('Choose current frame or current animation.');
+  assertEditScope(scope);
   const p = validateProject(project), { animation, frame } = locate(p, target);
-  const frames = scope === 'animation' ? animation.frames : [frame];
+  const frames = scopeFrames(animation, frame, scope);
   const { palette, mapping } = mapPaletteColors(p.palette, clip.palette, usedColors(clip));
   p.palette = palette;
   const color = c => c < 0 ? c : mapping.get(c);
@@ -185,7 +186,7 @@ function pasteOne(project, target, clipboard, { scope = 'animation', independent
   const sameSize = clip.width === p.width && clip.height === p.height;
   const keepsSource = clip.kind === 'instance' || (clip.source && sameSize) || Boolean(clip.frames && sameSize && clip.kind === 'container');
   // Pasting back into the copied animation keeps each frame's pose or artwork; elsewhere the copied frame is used.
-  const perFrame = scope === 'animation' && clip.frames && clip.animationId === animation.id && sameSize && frames.some(f => clip.frames[f.id]);
+  const perFrame = scope !== 'frame' && clip.frames && clip.animationId === animation.id && sameSize && frames.some(f => clip.frames[f.id]);
   const partIds = new Map();
   if (keepsSource) for (const part of clip.parts) {
     const definition = { id: part.id, width: part.width, height: part.height, ops: remap(part.ops) };

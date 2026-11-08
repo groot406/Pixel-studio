@@ -10,6 +10,7 @@ import {
   mirrorPose, resetPose, tweenPoses, rigView, boneOf,
 } from '../domain/skeleton.js';
 import { instanceBox, instancePixel } from '../domain/geometry.js';
+import { editFrameIds, editScopeText } from './edit-scope.js';
 import { frameObjects } from '../domain/objects.js';
 import { renderParts } from '../domain/artwork.js';
 import { closeMotionMode } from './motion-modes.js';
@@ -29,7 +30,7 @@ const same = (a, b) => Boolean(a && b) && a.layerId === b.layerId && a.key === b
 const imageOf = op => { const parts = st().project.parts; if (!imageCache.has(parts)) imageCache.set(parts, renderParts(parts)); return imageCache.get(parts).get(op.partId); };
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const frameIndex = () => animation().frames.findIndex(f => f.id === st().frameId);
-const scopeIds = () => (st().objectScope === 'frame' ? [st().frameId] : animation().frames.map(f => f.id));
+const scopeIds = () => editFrameIds(st(), animation());
 const view = () => rigView(st().project, animation().id, st().frameId);
 const bones = () => st().project.bones || [];
 const boneName = b => d.escapeHTML(b?.name || b?.id || '');
@@ -211,7 +212,7 @@ function info(text = r?.info) {
   const el = d.$('rig-bar').querySelector('.motion-info');
   if (!el || !r) return;
   el.classList.toggle('is-error', Boolean(r.error));
-  el.textContent = r.error || text || (r.step === 'pose' ? `${st().objectScope === 'frame' ? `Poses frame ${frameIndex() + 1} only` : 'Poses every frame (Edit: All frames)'} · ${bones().length} bones` : `${bones().length} bones`);
+  el.textContent = r.error || text || (r.step === 'pose' ? `${st().objectScope === 'frame' ? `Poses frame ${frameIndex() + 1} only` : `Poses ${editScopeText(st(), animation())} (Edit switch)`} · ${bones().length} bones` : `${bones().length} bones`);
 }
 
 // ---------------------------------------------------------------------------------------------

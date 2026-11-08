@@ -4,6 +4,7 @@
  * to the selection when there is one. Each dialog shows a live before/after preview of the current frame.
  */
 import { applyPixelEffect } from '../domain/effects.js';
+import { editScope, editScopeText } from './edit-scope.js';
 import { compositeFrame } from '../domain/project.js';
 import { rampFromPalette } from '../domain/colour.js';
 import { selectionTarget } from './tool-extras.js';
@@ -28,8 +29,8 @@ export function blockedReason() {
   return '';
 }
 export function scopeText() {
-  const { state } = d, layer = d.currentLayer(), frames = d.currentAnimation().frames.length;
-  return `“${layer.name}”${state.selection ? ', inside the selection,' : ''} in ${state.objectScope === 'animation' && frames > 1 ? `all ${frames} frames` : 'this frame'}`;
+  const { state } = d, layer = d.currentLayer();
+  return `“${layer.name}”${state.selection ? ', inside the selection,' : ''} in ${editScopeText(state, d.currentAnimation())}`;
 }
 
 export function renderEffectsPanel() {
@@ -155,7 +156,7 @@ function effectDialog(effect) {
   $('fx-form').onsubmit = event => {
     event.preventDefault();
     let result;
-    try { d.mutate(() => { result = applyPixelEffect(state.project, { ...target(), scope: state.objectScope }, effect, def.options()); state.project = result.project; }); }
+    try { d.mutate(() => { result = applyPixelEffect(state.project, { ...target(), scope: editScope(state) }, effect, def.options()); state.project = result.project; }); }
     catch (error) { $('fx-error').textContent = error.message; return; }
     $('modal').close(); d.renderAll();
     const changed = result.frameIds.length;

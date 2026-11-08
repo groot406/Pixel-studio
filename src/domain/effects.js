@@ -16,6 +16,7 @@ import { canInsertFrames } from './animate.js';
 import { autoOutline } from './shading.js';
 import { applyFixes } from './cleanup.js';
 import { smoothJaggies } from './antialias.js';
+import { assertEditScope, scopeFrames } from './frame-scope.js';
 
 /** Map palette index → its hue-family ramp (indices, dark → light), the `ramps` autoShade and selOut take. */
 export function rampsForPalette(palette, { hueTolerance = 35 } = {}) {
@@ -79,7 +80,7 @@ function scopeMask({ mask, rect }, width, height) {
  */
 export function applyPixelEffect(project, { animationId, frameId, layerId, scope = 'frame', mask, rect }, effect, options = {}) {
   if (!PIXEL_EFFECTS.includes(effect)) throw new Error(`Unknown effect ${effect}.`);
-  if (!['frame', 'animation'].includes(scope)) throw new Error('Choose current frame or current animation.');
+  assertEditScope(scope);
   const p = validateProject(project), animation = p.animations.find(a => a.id === animationId), frame = animation?.frames.find(f => f.id === frameId);
   const layer = p.layers.find(l => l.id === layerId);
   if (!frame || !layer) throw new Error('This frame or container no longer exists.');
@@ -88,7 +89,7 @@ export function applyPixelEffect(project, { animationId, frameId, layerId, scope
   const o = effect === 'gradient' && options.region === 'mask' ? { ...options, mask: options.mask ?? selected } : options;
   const frameIds = [];
   let skipped = 0;
-  for (const f of scope === 'animation' ? animation.frames : [frame]) {
+  for (const f of scopeFrames(animation, frame, scope)) {
     const cel = f.cels.find(c => c.layerId === layerId);
     if (hasLockedInstances(cel)) {
       if (scope === 'frame') throw new Error('Unlock objects in this container first.');

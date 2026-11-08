@@ -99,3 +99,13 @@ test('tool helpers: pixel-perfect, wrap-around and clean-slope points', () => {
   assert.equal(toolLinePoints(14, 0, 17, 0, { wrap: true, width: W, height: W }).at(-1).x, 1);
   assert.equal(tileSeams(cel(scene()).pixels, W, W), 0);
 });
+
+test('a list of frame ids scopes an edit to those frames (plus the target frame)', async () => {
+  const { translateObject } = await import('../src/domain/objects.js');
+  const r = applyPixelEffect(scene(4), { ...T, frameId: 'f1', scope: ['f3'] }, 'outline', { color: 0 });
+  assert.deepEqual(r.frameIds, ['f1', 'f3']);
+  assert.deepEqual([0, 1, 2, 3].map(k => at(r.project, 4, 4, k)), [-1, 0, -1, 0]);
+  const moved = translateObject(scene(4, { retained: true }), { ...T, frameId: 'f0' }, 'o', 2, 0, ['f2']);
+  assert.deepEqual(moved.animations[0].frames.map(f => f.cels[0].source.ops[0].x), [7, 5, 7, 5]);
+  assert.throws(() => applyPixelEffect(scene(), { ...T, scope: [] }, 'outline', { color: 0 }), /Choose/);
+});

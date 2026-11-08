@@ -309,7 +309,12 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--green); }
 .export-summary strong { overflow-wrap: anywhere; color: #4f6e3c; font-size: 12px; font-weight: 600; line-height: 1.5; }
 .export-summary span { color: #718365; font-size: 10px; line-height: 1.5; }
 .png-import-preview { display: grid; place-items: center; min-height: 160px; margin: 12px 0 20px; border: 1px solid #e0e8d4; border-radius: 8px; background-color: #f6f8f1; background-image: linear-gradient(45deg, #e8eddf 25%, transparent 25%), linear-gradient(-45deg, #e8eddf 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e8eddf 75%), linear-gradient(-45deg, transparent 75%, #e8eddf 75%); background-size: 16px 16px; background-position: 0 0, 0 8px, 8px -8px, -8px 0; }
-.png-import-preview canvas { display: block; width: 128px; height: 128px; }
+.png-import-preview canvas { display: block; width: 160px; height: 160px; object-fit: contain; image-rendering: pixelated; }
+.png-detect-note { font-size: 11px; color: #4f6b45; background: rgba(255,255,255,.85); padding: 2px 8px; border-radius: 99px; margin-bottom: 8px; }
+.png-detect-note:empty { display: none; }
+.png-cleanup { align-items: end; margin-bottom: 8px; }
+.png-cleanup[hidden] { display: none; }
+.png-cleanup .check-row { margin-top: 0; padding-bottom: 8px; }
 .download-row { text-decoration: none; }
 .download-row:hover { background: #f5f9ee; border-color: #bfd2a7; }
 .download-row > img { display: block; flex: 0 0 auto; width: 48px; height: 48px; border-radius: 5px; background: #f1f5e8; image-rendering: pixelated; }

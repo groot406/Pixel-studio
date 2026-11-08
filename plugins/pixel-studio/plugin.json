@@ -1,0 +1,43 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "pixel-studio",
+  "version": "1.2.0",
+  "description": "Create, edit, animate and export pixel art with Pixel Studio: PXA sprite files, rendering, image-to-pixel clean-up, palettes, walk/run templates and a live link to the open editor.",
+  "author": {
+    "name": "Pixel Studio",
+    "url": "https://github.com/groot406/Pixel-studio"
+  },
+  "homepage": "https://github.com/groot406/Pixel-studio",
+  "repository": "https://github.com/groot406/Pixel-studio",
+  "keywords": [
+    "pixel-art",
+    "sprites",
+    "animation",
+    "game-dev",
+    "mcp"
+  ],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Pixel Studio",
+        "shortDescription": "Draw, animate and export pixel-art sprites",
+        "longDescription": "Create, edit, animate and export pixel art with Pixel Studio: PXA sprite files, rendering, image-to-pixel clean-up, palettes, walk/run templates and a live link to the open editor. Requires Node.js 20 or newer. Files stay in your workspace.",
+        "developerName": "Pixel Studio",
+        "category": "Design",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "websiteURL": "https://github.com/groot406/Pixel-studio",
+        "defaultPrompt": [
+          "Use Pixel Studio to draw a 32×32 knight sprite and render it.",
+          "Use Pixel Studio to turn hero.png into clean pixel art with 16 colours.",
+          "Use Pixel Studio to add a walk cycle to my rigged character and export a sprite sheet."
+        ],
+        "brandColor": "#285B47",
+        "composerIcon": "./assets/icon.png",
+        "logo": "./assets/icon.png"
+      }
+    }
+  }
+}

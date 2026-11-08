@@ -7,8 +7,34 @@ them directly. This checkout ships everything an agent needs to work headless (N
 |-------|-------------|---------|
 | MCP server | `node local/cli.mjs mcp [--root DIR]` (`npm run mcp`) | Tools for Claude, Copilot, Cursor, Codex and any MCP client |
 | CLI | `node local/cli.mjs …` (`pixelstudio` after `npm link`) | The same operations for shell-only agents and scripts |
+| Plugin | `codex plugin marketplace add groot406/Pixel-studio` / Claude Code `/plugin marketplace add …` | Skills + MCP server packaged for Codex, ChatGPT desktop and Claude Code |
 | Skills | `node local/cli.mjs skills install` (`npm run skills`) | `SKILL.md` instructions: PXA 2 workflow, pixel-art and animation rules |
 | Live bridge | `npm start` + an open editor | `editor_*` tools read and edit the project in the user's open tab |
+
+## Plugin (Codex and Claude Code)
+
+`plugins/pixel-studio` is a self-contained agent plugin: both skills, a copy of the MCP server with only the source files
+it imports (`server/`), an icon and manifests for both hosts — portable `plugin.json` + `mcp.json` (Codex / ChatGPT, with
+`extensions["com.openai"].interface` for the Plugins directory) and `.claude-plugin/plugin.json` + `.mcp.json` (Claude
+Code). The repository is its own marketplace (`.agents/plugins/marketplace.json` and `.claude-plugin/marketplace.json`).
+
+```sh
+# Codex CLI (or add the marketplace, then install from /plugins or the ChatGPT desktop Plugins directory)
+codex plugin marketplace add groot406/Pixel-studio
+codex plugin add pixel-studio@pixel-studio
+
+# Claude Code
+/plugin marketplace add groot406/Pixel-studio
+/plugin install pixel-studio@pixel-studio
+
+# From a checkout: copy to ~/.codex/plugins/pixel-studio and list it in ~/.agents/plugins/marketplace.json
+node local/cli.mjs plugin install        # npm run plugin:install
+```
+
+Codex starts plugin MCP servers inside the plugin cache and doesn't pass your project folder, so the server falls back
+to `~/PixelStudio` and offers a `set_workspace` tool; the skill tells the agent to call it with its working directory.
+Clients that support MCP roots get the project folder automatically. Run `npm run plugin` after changing the skills or
+the server (`npm test` fails when the package is stale), then bump `version` in `package.json` so installs refresh.
 
 ## Connecting clients
 
@@ -55,6 +81,7 @@ Arguments marked * are required. Frames and animations accept an id, a name or a
 | `editor_get_project` | `preview`, `strip` | The open tab as PXA 2 + PNG preview |
 | `editor_apply_project` | `pxa` or `path`, `mode` (`replace`/`new-tab`), `message` | Validated, then applied in the editor (one undo step) or opened as a new tab |
 | `editor_open_file` | `path`* | Opens a workspace project in a new editor tab |
+| `set_workspace` | `path`* | Only when the root is a fallback (plugin cache or `/`): switch to the agent's project folder |
 
 Tool failures are returned as `isError` results with an actionable message (for example the PXA line to fix), so the
 agent can correct itself. Arguments are checked against each tool's JSON Schema.
@@ -94,6 +121,7 @@ pixelstudio export sprite.pxa --sheet -o sheet.png      # also --gif, --apng, --
 pixelstudio mcp --root ~/PixelStudio
 pixelstudio skills install [--target claude|copilot|codex|cursor|all] [--project]
 pixelstudio skills config
+pixelstudio plugin install                               # Codex personal marketplace (~/.codex/plugins)
 pixelstudio serve [--port 4317] [--open]
 ```
 

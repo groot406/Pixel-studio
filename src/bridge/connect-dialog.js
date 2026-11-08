@@ -2,6 +2,8 @@
 import { mcpSnippets, skillsCommand } from './mcp-config.js';
 
 const REPO_URL = 'https://github.com/groot406/Pixel-studio';
+const CODEX_PLUGIN_COMMANDS = 'codex plugin marketplace add groot406/Pixel-studio\ncodex plugin add pixel-studio@pixel-studio';
+const CLAUDE_PLUGIN_COMMANDS = '/plugin marketplace add groot406/Pixel-studio\n/plugin install pixel-studio@pixel-studio';
 
 /** status: the /api/local-ai/status response when served by Pixel Studio Local, else null. */
 export async function openConnectDialog({ openDialog, escapeHTML, toast, status }) {
@@ -20,7 +22,13 @@ export async function openConnectDialog({ openDialog, escapeHTML, toast, status 
     ? `<p class="modal-body-text">Let Claude, GitHub Copilot, Cursor, Codex and other MCP clients draw, animate and export sprites with Pixel Studio. While this editor is open, agents can also read the current tab and propose changes here (you approve the first edit; each one is an undo step).</p>`
     : `<p class="modal-body-text">AI agents connect through <strong>Pixel Studio Local</strong>, which runs on your computer. Download or clone <a href="${REPO_URL}" target="_blank" rel="noopener">the repository ↗</a> (Node.js 20+), then run:</p>${block('npm start', 'start command')}<p class="modal-body-text">The commands below use your checkout's path in place of <code>/path/to/Pixel-studio</code>.</p>`;
   const html = `<div class="connect-agent">${intro}
-    <h3 class="connect-heading">1 · Add the MCP server</h3>
+    <h3 class="connect-heading">Quickest · Install the plugin</h3>
+    <p class="modal-body-text">The Pixel Studio plugin bundles the skills and the MCP server, so there are no paths to set up. <strong>Codex</strong> (CLI, or the ChatGPT desktop app's Plugins directory after adding the marketplace):</p>
+    ${block(CODEX_PLUGIN_COMMANDS, 'Codex plugin commands')}
+    <p class="modal-body-text"><strong>Claude Code</strong>:</p>
+    ${block(CLAUDE_PLUGIN_COMMANDS, 'Claude Code plugin commands')}
+    <p class="connect-note">In Codex the plugin starts outside your project, so the agent first calls <code>set_workspace</code> with its working folder. From a checkout, <code>node local/cli.mjs plugin install</code> adds it to your personal Codex marketplace instead.</p>
+    <h3 class="connect-heading">Or connect manually · 1 · Add the MCP server</h3>
     <div class="connect-tabs" role="tablist">${snippets.map((s, i) => `<button type="button" role="tab" class="button small${i ? '' : ' primary'}" aria-selected="${!i}" data-client="${s.id}">${escapeHTML(s.client)}</button>`).join('')}</div>
     ${snippets.map((s, i) => `<section class="connect-client" data-client-pane="${s.id}" ${i ? 'hidden' : ''}><p class="connect-where">${escapeHTML(s.where)}</p>${block(s.text, `${s.client} configuration`)}<p class="connect-note">${escapeHTML(s.note)}</p></section>`).join('')}
     <h3 class="connect-heading">2 · Install the skills (optional)</h3>

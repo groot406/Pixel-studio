@@ -1,0 +1,62 @@
+{
+  "format": "pixel-studio-spritesheet",
+  "version": 1,
+  "name": "Ravi the Red Panda",
+  "width": 32,
+  "height": 32,
+  "cellWidth": 32,
+  "cellHeight": 32,
+  "scale": 1,
+  "rows": 3,
+  "columns": 6,
+  "palette": [
+    "#35252a",
+    "#513139",
+    "#75433a",
+    "#a94e35",
+    "#d4693f",
+    "#ee9560",
+    "#f6bb80",
+    "#ffedcf",
+    "#d9b38d",
+    "#fff9e8",
+    "#e19a8b"
+  ],
+  "animations": [
+    {
+      "name": "Idle",
+      "fps": 4,
+      "frameCount": 4,
+      "durations": [
+        450,
+        350,
+        450,
+        140
+      ]
+    },
+    {
+      "name": "Walk",
+      "fps": 8,
+      "frameCount": 6,
+      "durations": [
+        125,
+        125,
+        125,
+        125,
+        125,
+        125
+      ]
+    },
+    {
+      "name": "Wave",
+      "fps": 6,
+      "frameCount": 4,
+      "durations": [
+        160,
+        180,
+        160,
+        220
+      ]
+    }
+  ]
+}

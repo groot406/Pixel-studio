@@ -1,0 +1,16 @@
+{
+  "name": "pixel-studio",
+  "description": "Pixel Studio: pixel-art sprite and animation tools for AI agents.",
+  "owner": {
+    "name": "Pixel Studio",
+    "url": "https://github.com/groot406/Pixel-studio"
+  },
+  "plugins": [
+    {
+      "name": "pixel-studio",
+      "source": "./plugins/pixel-studio",
+      "description": "Create, edit, animate and export pixel-art sprites with Pixel Studio: skills plus a local MCP server.",
+      "category": "design"
+    }
+  ]
+}

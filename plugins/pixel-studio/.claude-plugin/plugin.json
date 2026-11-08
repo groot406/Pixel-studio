@@ -1,0 +1,18 @@
+{
+  "name": "pixel-studio",
+  "version": "1.2.0",
+  "description": "Create, edit, animate and export pixel art with Pixel Studio: PXA sprite files, rendering, image-to-pixel clean-up, palettes, walk/run templates and a live link to the open editor.",
+  "author": {
+    "name": "Pixel Studio",
+    "url": "https://github.com/groot406/Pixel-studio"
+  },
+  "homepage": "https://github.com/groot406/Pixel-studio",
+  "repository": "https://github.com/groot406/Pixel-studio",
+  "keywords": [
+    "pixel-art",
+    "sprites",
+    "animation",
+    "game-dev",
+    "mcp"
+  ]
+}

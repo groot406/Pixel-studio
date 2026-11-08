@@ -26,6 +26,7 @@ Usage: pixelstudio <command> [options]
   skills install [--target claude|copilot|codex|cursor|all] [--project]
                                        Install the Pixel Studio agent skills and print MCP config snippets
   skills config                        Print MCP config snippets only
+  plugin install                       Install the Pixel Studio plugin (skills + MCP server) for Codex / ChatGPT desktop
   serve [--port 4317] [--open]         Start Pixel Studio Local (editor + live agent bridge)
 `;
 
@@ -140,6 +141,14 @@ const commands = {
     const results = await installSkills({ target: options.target || 'all', project: Boolean(options.project) });
     for (const r of results) say(`Installed ${r.skills.join(', ')} for ${r.label} → ${r.directory}${r.extra.length ? ` (+ ${r.extra.join(', ')})` : ''}`);
     say(`\n${mcpSetupText()}`);
+  },
+
+  async plugin(args) {
+    const { positional } = parseArgs(args, []);
+    const action = positional[0] || 'install';
+    if (action !== 'install') throw new UsageError(`Unknown plugin action "${action}". Use install.`);
+    const { installCodexPlugin, pluginInstructions } = await import('./plugin.mjs');
+    say(pluginInstructions(await installCodexPlugin()));
   },
 
   async serve(args) {

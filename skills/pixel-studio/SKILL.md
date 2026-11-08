@@ -14,7 +14,9 @@ writing PXA.
 
 Prefer the **Pixel Studio MCP tools** when they are available (`pixel_guide`, `create_project`, `read_project`,
 `validate_pxa`, `write_project`, `render_png`, `image_to_pixels`, `apply_template`, `set_palette`, `export`,
-and the live `editor_*` tools). Without MCP, use the CLI from the Pixel Studio checkout:
+and the live `editor_*` tools). If `set_workspace` is listed (the Pixel Studio plugin in Codex, whose server starts
+outside your project), call it first with the absolute path of your working directory so files land in the project.
+Without MCP, use the CLI from the Pixel Studio checkout:
 
 ```sh
 pixelstudio info sprite.pxa                 # summary: size, palette, animations, frames, parts, bones

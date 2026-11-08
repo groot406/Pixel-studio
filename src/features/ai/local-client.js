@@ -29,6 +29,8 @@ export async function readLocalEditResponse(response, onEvent = () => {}, signal
       if (typeof event.text !== 'string' || !event.text.trim()) throw new Error('Codex completed without returning pixel data. Try again.');
       if (new TextEncoder().encode(event.text).length > 4 * 1024 * 1024) throw new Error('This edit is too large. Try one animation or frame at a time.');
       finalText = event.text;
+      // Pixel Studio Cloud reports the credits this request used and what is left.
+      if (event.credits && typeof globalThis.dispatchEvent === 'function' && typeof CustomEvent === 'function') globalThis.dispatchEvent(new CustomEvent('pixel-studio:credits', { detail: event.credits }));
     }
   };
   try {

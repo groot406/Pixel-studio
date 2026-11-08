@@ -43,6 +43,8 @@ import { initAnimatePanel, renderAnimatePanel } from './animate-panel.js';
 import { initMotionAsk, motionAskDialog } from './motion-ask.js';
 import { initMotionModes, syncMotionMode, drawMotionOverlay } from './motion-modes.js';
 import { initOutlineDialog, renderOutlineButton, outlineDialog } from './outline-dialog.js';
+import { initAccount } from '../features/cloud/account-dialog.js';
+import { isCloudEdition } from '../features/cloud/client.js';
 import { initRigMode, syncRigMode, drawRigOverlay, toggleRigMode } from './rig-mode.js';
 import { initTimeline, renderFrameCards, frameAction, timelineKey, nextPreviewIndex, loopLabel } from './timeline.js';
 import { initOnion, drawOnion, onionSummary } from './onion.js';
@@ -2790,7 +2792,7 @@ function samplesDialog() {
   render();
 }
 function accountDialog() {
-  if (['127.0.0.1','localhost','[::1]'].includes(location.hostname)) { aiEditDialog(); return; }
+  if (isCloudEdition() || ['127.0.0.1','localhost','[::1]'].includes(location.hostname)) { aiEditDialog(); return; }
   openDialog('AI in Pixel Studio', `<p class="modal-body-text">Use your own Codex ChatGPT account in the local edition. Describe an edit, review the result, then apply it with Undo available.</p><div class="notice"><strong>Local Codex edition</strong><p>Download and unzip Pixel Studio, then run <code>npm start</code> in its folder or open <strong>Start-Pixel-Studio.command</strong> on your Mac. Requires Node.js 20+ and the Codex CLI signed in with ChatGPT.</p><a class="button primary" href="./downloads/pixel-studio-local.zip" download>Download local edition</a></div><p class="modal-body-text">To move your current artwork to localhost, export a .pxa or .pxs file here and import it there. Each address keeps its own saved projects.</p><div class="modal-actions"><button id="account-ai-edit" class="button primary">Review an AI edit</button><button id="account-ai-export" class="button">Build a creation prompt</button></div><details class="prompt-style-details"><summary>Website sign-in</summary><p class="modal-body-text">Sign in to this website with your ChatGPT account. Using your plan for automatic generation on the hosted website requires a separate approved connection.</p><a class="button chatgpt-signin" href="/signin-with-chatgpt?return_to=%2F" target="_top" data-oai-siwc-button>Continue with ChatGPT</a><p><a class="text-button" href="/signout-with-chatgpt?return_to=%2F" target="_top">Sign out of Pixel Studio</a></p><a href="https://developers.openai.com/siwc/quickstart" target="_blank" rel="noopener noreferrer">About ChatGPT plan connections ↗</a></details>`, 'AI CONNECTION');
   $('account-ai-edit').onclick=aiEditDialog;
   $('account-ai-export').onclick=()=>promptBuilderDialog();
@@ -2800,7 +2802,7 @@ function bindEvents() {
   bindFileDrop();
   const mathsDeps={state,$,icon,escapeHTML,mutate,snapshot,remember,versionBefore,renderAll,renderCanvas,renderPreview,renderTools,toast,openDialog,paintSprite,finishDrawing,drawPoints,
     currentAnimation,currentFrame,currentLayer,selectedObject,selectedItems,transformItems,resizableObject,objectTarget,canEditPixels,canvasPixels,canvasPosition,normalizeSelection,selectObject,selectFrameAt,addFrame,undo:()=>restore(state.undo,state.redo)};
-  initToolExtras(mathsDeps);initObjectPose(mathsDeps);initMotionModes(mathsDeps);initRigMode(mathsDeps);initAnimatePanel(mathsDeps);initMotionAsk(mathsDeps);initTimeline(mathsDeps);initOnion(mathsDeps);initEffectsPanel(mathsDeps);initPaletteTools(mathsDeps);initPaletteStudio(mathsDeps);initOutlineDialog(mathsDeps,{bake:magicOutlineDialog});
+  initToolExtras(mathsDeps);initObjectPose(mathsDeps);initMotionModes(mathsDeps);initRigMode(mathsDeps);initAnimatePanel(mathsDeps);initMotionAsk(mathsDeps);initTimeline(mathsDeps);initOnion(mathsDeps);initEffectsPanel(mathsDeps);initPaletteTools(mathsDeps);initPaletteStudio(mathsDeps);initOutlineDialog(mathsDeps,{bake:magicOutlineDialog});initAccount({...mathsDeps,openProject:replaceProject});
   initAiImage({...mathsDeps,replaceProject,insertLayer,canAddFrame,canAddLayer,decodeImage,imageRgba});
   const pluginDeps={...mathsDeps,openPluginManager:tab=>openPluginManager(tab),openPromptBuilder:promptBuilderDialog};
   initPluginManager(pluginDeps);initPlugins(pluginDeps);initCommandPalette(pluginDeps);

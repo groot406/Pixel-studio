@@ -9,3 +9,5 @@
 /pixel-studio-ai-inpaint-patch.zip
 
 /.playwright-cli/
+!.env.example
+/pixel-studio-cloud.db*

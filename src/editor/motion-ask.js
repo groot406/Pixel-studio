@@ -111,21 +111,21 @@ export function motionAskDialog(initial = last) {
     s.connection = { connected: false };
     try {
       const response = await fetch('/api/local-ai/status', { cache: 'no-store', credentials: 'same-origin' }), result = await response.json();
-      if (response.ok && result.local === true && result.connected === true && result.authMode === 'chatgpt' && typeof result.csrfToken === 'string') s.connection = { connected: true, csrfToken: result.csrfToken };
+      if (response.ok && result.local === true && result.connected === true && (result.authMode === 'chatgpt' || (result.cloud === true && result.authMode === 'cloud')) && typeof result.csrfToken === 'string') s.connection = { connected: true, csrfToken: result.csrfToken, label: result.cloud ? 'the AI' : 'Codex' };
     } catch { /* hosted edition: copy and paste only */ }
     if (!form.isConnected) return;
     $('ma-ai-send').hidden = !s.connection.connected;
-    if (s.connection.connected) $('ma-ai-status').textContent = 'Ask Codex directly, or copy the prompt into any AI chat and paste its JSON reply below.';
+    if (s.connection.connected) $('ma-ai-status').textContent = `Ask ${s.connection.label} directly, or copy the prompt into any AI chat and paste its JSON reply below.`;
   }
   async function askCodex() {
     if (s.busy || !s.connection?.connected) return;
-    s.busy = true; $('ma-ai-send').disabled = true; $('ma-ai-status').textContent = 'Asking Codex for a motion plan…';
+    s.busy = true; $('ma-ai-send').disabled = true; $('ma-ai-status').textContent = `Asking ${s.connection.label} for a motion plan…`;
     try {
       const response = await fetch('/api/local-ai/edit', { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json', 'X-Pixel-Studio-Token': s.connection.csrfToken }, body: JSON.stringify({ prompt: $('ma-ai-prompt').value }) });
       const text = await readLocalEditResponse(response, event => { if (event.type === 'status' && form.isConnected) $('ma-ai-status').textContent = event.message || 'Codex is thinking…'; });
       if (!form.isConnected) return;
       $('ma-ai-reply').value = text;
-      $('ma-ai-status').textContent = 'Codex replied. Check the plan and preview.';
+      $('ma-ai-status').textContent = `${s.connection.label === 'Codex' ? 'Codex' : 'The AI'} replied. Check the plan and preview.`;
       useReply();
     } catch (e) { if (form.isConnected) { $('ma-ai-status').textContent = ''; error(e.message || 'Codex could not answer. Copy the prompt instead.'); } }
     finally { s.busy = false; if (form.isConnected) $('ma-ai-send').disabled = false; }

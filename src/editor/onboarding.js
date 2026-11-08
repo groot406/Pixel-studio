@@ -31,6 +31,8 @@ export const SHORTCUTS = [
   { keys: 'Alt', action: 'Hold to pick a color with any tool', group: 'tools' },
   { keys: '⌘/Ctrl + Z', action: 'Undo', group: 'editing' },
   { keys: '⌘/Ctrl + ⇧ + Z', action: 'Redo (also ⌘/Ctrl + Y)', group: 'editing' },
+  { keys: '⇧ + L', action: 'Lock transparency: drawing only recolours existing pixels', group: 'editing' },
+  { keys: 'Esc', action: 'Deselect pixels (drawing tools stay inside a selection)', group: 'editing' },
   { keys: '⌘/Ctrl + A', action: 'Select all pixels (all objects with Object or Transform)', group: 'editing' },
   { keys: '⌘/Ctrl + C / X / V', action: 'Copy / cut / paste pixels, or the selected object', group: 'editing' },
   { keys: '⌘/Ctrl + ⇧ + V', action: 'Paste object as an independent copy', group: 'editing' },

@@ -145,11 +145,12 @@ function stamp(session,stroke,points) {
     return;
   }
   if(stroke.tool==='dither')footprint=footprint.filter(point=>ditherCell(point.x,point.y));
-  // Painting past the outline extends the part; erasing there has nothing to remove.
-  if(stroke.color>=0)grow(session,footprint.map(point=>inPlacePoint(session,point)));
+  // Painting past the outline extends the part (unless transparency is locked); erasing there has nothing to remove.
+  const locked=stroke.lockAlpha && stroke.color>=0;
+  if(stroke.color>=0 && !locked)grow(session,footprint.map(point=>inPlacePoint(session,point)));
   for(const point of footprint) {
-    const local=inPlacePoint(session,point);
-    if(insidePart(session,local))session.pixels[local.y*session.width+local.x]=stroke.color;
+    const local=inPlacePoint(session,point), index=local.y*session.width+local.x;
+    if(insidePart(session,local) && !(locked && session.pixels[index]<0))session.pixels[index]=stroke.color;
   }
 }
 
@@ -167,6 +168,7 @@ export function beginInPlaceStroke(session,point,options) {
   if(stroke.tool==='eraser')stroke.color=-1;
   if(stroke.tool==='fill')floodFill(session.pixels,local.x,local.y,stroke.color,session.width,session.height);
   else if(stroke.tool==='replace')session.pixels=replaceColor(session.pixels,session.width,session.height,session.pixels[local.y*session.width+local.x],stroke.color);
+  if(stroke.lockAlpha && ['fill','replace'].includes(stroke.tool))session.pixels=session.pixels.map((value,index)=>stroke.base.pixels[index]<0?-1:value);
   else if(options.from && ['pencil','eraser','dither','shade'].includes(stroke.tool))stamp(session,stroke,linePoints(options.from.x,options.from.y,point.x,point.y));
   else stamp(session,stroke,[point]);
   session.revision++;

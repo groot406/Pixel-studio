@@ -51,6 +51,25 @@ test('growing a part keeps every transformed instance in place',async()=>{
   }
 });
 
+test('Lock transparency keeps an in-place part’s silhouette: strokes and fills only recolour existing pixels',async()=>{
+  const m=await import('../src/features/objects/in-place-edit.js');
+  const p=decodeAIProject(sparklePxa), session=m.createInPlaceEdit(p,{...target,instanceId:'glint'});
+  const rect=m.inPlaceCanvasRect(session), shape=session.pixels.map(v=>v<0);
+  const line=m.beginInPlaceStroke(session,{x:rect.x-3,y:rect.y},{tool:'pencil',color:1,from:{x:rect.x+rect.width+2,y:rect.y+rect.height-1},lockAlpha:true});
+  m.finishInPlaceStroke(session,line);
+  for(let y=0;y<session.height;y++) for(let x=0;x<session.width;x++) {
+    const i=y*session.width+x;
+    if(shape[i])assert.equal(session.pixels[i],-1);
+  }
+  assert.equal(session.width,session.originalWidth);
+  const empty=shape.indexOf(true), filled=shape.indexOf(false);
+  const fill=m.beginInPlaceStroke(session,{x:rect.x+empty%session.width,y:rect.y+Math.floor(empty/session.width)},{tool:'fill',color:2,lockAlpha:true});
+  m.finishInPlaceStroke(session,fill);
+  assert.deepEqual(session.pixels.map(v=>v<0),shape);
+  m.finishInPlaceStroke(session,m.beginInPlaceStroke(session,{x:rect.x+filled%session.width,y:rect.y+Math.floor(filled/session.width)},{tool:'pencil',color:2,lockAlpha:true}));
+  assert.equal(session.pixels[filled],2);
+});
+
 test('in-place drawing beyond the outline extends the part and selections edit part pixels',async()=>{
   const m=await import('../src/features/objects/in-place-edit.js');
   for(const transform of ['N','R90','FX']) {

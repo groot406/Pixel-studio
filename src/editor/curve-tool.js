@@ -213,7 +213,7 @@ export function commitCurve() {
 function commitInPlace(points) {
   const { state } = d, session = state.inPlaceEdit.session;
   try {
-    const s = beginInPlaceStroke(session, points[0], { tool: 'pencil', color: state.color, brushSize: state.brushSize, brushShape: state.brushShape, symmetry: state.symmetry });
+    const s = beginInPlaceStroke(session, points[0], { tool: 'pencil', color: state.color, brushSize: state.brushSize, brushShape: state.brushShape, symmetry: state.symmetry, lockAlpha: state.lockAlpha });
     if (!s) return;
     for (const p of points.slice(1)) moveInPlaceStroke(session, s, p);
     finishInPlaceStroke(session, s);

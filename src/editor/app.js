@@ -94,7 +94,7 @@ const SELECT_TOOLS = ['select','wand'];
 const state = {
   project: blankProject(), animationId: null, frameId: null, layerId: null,
   tool: 'pencil', color: 0, scale: 12, fit: true, grid: true, onion: false,
-  filled: false, playing: true, previewIndex: 0, previewTime: 0, previewBackground: 0,
+  filled: false, lockAlpha: false, playing: true, previewIndex: 0, previewTime: 0, previewBackground: 0,
   inPlaceEdit:null, previewOverride:null, objectSelection:null, objectScope:'animation', collapsedGroups:new Set(), objectDrag:null,
   cursor: null, drawing: null, selection: null, lastPaint: null, shiftHeld: false, swap: false, swapFirst: null,
   brushSize: 1, brushShape: 'square', symmetry: 'none', pixelPerfect: false, antialias: false, wandMode: 'shape', resizeMode: 'free', transformScope: 'frame', clipboard: null, objectClipboard: null, objectMulti: null, lastClipboard: 'pixels',
@@ -751,9 +751,11 @@ function renderTools() {
   $('brush-shape').value=state.brushShape;
   $('symmetry-mode').value=state.symmetry;
   $('filled-shape').checked=state.filled;
+  $('lock-alpha-row').hidden=!LOCKABLE_TOOLS.includes(state.tool);
+  $('lock-alpha').checked=state.lockAlpha;
   renderToolExtras();
   const scopeText=editScopeText(state,currentAnimation()), everyFrame=scopeText!=='this frame' && (PAINT_TOOLS.includes(state.tool) || ['object','resize','gradient'].includes(state.tool));
-  $('tool-status').textContent = TOOL_NAMES[state.tool] + (sized?` · ${state.brushSize}px`:'') + (state.filled && shaped ? ' · filled' : '') + (state.tool==='gradient'?` · ${gradientStatus()}`:'') + (state.tileMode?' · tile':'') + (everyFrame?` · ${scopeText.replace(/^all \d+ /,'all ')}`:'');
+  $('tool-status').textContent = TOOL_NAMES[state.tool] + (sized?` · ${state.brushSize}px`:'') + (state.filled && shaped ? ' · filled' : '') + (state.tool==='gradient'?` · ${gradientStatus()}`:'') + (state.tileMode?' · tile':'')+(state.selection && !state.inPlaceEdit && (PAINT_TOOLS.includes(state.tool) || state.tool==='gradient')?' · inside selection':'')+(state.lockAlpha && LOCKABLE_TOOLS.includes(state.tool)?' · transparency locked':'') + (everyFrame?` · ${scopeText.replace(/^all \d+ /,'all ')}`:'');
   for (const [id, active] of [['toggle-grid',state.grid],['toggle-onion',state.onion]]) {
     $(id).classList.toggle('active', active);
     $(id).setAttribute('aria-pressed', active);
@@ -1082,7 +1084,7 @@ function canvasPartKey(event,key) {
   }
   if(key===' ' && !event.target.closest('button,a')) {
     event.preventDefault();if(state.tool==='eyedropper'){state.color=canvasPixels()[(state.cursor?.y || 0)*state.project.width+(state.cursor?.x || 0)];renderPalette();renderInPlaceControls();return;}
-    try{const stroke=beginInPlaceStroke(state.inPlaceEdit.session,state.cursor || {x:0,y:0},{tool:state.tool,color:state.color,brushSize:state.brushSize,brushShape:state.brushShape,symmetry:state.symmetry,filled:state.filled});if(stroke)finishInPlaceStroke(state.inPlaceEdit.session,stroke);}
+    try{const stroke=beginInPlaceStroke(state.inPlaceEdit.session,state.cursor || {x:0,y:0},{tool:state.tool,color:state.color,brushSize:state.brushSize,brushShape:state.brushShape,symmetry:state.symmetry,filled:state.filled,lockAlpha:state.lockAlpha});if(stroke)finishInPlaceStroke(state.inPlaceEdit.session,stroke);}
     catch(error){state.inPlaceEdit.error=error.message;}
     renderTools();renderCanvas();renderPreview();
   }
@@ -1627,6 +1629,41 @@ function canvasPoint(event, clamp = false) {
   return {x,y};
 }
 function inside(point) { return point.x >= 0 && point.x < state.project.width && point.y >= 0 && point.y < state.project.height; }
+const LOCKABLE_TOOLS = ['pencil','line','rectangle','ellipse','fill','replace','dither','gradient','curve'];
+/**
+ * Pixels a stroke may change (1 = allowed), or null when nothing limits it: the pixel selection, and with
+ * Lock transparency only pixels that already have colour (so silhouettes keep their shape).
+ */
+function paintLimit(tool, pixels) {
+  const sel = state.inPlaceEdit ? null : state.selection, lock = state.lockAlpha && LOCKABLE_TOOLS.includes(tool);
+  if (!sel && !lock) return null;
+  const width = state.project.width, allow = new Uint8Array(pixels.length);
+  if (!sel) allow.fill(1);
+  else if (sel.mask) for (const i of sel.mask) allow[i] = 1;
+  else for (let y = sel.rect.y; y < sel.rect.y + sel.rect.height; y++) allow.fill(1, y * width + sel.rect.x, y * width + sel.rect.x + sel.rect.width);
+  if (lock) for (let i = 0; i < pixels.length; i++) if (pixels[i] < 0) allow[i] = 0;
+  return allow;
+}
+/** Undo the parts of a live stroke that fall outside its paint limit. */
+function limitStroke(drawing) {
+  const allow = drawing?.allow;
+  if (!allow || !drawing.cel) return;
+  const pixels = drawing.cel.pixels, base = drawing.base;
+  for (let i = 0; i < pixels.length; i++) if (!allow[i] && pixels[i] !== base[i]) { pixels[i] = base[i]; drawing.footprint?.delete(i); }
+}
+/** After a stroke is applied in the Edit scope, keep every changed frame inside the selection / Lock transparency. */
+function limitStrokeFrames(drawing) {
+  if (!(PAINT_TOOLS.includes(drawing.tool) || drawing.tool === 'gradient') || !drawing.cel || !drawing.before) return;
+  if (!state.selection && !(state.lockAlpha && LOCKABLE_TOOLS.includes(drawing.tool))) return;
+  const layerId = drawing.cel.layerId, before = new Map();
+  for (const animation of drawing.before.project.animations) for (const frame of animation.frames) before.set(frame.id, frame);
+  for (const frame of currentAnimation().frames) {
+    const cel = frame.cels.find(c => c.layerId === layerId), old = before.get(frame.id)?.cels.find(c => c.layerId === layerId);
+    if (!cel || !old || old.pixels.length !== cel.pixels.length) continue;
+    const allow = paintLimit(drawing.tool, old.pixels);
+    for (let i = 0; i < cel.pixels.length; i++) if (!allow[i] && cel.pixels[i] !== old.pixels[i]) cel.pixels[i] = old.pixels[i];
+  }
+}
 function drawPoints(points, color) {
   const pixels = state.drawing?.cel.pixels || currentPixels();
   const tool=state.drawing?.tool || state.tool,sized=BRUSH_TOOLS.includes(tool);
@@ -1730,7 +1767,7 @@ function pointerDown(event) {
   if(state.inPlaceEdit) {
     try {
       const from=event.shiftKey?shiftLineStart(tool):null;
-      const stroke=tool==='select'?beginInPlaceSelection(state.inPlaceEdit.session,point):beginInPlaceStroke(state.inPlaceEdit.session,point,{tool,from,shade,shadeStep:shadeColour,color:tool==='eraser'?-1:tool==='shade'?0:state.color,brushSize:state.brushSize,brushShape:state.brushShape,symmetry:state.symmetry,filled:state.filled});
+      const stroke=tool==='select'?beginInPlaceSelection(state.inPlaceEdit.session,point):beginInPlaceStroke(state.inPlaceEdit.session,point,{tool,from,shade,shadeStep:shadeColour,color:tool==='eraser'?-1:tool==='shade'?0:state.color,brushSize:state.brushSize,brushShape:state.brushShape,symmetry:state.symmetry,filled:state.filled,lockAlpha:state.lockAlpha});
       if(stroke){state.inPlaceEdit.error=null;state.drawing={...stroke,tool,pointerId:event.pointerId,kind:tool==='select'?'part-select':'part-edit'};}
       else if($('pixel-canvas').hasPointerCapture(event.pointerId))$('pixel-canvas').releasePointerCapture(event.pointerId);
     } catch(error) {state.inPlaceEdit.error=error.message;if($('pixel-canvas').hasPointerCapture(event.pointerId))$('pixel-canvas').releasePointerCapture(event.pointerId);}
@@ -1753,17 +1790,18 @@ function pointerDown(event) {
   if (tool==='select') { beginSelection(event,point,cel); return; }
   if (tool==='wand') { if($('pixel-canvas').hasPointerCapture(event.pointerId))$('pixel-canvas').releasePointerCapture(event.pointerId); wandSelect(point,cel,event.shiftKey); return; }
   if (tool==='gradient') {
-    try{state.drawing=beginGradient({pointerId:event.pointerId,tool,origin:point,last:point,before:snapshot(),cel,base:[...cel.pixels]});}
+    try{state.drawing=beginGradient({pointerId:event.pointerId,tool,origin:point,last:point,before:snapshot(),cel,base:[...cel.pixels],allow:paintLimit(tool,cel.pixels)});}
     catch(error){toast(error.message);if($('pixel-canvas').hasPointerCapture(event.pointerId))$('pixel-canvas').releasePointerCapture(event.pointerId);}
     renderCanvas();return;
   }
-  state.drawing = {pointerId:event.pointerId,tool,origin:point,last:point,before:snapshot(),cel,base:[...cel.pixels],color:tool === 'eraser' ? -1 : state.color,shade,touched:new Set(),footprint:new Set(),path:[{...point}]};
+  state.drawing = {pointerId:event.pointerId,tool,origin:point,last:point,before:snapshot(),cel,base:[...cel.pixels],color:tool === 'eraser' ? -1 : state.color,shade,touched:new Set(),footprint:new Set(),path:[{...point}],allow:paintLimit(tool,cel.pixels)};
   if (tool === 'fill') floodFill(cel.pixels, point.x, point.y, state.drawing.color, state.project.width, state.project.height);
   else if(tool==='replace') {state.drawing.replaceFrom=cel.pixels[point.y*state.project.width+point.x];cel.pixels=replaceColor(cel.pixels,state.project.width,state.project.height,state.drawing.replaceFrom,state.drawing.color);}
   else {
     const from=event.shiftKey?shiftLineStart(tool):null;
     drawPoints(from?linePoints(from.x,from.y,point.x,point.y):[point], state.drawing.color);
   }
+  limitStroke(state.drawing);
   renderCanvas(); renderPreview();
 }
 function pointerMove(event) {
@@ -1819,6 +1857,7 @@ function pointerMove(event) {
       drawPoints(getPoints(drawing.origin.x, drawing.origin.y, end.x, end.y, state.filled, state.project.width, state.project.height), drawing.color);
       if (drawing.tool === 'ellipse') antialiasShape(drawing);
     }
+    if(!drawing.kind)limitStroke(drawing);
     drawing.last = point;
     renderSoon(true);
   } else renderSoon();
@@ -1874,7 +1913,7 @@ function finishDrawing(cancel = false) {
     if (drawing.tool==='select') state.selection=drawing.previousSelection;
   }
   else {
-    try { if(drawing.finish)drawing.finish(); const skipped=repeatStrokeInAnimation(drawing); remember(drawing.before); if(skipped)toast(`Painted every frame except ${skipped} with locked objects.`); }
+    try { if(drawing.finish)drawing.finish(); const skipped=repeatStrokeInAnimation(drawing); limitStrokeFrames(drawing); remember(drawing.before); if(skipped)toast(`Painted every frame except ${skipped} with locked objects.`); }
     catch(error) { state.project=drawing.before.project; normalizeSelection(); toast(`Could not apply stroke: ${error.message}`); }
   }
   if ($('pixel-canvas').hasPointerCapture(drawing.pointerId)) $('pixel-canvas').releasePointerCapture(drawing.pointerId);
@@ -2592,7 +2631,7 @@ function bindEvents() {
   document.querySelectorAll('[data-tool]').forEach(button => button.addEventListener('click', () => {
     finishDrawing();
     state.tool = button.dataset.tool;
-    if (!SELECT_TOOLS.includes(state.tool) && !['gradient','curve'].includes(state.tool)) state.selection=null;
+    if (['object','resize'].includes(state.tool)) state.selection=null;
     state.swap = false;
     renderTools(); renderPalette(); renderSelection(); renderCanvas();
   }));
@@ -2625,6 +2664,7 @@ function bindEvents() {
   $('cut-selection').onclick=()=>copySelectionPixels(true);
   $('paste-selection').onclick=pasteClipboardPixels;
   $('filled-shape').onchange = event => { state.filled = event.target.checked; renderTools(); };
+  $('lock-alpha').onchange = event => { state.lockAlpha = event.target.checked; renderTools(); };
   $('color-picker').onchange = event => editColor(event.target.value);
   $('hex-color').onchange = event => editColor(event.target.value);
   $('hex-color').onkeydown = event => { if (event.key === 'Enter') event.target.blur(); };
@@ -2799,9 +2839,11 @@ function bindEvents() {
       if (key==='delete' || key==='backspace') { event.preventDefault(); clearSelectionPixels(); return; }
       if (key==='escape' || key==='enter') { event.preventDefault(); deselectPixels(); return; }
     }
+    if (key==='escape' && state.selection && !state.inPlaceEdit) { event.preventDefault(); deselectPixels(); return; }
     if (key==='escape' && state.objectSelection && !state.inPlaceEdit) { event.preventDefault(); state.objectSelection=null; renderAll(); return; }
+    if (key === 'l' && event.shiftKey) { event.preventDefault(); state.lockAlpha=!state.lockAlpha; renderTools(); toast(`Lock transparency ${state.lockAlpha?'on: painting only recolours existing pixels':'off'}.`); return; }
     const tool = TOOL_KEYS[key];
-    if (tool) { state.tool = tool; if(!SELECT_TOOLS.includes(tool) && !['gradient','curve'].includes(tool))state.selection=null; renderTools(); renderSelection(); renderCanvas(); return; }
+    if (tool) { state.tool = tool; if(['object','resize'].includes(tool))state.selection=null; renderTools(); renderSelection(); renderCanvas(); return; }
     if (key === 'j') { event.preventDefault(); toggleRigMode(); return; }
     if (key === 'q') { event.preventDefault(); motionAskDialog(); return; }
     if (key === 'g') $('toggle-grid').click();

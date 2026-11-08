@@ -51,7 +51,7 @@ The editor is published at [groot406.github.io/Pixel-studio](https://groot406.gi
 
 ### Pixel Studio Cloud (SaaS edition)
 
-`npm run cloud` (Node 22.13+) serves a marketing page at `/` and the editor at `/app`, with accounts, a Free plan (1 cloud project, no AI) and a Pro plan, metered AI credits (server-side OpenAI/Gemini keys), cloud projects and Lemon Squeezy billing. It shows a **Sign in** button in the header and has no npm dependencies; a `Dockerfile` is included. Configuration, pricing, deployment and the launch checklist are in [docs/saas.md](docs/saas.md).
+`npm run cloud` (Node 22.13+) serves a marketing page at `/` and the editor at `/app`, with accounts, a Free plan (1 cloud project, no AI) and a Pro plan, metered AI credits (server-side OpenAI/Gemini keys), cloud projects, your own OpenAI/Gemini keys on Pro (no credits used), an account page with usage stats and Stripe billing. It shows a **Sign in** button in the header and has no npm dependencies; a `Dockerfile` is included. Configuration, pricing, deployment and the launch checklist are in [docs/saas.md](docs/saas.md).
 
 ## Run
 

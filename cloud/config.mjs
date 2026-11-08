@@ -14,14 +14,16 @@ export function readConfig(env = process.env) {
     geminiApiKey: env.GEMINI_API_KEY || env.GOOGLE_API_KEY || '',
     resendApiKey: env.RESEND_API_KEY || '',
     mailFrom: env.MAIL_FROM || 'Pixel Studio <login@example.com>',
-    lsApiKey: env.LEMONSQUEEZY_API_KEY || '',
-    lsStoreId: env.LEMONSQUEEZY_STORE_ID || '',
-    lsWebhookSecret: env.LEMONSQUEEZY_WEBHOOK_SECRET || '',
-    lsVariantProMonthly: env.LEMONSQUEEZY_VARIANT_PRO_MONTHLY || '',
-    lsVariantProYearly: env.LEMONSQUEEZY_VARIANT_PRO_YEARLY || '',
-    lsVariantCredits1000: env.LEMONSQUEEZY_VARIANT_CREDITS_1000 || '',
-    lsTestMode: bool(env.LEMONSQUEEZY_TEST_MODE),
+    stripeSecretKey: env.STRIPE_SECRET_KEY || '',
+    stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET || '',
+    stripePriceProMonthly: env.STRIPE_PRICE_PRO_MONTHLY || '',
+    stripePriceProYearly: env.STRIPE_PRICE_PRO_YEARLY || '',
+    stripePriceCredits1000: env.STRIPE_PRICE_CREDITS_1000 || '',
+    // Stripe as merchant of record (tax, fraud, disputes). Set STRIPE_MANAGED_PAYMENTS=0 to sell as yourself.
+    stripeManagedPayments: !/^(0|false|no)$/i.test(String(env.STRIPE_MANAGED_PAYMENTS ?? '1')),
     supportEmail: env.SUPPORT_EMAIL || '',
+    // Encrypts users' own AI keys at rest. Without it in production, "bring your own key" is switched off.
+    aiKeySecret: env.AI_KEY_SECRET || (production ? '' : 'development-only-ai-key-secret'),
   };
   if (production) {
     const missing = [];

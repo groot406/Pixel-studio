@@ -13,6 +13,7 @@ export const PRO_FEATURES = Object.freeze({
   sheetExport: 'Sprite sheet export',
   animationExport: 'GIF and APNG export',
   creditPacks: 'Extra AI credit packs',
+  ownKeys: 'Your own OpenAI or Gemini key (no credits used)',
 });
 
 export const PLANS = Object.freeze({
@@ -24,7 +25,7 @@ export const PLANS = Object.freeze({
   pro: Object.freeze({
     id: 'pro', name: 'Pro', price: { monthly: 8, yearly: 72 },
     monthlyCredits: 1000, cloudProjects: 200, projectBytes: 8 * 1024 * 1024, allows: Object.freeze(Object.keys(PRO_FEATURES)),
-    features: ['Everything in Free', '1,000 AI credits every month (assistant, AI edit, image generation)', 'Sprite sheets for Aseprite, Godot and Unity, GIF and APNG export', '200 projects in the cloud, on every device', 'Extra credit packs when you need more', 'Priority support'],
+    features: ['Everything in Free', '1,000 AI credits every month (assistant, AI edit, image generation)', 'Sprite sheets for Aseprite, Godot and Unity, GIF and APNG export', '200 projects in the cloud, on every device', 'Extra credit packs when you need more', 'Bring your own OpenAI or Gemini key: AI without using credits', 'Priority support'],
   }),
 });
 
@@ -87,11 +88,10 @@ export function spendCredits(account, credits) {
 
 export const creditBalance = account => Math.max(0, account.allowance) + account.purchased;
 
-/** Lemon Squeezy subscription statuses that still grant Pro. "cancelled" keeps Pro until ends_at. */
+/** Stripe subscription statuses that grant Pro. A subscription set to cancel keeps Pro until it ends (endsAt). */
 export function subscriptionGrantsPro({ status, endsAt } = {}, at = Date.now()) {
-  if (['active', 'on_trial', 'past_due'].includes(status)) return true;
-  if (status === 'cancelled') return !!endsAt && Date.parse(endsAt) > at;
-  return false;
+  if (!['active', 'trialing', 'past_due'].includes(status)) return false;
+  return !endsAt || Date.parse(endsAt) > at;
 }
 
 export const formatPrice = (amount, currency = CURRENCY) => new Intl.NumberFormat('en', { style: 'currency', currency, maximumFractionDigits: amount % 1 ? 2 : 0 }).format(amount);

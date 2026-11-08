@@ -41,6 +41,10 @@ export function noteCredits(update) {
 export const sendSignInLink = email => request('/api/account/login', { method: 'POST', body: { email } });
 export async function signOut() { await request('/api/account/logout', { method: 'POST' }); return refreshAccount(); }
 export async function deleteAccount(confirm) { await request('/api/account/delete', { method: 'POST', body: { confirm } }); return refreshAccount(); }
+export const fetchUsage = days => request(`/api/account/usage?days=${encodeURIComponent(days)}`);
+/** Saves (after the server checked it with the provider) or, with an empty key, removes the user's own AI key. */
+export async function saveAiKey(provider, key) { const result = await request('/api/account/ai-key', { method: 'POST', body: { provider, key } }); await refreshAccount(); return result; }
+export async function confirmCheckout(sessionId) { return request('/api/billing/confirm', { method: 'POST', body: { sessionId } }); }
 export async function startCheckout(product) { const { url } = await request('/api/billing/checkout', { method: 'POST', body: { product } }); location.assign(url); }
 export async function openBillingPortal() { const { url } = await request('/api/billing/portal'); window.open(url, '_blank', 'noopener'); }
 

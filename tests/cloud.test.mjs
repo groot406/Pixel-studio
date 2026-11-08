@@ -27,9 +27,9 @@ test('credits refill monthly, spend the allowance first and price tokens and ima
   assert.equal(chatCredits('gpt-5-mini', 20_000, 5_000), 8); // $0.005 + $0.01 = $0.015 → 7.5 → 8
   assert.equal(chatCredits('gpt-5', 20_000, 5_000), 38);
   assert.equal(imageCredits('openai', { n: 2, quality: 'low' }), 12);
-  assert.ok(subscriptionGrantsPro({ status: 'cancelled', endsAt: '2026-12-01T00:00:00Z' }, nov));
-  assert.ok(!subscriptionGrantsPro({ status: 'cancelled', endsAt: '2026-11-01T00:00:00Z' }, nov));
-  assert.ok(!subscriptionGrantsPro({ status: 'expired' }, nov));
+  assert.ok(subscriptionGrantsPro({ status: 'active', endsAt: '2026-12-01T00:00:00Z' }, nov), 'cancelled at period end: Pro until then');
+  assert.ok(!subscriptionGrantsPro({ status: 'active', endsAt: '2026-11-01T00:00:00Z' }, nov));
+  assert.ok(!subscriptionGrantsPro({ status: 'canceled' }, nov));
 });
 
 async function setup(t, { now = () => Date.now() } = {}) {
@@ -39,19 +39,31 @@ async function setup(t, { now = () => Date.now() } = {}) {
   await writeFile(join(dist, 'landing.html'), '<!doctype html><html><head><title>Pixel Studio</title></head><body><!--pricing--><!--support--></body></html>');
   const mails = [], upstream = [];
   const config = {
-    publicUrl: 'http://placeholder', openaiApiKey: 'sk-server', geminiApiKey: '', lsApiKey: 'ls-key', lsStoreId: '7', lsWebhookSecret: SECRET,
-    lsVariantProMonthly: '101', lsVariantProYearly: '102', lsVariantCredits1000: '103', supportEmail: 'help@example.com',
+    publicUrl: 'http://placeholder', openaiApiKey: 'sk-server', geminiApiKey: '', stripeSecretKey: 'sk_test_stripe', stripeWebhookSecret: SECRET,
+    stripePriceProMonthly: 'price_pm', stripePriceProYearly: 'price_py', stripePriceCredits1000: 'price_c1000', stripeManagedPayments: true,
+    aiKeySecret: 'test-ai-key-secret', supportEmail: 'help@example.com',
   };
   let openaiReply = { text: '{"reply":"Hi!"}', usage: { prompt_tokens: 20_000, completion_tokens: 5_000 } };
+  const sessions = new Map();
   const fetchImpl = async (url, init) => {
     upstream.push({ url: String(url), init });
+    const path = String(url).replace(/\?.*$/, '');
+    if (path.endsWith('/v1/models') || path.endsWith('/v1beta/models')) {
+      const key = init.headers.Authorization?.slice(7) || init.headers['x-goog-api-key'];
+      return Response.json({}, { status: /bad/.test(key) ? 401 : 200 });
+    }
+    if (path === 'https://api.stripe.com/v1/checkout/sessions') return Response.json({ id: 'cs_test_new', url: 'https://checkout.stripe.com/c/pay/cs_test_new' });
+    if (path === 'https://api.stripe.com/v1/billing_portal/sessions') return Response.json({ url: 'https://billing.stripe.com/p/session/abc' });
+    if (path.startsWith('https://api.stripe.com/v1/checkout/sessions/')) {
+      const found = sessions.get(path.split('/').at(-1));
+      return found ? Response.json(found) : Response.json({ error: { message: 'No such checkout.session' } }, { status: 404 });
+    }
     if (String(url).endsWith('/chat/completions')) {
       const chunks = [...openaiReply.text.match(/.{1,5}/gs)].map(text => `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`);
       chunks.push(`data: ${JSON.stringify({ choices: [], usage: openaiReply.usage })}\n\ndata: [DONE]\n\n`);
       return new Response(new ReadableStream({ start(c) { for (const chunk of chunks) c.enqueue(new TextEncoder().encode(chunk)); c.close(); } }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
     }
     if (String(url).endsWith('/images/generations')) return Response.json({ data: [{ b64_json: PNG }] });
-    if (String(url).endsWith('/v1/checkouts')) return Response.json({ data: { attributes: { url: 'https://pixelstudio.lemonsqueezy.com/checkout/abc' } } });
     throw new Error(`unexpected ${url}`);
   };
   const store = openStore(':memory:', { now });
@@ -89,12 +101,16 @@ async function setup(t, { now = () => Date.now() } = {}) {
     const me = await (await call('/api/account/me')).json();
     return { me, token: link.searchParams.get('token') };
   }
-  const signWebhook = payload => { const raw = JSON.stringify(payload); return { raw, headers: { 'Content-Type': 'application/json', 'X-Signature': createHmac('sha256', SECRET).update(raw).digest('hex') } }; };
+  const signWebhook = (payload, at = Math.floor(Date.now() / 1000)) => {
+    const raw = JSON.stringify(payload);
+    return { raw, headers: { 'Content-Type': 'application/json', 'Stripe-Signature': `t=${at},v1=${createHmac('sha256', SECRET).update(`${at}.${raw}`).digest('hex')}` } };
+  };
+  const subscription = (userId, status, extra = {}) => ({ id: `sub_${userId.slice(0, 8)}`, object: 'subscription', status, customer: 'cus_9', metadata: { user_id: userId }, items: { data: [{ price: { id: 'price_pm' }, current_period_end: 4_102_444_800 }] }, ...extra });
   async function goPro(email = 'ada@example.com') {
-    const hook = signWebhook({ meta: { event_name: 'subscription_created', custom_data: { user_id: store.userByEmail(email).id } }, data: { type: 'subscriptions', id: `sub-${email}`, attributes: { status: 'active', variant_id: 101, customer_id: 9, updated_at: new Date().toISOString() } } });
+    const hook = signWebhook({ id: `evt_${email}`, type: 'customer.subscription.created', created: Math.floor(Date.now() / 1000), data: { object: subscription(store.userByEmail(email).id, 'active') } });
     assert.equal((await call('/api/billing/webhook', { method: 'POST', raw: hook.raw, headers: hook.headers })).status, 200);
   }
-  return { call, signIn, goPro, mails, upstream, store, origin, signWebhook, setReply: reply => { openaiReply = reply; }, clearCookie: () => { cookie = ''; } };
+  return { call, signIn, goPro, mails, upstream, store, origin, signWebhook, subscription, sessions, setReply: reply => { openaiReply = reply; }, clearCookie: () => { cookie = ''; } };
 }
 
 test('email sign-in: confirm page, single-use token, session cookie, marker tag and sign-out', async t => {
@@ -181,41 +197,116 @@ test('image generation charges fixed credits per image', async t => {
   assert.deepEqual(body.credits, { used: 21, balance: 979 });
 });
 
-test('Lemon Squeezy: checkout carries the user, signed webhooks switch plans and add credit packs once', async t => {
+test('Stripe: checkout carries the user, signed webhooks switch plans and add credit packs once', async t => {
   const s = await setup(t);
   const { me } = await s.signIn();
   const headers = { 'X-Pixel-Studio-Token': me.csrfToken };
   assert.equal((await s.call('/api/billing/checkout', { method: 'POST', body: { product: 'credits-1000' }, headers })).status, 402, 'credit packs are for Pro');
   const checkout = await (await s.call('/api/billing/checkout', { method: 'POST', body: { product: 'pro-monthly' }, headers })).json();
-  assert.equal(checkout.url, 'https://pixelstudio.lemonsqueezy.com/checkout/abc');
-  const sent = JSON.parse(s.upstream.at(-1).init.body);
-  assert.equal(sent.data.relationships.variant.data.id, '101');
-  const userId = sent.data.attributes.checkout_data.custom.user_id;
-  assert.ok(userId);
+  assert.equal(checkout.url, 'https://checkout.stripe.com/c/pay/cs_test_new');
+  const sent = new URLSearchParams(s.upstream.at(-1).init.body);
+  assert.equal(sent.get('line_items[0][price]'), 'price_pm');
+  assert.equal(sent.get('mode'), 'subscription');
+  assert.equal(sent.get('managed_payments[enabled]'), 'true');
+  assert.match(sent.get('success_url'), /\/app\?billing=done&session_id=\{CHECKOUT_SESSION_ID\}$/);
+  const userId = sent.get('client_reference_id');
+  assert.equal(sent.get('subscription_data[metadata][user_id]'), userId);
 
   const bad = s.signWebhook({});
-  assert.equal((await s.call('/api/billing/webhook', { method: 'POST', raw: bad.raw, headers: { ...bad.headers, 'X-Signature': '0'.repeat(64) } })).status, 401);
-  const sub = (status, updatedAt, extra = {}) => s.signWebhook({ meta: { event_name: 'subscription_updated', custom_data: { user_id: userId } }, data: { type: 'subscriptions', id: '55', attributes: { status, variant_id: 101, customer_id: 9, updated_at: updatedAt, urls: { customer_portal: 'https://pixelstudio.lemonsqueezy.com/billing' }, ...extra } } });
+  assert.equal((await s.call('/api/billing/webhook', { method: 'POST', raw: bad.raw, headers: { ...bad.headers, 'Stripe-Signature': `t=1,v1=${'0'.repeat(64)}` } })).status, 401);
+  const old = s.signWebhook({ type: 'customer.subscription.updated', data: { object: s.subscription(userId, 'active') } }, Math.floor(Date.now() / 1000) - 3600);
+  assert.equal((await s.call('/api/billing/webhook', { method: 'POST', raw: old.raw, headers: old.headers })).status, 401, 'replayed (old) signatures are refused');
+  const event = (type, created, object) => s.signWebhook({ id: `evt_${created}`, type, created, data: { object } });
   const deliver = async hook => assert.equal((await s.call('/api/billing/webhook', { method: 'POST', raw: hook.raw, headers: hook.headers })).status, 200);
-  await deliver(sub('active', '2026-11-08T10:00:00Z'));
+  await deliver(event('customer.subscription.updated', 1000, s.subscription(userId, 'active')));
   let account = await (await s.call('/api/account/me')).json();
   assert.equal(account.plan, 'pro');
   assert.equal(account.credits.allowance, 1000, 'upgrading tops up this month');
   assert.equal(account.canManageBilling, true);
-  assert.equal((await (await s.call('/api/billing/portal')).json()).url, 'https://pixelstudio.lemonsqueezy.com/billing');
-  await deliver(sub('expired', '2026-11-08T09:00:00Z'));
+  assert.equal((await (await s.call('/api/billing/portal')).json()).url, 'https://billing.stripe.com/p/session/abc');
+  await deliver(event('customer.subscription.deleted', 900, s.subscription(userId, 'canceled')));
   assert.equal((await (await s.call('/api/account/me')).json()).plan, 'pro', 'an older, late delivery is ignored');
-  await deliver(sub('cancelled', '2026-11-08T11:00:00Z', { ends_at: '2099-01-01T00:00:00Z' }));
-  assert.equal((await (await s.call('/api/account/me')).json()).plan, 'pro', 'cancelled keeps Pro until the period ends');
-  await deliver(sub('expired', '2026-11-08T12:00:00Z'));
+  await deliver(event('customer.subscription.updated', 1100, s.subscription(userId, 'active', { cancel_at_period_end: true })));
+  account = await (await s.call('/api/account/me')).json();
+  assert.equal(account.plan, 'pro', 'cancelled keeps Pro until the period ends');
+  assert.ok(account.subscription.endsAt);
+  await deliver(event('customer.subscription.deleted', 1200, s.subscription(userId, 'canceled')));
   account = await (await s.call('/api/account/me')).json();
   assert.equal(account.plan, 'free');
   assert.equal(account.credits.allowance, 0);
 
-  const order = s.signWebhook({ meta: { event_name: 'order_created', custom_data: { user_id: userId } }, data: { type: 'orders', id: '777', attributes: { status: 'paid', customer_id: 9, first_order_item: { variant_id: 103 } } } });
+  const order = event('checkout.session.completed', 1300, { id: 'cs_test_pack', object: 'checkout.session', mode: 'payment', payment_status: 'paid', customer: 'cus_9', client_reference_id: userId, metadata: { user_id: userId, product: 'credits-1000' } });
   await deliver(order);
   await deliver(order);
   assert.equal((await (await s.call('/api/account/me')).json()).credits.purchased, 1000, 'retried deliveries count once');
+});
+
+test('returning from checkout confirms the purchase without waiting for the webhook', async t => {
+  const s = await setup(t);
+  const { me } = await s.signIn();
+  const headers = { 'X-Pixel-Studio-Token': me.csrfToken };
+  const confirm = sessionId => s.call('/api/billing/confirm', { method: 'POST', body: { sessionId }, headers });
+  assert.equal((await confirm('not-a-session')).status, 400);
+  assert.equal((await confirm('cs_test_unknown123456')).status, 404);
+  const userId = s.store.userByEmail('ada@example.com').id;
+  s.sessions.set('cs_test_someoneelse1', { id: 'cs_test_someoneelse1', status: 'complete', mode: 'subscription', client_reference_id: 'another-user', subscription: s.subscription('another-user', 'active') });
+  assert.equal((await confirm('cs_test_someoneelse1')).status, 404, 'a checkout of another user is not applied');
+  s.sessions.set('cs_test_open00000001', { id: 'cs_test_open00000001', status: 'open', mode: 'subscription', client_reference_id: userId, metadata: { product: 'pro-monthly' } });
+  assert.deepEqual(await (await confirm('cs_test_open00000001')).json(), { state: 'pending', product: 'pro-monthly' });
+  s.sessions.set('cs_test_paid00000001', { id: 'cs_test_paid00000001', status: 'complete', mode: 'subscription', customer: 'cus_9', client_reference_id: userId, metadata: { user_id: userId, product: 'pro-monthly' }, subscription: { ...s.subscription(userId, 'active'), metadata: {} } });
+  assert.deepEqual(await (await confirm('cs_test_paid00000001')).json(), { state: 'complete', product: 'pro-monthly' });
+  assert.ok(s.upstream.at(-1).url.includes('expand%5B0%5D=subscription'));
+  let account = await (await s.call('/api/account/me')).json();
+  assert.equal(account.plan, 'pro');
+  assert.equal(account.canManageBilling, true);
+  s.sessions.set('cs_test_pack00000001', { id: 'cs_test_pack00000001', status: 'complete', mode: 'payment', payment_status: 'paid', client_reference_id: userId, metadata: { user_id: userId, product: 'credits-1000' } });
+  await confirm('cs_test_pack00000001');
+  await confirm('cs_test_pack00000001');
+  const pack = s.signWebhook({ type: 'checkout.session.completed', created: 2000, data: { object: s.sessions.get('cs_test_pack00000001') } });
+  assert.equal((await s.call('/api/billing/webhook', { method: 'POST', raw: pack.raw, headers: pack.headers })).status, 200);
+  account = await (await s.call('/api/account/me')).json();
+  assert.equal(account.credits.purchased, 1000, 'confirm and webhook together add the pack once');
+});
+
+test('your own AI key: Pro only, checked, stored encrypted, used without credits and shown in usage', async t => {
+  const s = await setup(t);
+  const { me } = await s.signIn();
+  const headers = { 'X-Pixel-Studio-Token': me.csrfToken };
+  const save = (provider, key) => s.call('/api/account/ai-key', { method: 'POST', body: { provider, key }, headers });
+  assert.equal(me.ownKeys, true);
+  assert.equal((await save('openai', 'sk-user-0123456789abcdefghij')).status, 402, 'Pro feature');
+  await s.goPro();
+  assert.equal((await save('openai', 'not-a-key')).status, 400);
+  assert.equal((await (await save('openai', 'sk-bad-0123456789abcdefghijk')).json()).code, 'OWN_KEY_REJECTED');
+  const saved = await (await save('openai', 'sk-user-0123456789abcdefghij')).json();
+  assert.equal(saved.aiKeys.length, 1);
+  assert.equal(saved.aiKeys[0].provider, 'openai');
+  assert.doesNotMatch(saved.aiKeys[0].hint, /0123456789abcdef/, 'only a hint is shown');
+  const userId = s.store.userByEmail('ada@example.com').id;
+  assert.doesNotMatch(s.store.aiKeySecret(userId, 'openai'), /sk-user/, 'stored encrypted');
+  assert.doesNotMatch(await (await s.call('/api/account/export')).text(), /sk-user-0123/, 'never exported');
+
+  const status = await (await s.call('/api/local-ai/status')).json();
+  assert.equal(status.ownKey, true);
+  const before = (await (await s.call('/api/account/me')).json()).credits.balance;
+  const events = (await (await s.call('/api/local-ai/edit', { method: 'POST', body: { prompt: 'PXACHAT 1\nHi' }, headers })).text()).trim().split('\n').map(line => JSON.parse(line));
+  assert.equal(events.at(-1).type, 'done');
+  assert.equal(s.upstream.at(-1).init.headers.Authorization, 'Bearer sk-user-0123456789abcdefghij');
+  assert.equal((await (await s.call('/api/account/me')).json()).credits.balance, before, 'no credits used');
+  const image = await s.call('/api/image/generate', { method: 'POST', body: { provider: 'openai', prompt: 'a cat', quality: 'low' }, headers });
+  assert.equal((await image.json()).credits.used, 0);
+
+  const stats = await (await s.call('/api/account/usage?days=7')).json();
+  assert.equal(stats.days.length, 1, 'one day with requests');
+  assert.equal(stats.total.requests, 2);
+  assert.equal(stats.total.ownKeyRequests, 2);
+  assert.equal(stats.total.credits, 0);
+  assert.equal(stats.total.images, 1);
+  assert.equal(stats.total.inputTokens, 20_000);
+  assert.deepEqual(stats.models.map(m => m.kind).sort(), ['chat', 'image'].sort());
+
+  assert.deepEqual((await (await save('openai', '')).json()).aiKeys, []);
+  assert.equal((await (await s.call('/api/local-ai/status')).json()).ownKey, false);
 });
 
 test('cloud projects are per user and limited by plan', async t => {

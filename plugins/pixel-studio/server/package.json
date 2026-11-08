@@ -14,6 +14,7 @@
     "start": "node local/start.mjs --open",
     "dev": "node --watch local/start.mjs --dev",
     "cloud": "node --env-file-if-exists=.env cloud/start.mjs",
+    "cloud:stripe": "node --env-file-if-exists=.env cloud/stripe-setup.mjs",
     "build": "node scripts/build.mjs",
     "test": "node --test tests/*.test.mjs",
     "check": "node scripts/check.mjs && npm test && npm run build",

@@ -1,6 +1,6 @@
 // Pixel Studio Cloud: the hosted, multi-user edition. Serves the built editor (dist/) and the APIs the browser uses:
 // passwordless email sign-in, metered AI (same contracts as Pixel Studio Local's /api/local-ai and /api/image),
-// cloud projects and Lemon Squeezy billing. Zero dependencies: node:http + node:sqlite.
+// cloud projects and Stripe billing. Zero dependencies: node:http + node:sqlite.
 import { createServer } from 'node:http';
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { extname, resolve, sep } from 'node:path';
@@ -11,7 +11,8 @@ import { IMAGE_PROVIDERS } from '../src/features/ai/image-api.js';
 import { isPixelPrompt, readPreviewImages, MAX_PROMPT_BYTES, MAX_PREVIEW_BYTES, MAX_PREVIEW_COUNT } from '../local/pixel-request.mjs';
 import { validateImageRequest, MAX_IMAGE_BODY_BYTES } from '../local/image-client.mjs';
 import { CloudError } from './store.mjs';
-import { chatEdit, chatModels, generateImages } from './ai.mjs';
+import { chatEdit, chatModels, generateImages, checkOwnKey } from './ai.mjs';
+import { sealSecret, openSecret, keyHint } from './secrets.mjs';
 import { verifySignature } from './billing.mjs';
 import { renderLanding } from './landing.mjs';
 
@@ -112,14 +113,25 @@ export function createCloudServer({ config, store, mailer, billing, distDirector
   }
 
   const credits = user => ({ allowance: Math.max(0, user.allowance), purchased: user.purchased, balance: creditBalance(user), monthly: planFor(user.plan).monthlyCredits });
+  // ---------- the user's own AI keys ----------
+  const OWN_KEY_FORMATS = { openai: /^sk-[\x21-\x7e]{20,300}$/, gemini: /^AIza[\x21-\x7e]{20,200}$/ };
+  const ownKeysOn = !!config.aiKeySecret;
+  /** The user's own key for `provider`, if they saved one and their plan includes it. */
+  function ownKey(user, provider) {
+    if (!ownKeysOn || !planAllows(user.plan, 'ownKeys')) return null;
+    const sealed = store.aiKeySecret(user.id, provider);
+    return sealed ? openSecret(config.aiKeySecret, sealed, `${user.id}:${provider}`) : null;
+  }
+
   function accountJson(session) {
     const base = { cloud: true, billing: billing.enabled, plans: PLANS, packs: CREDIT_PACKS, currency: CURRENCY, supportEmail: config.supportEmail || null };
     if (!session) return { ...base, signedIn: false };
     const { user } = session, monthStart = Date.parse(`${user.allowancePeriod}-01T00:00:00Z`);
     return {
       ...base, signedIn: true, email: user.email, plan: user.plan, credits: credits(user), csrfToken: session.csrf,
-      subscription: store.subscriptions(user.id)[0] || null, canManageBilling: !!user.portalUrl,
+      subscription: store.subscriptions(user.id)[0] || null, canManageBilling: billing.enabled && !!user.customerId,
       usage: store.usageSince(user.id, monthStart), projects: store.listProjects(user.id).length,
+      memberSince: user.createdAt, ownKeys: ownKeysOn, aiKeys: store.aiKeys(user.id),
     };
   }
 
@@ -171,7 +183,7 @@ export function createCloudServer({ config, store, mailer, billing, distDirector
     const { user } = requireUser(request);
     const { confirm } = await readJson(request, 1024);
     if (confirm !== user.email) throw fail('CONFIRM_EMAIL', 'Type your email address to confirm.', 400);
-    if (store.subscriptions(user.id).some(s => ['active', 'on_trial', 'past_due', 'paused'].includes(s.status))) throw fail('CANCEL_FIRST', 'Cancel your Pro subscription under Billing first, then delete the account.', 409);
+    if (store.subscriptions(user.id).some(s => ['active', 'trialing', 'past_due', 'on_trial', 'paused'].includes(s.status))) throw fail('CANCEL_FIRST', 'Cancel your Pro subscription under Billing first, then delete the account.', 409);
     store.deleteUser(user.id);
     sendJson(response, 200, { deleted: true }, { 'Set-Cookie': sessionCookie('', 0) });
   }
@@ -179,7 +191,32 @@ export function createCloudServer({ config, store, mailer, billing, distDirector
     const { user } = requireUser(request, { csrf: false });
     const projects = store.listProjects(user.id).map(p => store.getProject(user.id, p.id));
     response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Disposition': 'attachment; filename="pixel-studio-account.json"' });
-    response.end(JSON.stringify({ email: user.email, createdAt: new Date(user.createdAt).toISOString(), plan: user.plan, credits: credits(user), subscriptions: store.subscriptions(user.id), usage: store.usageSince(user.id, 0), projects }, null, 2));
+    response.end(JSON.stringify({ email: user.email, createdAt: new Date(user.createdAt).toISOString(), plan: user.plan, credits: credits(user), subscriptions: store.subscriptions(user.id), usage: store.usageSince(user.id, 0), aiKeys: store.aiKeys(user.id), projects }, null, 2));
+  }
+
+  function usage(request, response) {
+    const { user } = requireUser(request, { csrf: false });
+    const days = Math.min(365, Math.max(7, Number(new URL(request.url, origin).searchParams.get('days')) || 30));
+    const since = Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()) - (days - 1) * 86_400_000;
+    const monthStart = Date.parse(`${user.allowancePeriod}-01T00:00:00Z`);
+    sendJson(response, 200, { period: days, since, ...store.usageStats(user.id, since), month: store.usageStats(user.id, monthStart).total, lifetime: store.usageStats(user.id, 0).total, credits: credits(user) });
+  }
+  async function saveAiKey(request, response) {
+    const { user } = requireUser(request);
+    const { provider, key: raw } = await readJson(request, 2048);
+    if (!OWN_KEY_FORMATS[provider]) throw fail('INVALID_PROVIDER', 'Choose OpenAI or Google Gemini.', 400);
+    const key = String(raw ?? '').trim();
+    if (!key) {
+      store.deleteAiKey(user.id, provider);
+      return sendJson(response, 200, { aiKeys: store.aiKeys(user.id) });
+    }
+    if (!ownKeysOn) throw fail('OWN_KEYS_DISABLED', 'Your own AI keys are not available on this server.', 503);
+    requirePro(user, 'ownKeys');
+    if (!OWN_KEY_FORMATS[provider].test(key)) throw fail('INVALID_KEY', provider === 'openai' ? 'OpenAI keys start with “sk-”. Copy the whole key from platform.openai.com.' : 'Gemini keys start with “AIza”. Copy the whole key from aistudio.google.com.', 400);
+    if (!allow(`ai-key:${user.id}`, 10, 10 * 60_000)) throw fail('TOO_MANY_REQUESTS', 'Too many key checks. Wait a few minutes, then try again.', 429);
+    if (!await checkOwnKey(provider, key, { fetchImpl })) throw fail('OWN_KEY_REJECTED', `${provider === 'openai' ? 'OpenAI' : 'Google Gemini'} did not accept this key. Check that you copied all of it and that it is active.`, 400);
+    store.setAiKey(user.id, provider, { secret: sealSecret(config.aiKeySecret, key, `${user.id}:${provider}`), hint: keyHint(key) });
+    sendJson(response, 200, { aiKeys: store.aiKeys(user.id) });
   }
 
   // ---------- AI (same contracts as Pixel Studio Local) ----------
@@ -192,14 +229,16 @@ export function createCloudServer({ config, store, mailer, billing, distDirector
     if (kind === 'image') {
       const keys = { openai: config.openaiApiKey, gemini: config.geminiApiKey };
       const pro = !!session && planAllows(session.user.plan, 'ai');
-      const providers = Object.fromEntries(Object.entries(IMAGE_PROVIDERS).map(([id, p]) => [id, { label: p.label, available: pro && !!keys[id], models: p.models, defaultModel: p.defaultModel }]));
+      const own = id => !!session && !!ownKey(session.user, id);
+      const providers = Object.fromEntries(Object.entries(IMAGE_PROVIDERS).map(([id, p]) => [id, { label: p.label, available: pro && (!!keys[id] || own(id)), ownKey: own(id), models: p.models, defaultModel: p.defaultModel }]));
       return sendJson(response, 200, { ...base, providers, csrfToken: session?.csrf || '', signedIn: !!session, proRequired: !!session && !pro, credits: session ? credits(session.user) : null });
     }
     if (!session) return sendJson(response, 200, { ...base, connected: false, authMode: null, models: [], code: 'SIGN_IN_REQUIRED', message: 'Sign in to Pixel Studio Cloud (Account, top right) to use AI with your monthly credits.' });
     const accountLabel = `Pixel Studio Cloud · ${planFor(session.user.plan).name}`;
     if (!planAllows(session.user.plan, 'ai')) return sendJson(response, 200, { ...base, connected: false, authMode: null, models: [], accountLabel, credits: credits(session.user), code: 'PRO_REQUIRED', message: PRO_AI_MESSAGE });
-    if (!config.openaiApiKey) return sendJson(response, 200, { ...base, connected: false, authMode: null, models: [], accountLabel: `Pixel Studio Cloud · ${planFor(session.user.plan).name}`, credits: credits(session.user), code: 'AI_NOT_CONFIGURED', message: 'AI is not set up on this server yet.' });
-    sendJson(response, 200, { ...base, connected: true, authMode: 'cloud', accountLabel: `Pixel Studio Cloud · ${planFor(session.user.plan).name}`, models: chatModels(), csrfToken: session.csrf, credits: credits(session.user) });
+    const own = !!ownKey(session.user, 'openai');
+    if (!config.openaiApiKey && !own) return sendJson(response, 200, { ...base, connected: false, authMode: null, models: [], accountLabel, credits: credits(session.user), code: 'AI_NOT_CONFIGURED', message: 'AI is not set up on this server yet.' });
+    sendJson(response, 200, { ...base, connected: true, authMode: 'cloud', ownKey: own, accountLabel: own ? 'Your OpenAI key · no credits used' : accountLabel, models: chatModels(), csrfToken: session.csrf, credits: credits(session.user) });
   }
   function reserve(userId) {
     if (busyUsers.has(userId)) throw fail('BUSY', 'Another AI request is running. Wait for it to finish.', 409);
@@ -219,7 +258,8 @@ export function createCloudServer({ config, store, mailer, billing, distDirector
   async function aiEdit(request, response) {
     const { user } = requireUser(request);
     requirePro(user, 'ai');
-    store.requireCredits(user.id, MIN_CHAT_CREDITS);
+    const own = ownKey(user, 'openai');
+    if (!own) store.requireCredits(user.id, MIN_CHAT_CREDITS);
     const release = reserve(user.id);
     const { controller, done } = abortOnClose(request, response);
     try {
@@ -240,14 +280,14 @@ export function createCloudServer({ config, store, mailer, billing, distDirector
       send({ type: 'status', message: 'Thinking…' });
       let result;
       try {
-        result = await chatEdit({ key: config.openaiApiKey, prompt: body.prompt, model, previews, signal: controller.signal, onEvent: send, fetchImpl });
+        result = await chatEdit({ key: own || config.openaiApiKey, ownKey: !!own, prompt: body.prompt, model, previews, signal: controller.signal, onEvent: send, fetchImpl });
       } catch (error) {
         const partial = error.partial;
-        if (partial?.text) store.charge(user.id, { kind: 'chat', model, inputTokens: partial.inputTokens, outputTokens: partial.outputTokens, credits: chatCredits(model, partial.inputTokens, partial.outputTokens) });
+        if (partial?.text) store.charge(user.id, { kind: 'chat', model, inputTokens: partial.inputTokens, outputTokens: partial.outputTokens, credits: chatCredits(model, partial.inputTokens, partial.outputTokens), ownKey: !!own });
         throw error;
       }
-      const charged = chatCredits(model, result.inputTokens, result.outputTokens);
-      const after = store.charge(user.id, { kind: 'chat', model, inputTokens: result.inputTokens, outputTokens: result.outputTokens, credits: charged });
+      const charged = own ? 0 : chatCredits(model, result.inputTokens, result.outputTokens);
+      const after = store.charge(user.id, { kind: 'chat', model, inputTokens: result.inputTokens, outputTokens: result.outputTokens, credits: charged, ownKey: !!own });
       send({ type: 'done', text: result.text, model, credits: { used: charged, balance: creditBalance(after) } });
     } catch (error) {
       if (controller.signal.aborted || response.destroyed) return;
@@ -267,10 +307,12 @@ export function createCloudServer({ config, store, mailer, billing, distDirector
     const { controller, done } = abortOnClose(request, response);
     try {
       const body = validateImageRequest(await readJson(request, MAX_IMAGE_BODY_BYTES));
-      const cost = imageCredits(body.provider, { n: body.n, quality: body.quality || 'medium' });
-      store.requireCredits(user.id, cost);
-      const { images } = await generateImages({ ...body, keys: { openai: config.openaiApiKey, gemini: config.geminiApiKey }, signal: controller.signal, fetchImpl });
-      const after = store.charge(user.id, { kind: 'image', model: `${body.provider}/${body.model}`, credits: cost });
+      const own = ownKey(user, body.provider);
+      const cost = own ? 0 : imageCredits(body.provider, { n: body.n, quality: body.quality || 'medium' });
+      if (!own) store.requireCredits(user.id, cost);
+      const keys = { openai: config.openaiApiKey, gemini: config.geminiApiKey, ...(own ? { [body.provider]: own } : {}) };
+      const { images } = await generateImages({ ...body, keys, ownKey: !!own, signal: controller.signal, fetchImpl });
+      const after = store.charge(user.id, { kind: 'image', model: `${body.provider}/${body.model}`, credits: cost, ownKey: !!own });
       if (!controller.signal.aborted) sendJson(response, 200, { images, provider: body.provider, model: body.model, credits: { used: cost, balance: creditBalance(after) } });
     } catch (error) {
       if (controller.signal.aborted) return;
@@ -315,9 +357,14 @@ export function createCloudServer({ config, store, mailer, billing, distDirector
     if (String(product).startsWith('credits-')) requirePro(user, 'creditPacks');
     sendJson(response, 200, { url: await billing.checkout(user, String(product || '')) });
   }
+  async function confirmCheckout(request, response) {
+    const { user } = requireUser(request);
+    const { sessionId } = await readJson(request, 1024);
+    sendJson(response, 200, await billing.confirm(user, sessionId));
+  }
   async function webhook(request, response) {
     const raw = await readBody(request, 1024 * 1024);
-    if (!verifySignature(raw, request.headers['x-signature'], config.lsWebhookSecret)) throw fail('INVALID_SIGNATURE', 'Invalid signature.', 401);
+    if (!verifySignature(raw, request.headers['stripe-signature'], config.stripeWebhookSecret)) throw fail('INVALID_SIGNATURE', 'Invalid signature.', 401);
     let payload;
     try { payload = JSON.parse(raw.toString('utf8')); } catch { throw fail('INVALID_JSON', 'Invalid JSON.', 400); }
     log(`[billing] ${billing.handleEvent(payload)}`);
@@ -364,8 +411,11 @@ export function createCloudServer({ config, store, mailer, billing, distDirector
     'POST /api/local-ai/edit': aiEdit,
     'GET /api/image/status': (q, r) => aiStatus(q, r, 'image'),
     'POST /api/image/generate': imageGenerate,
+    'GET /api/account/usage': usage,
+    'POST /api/account/ai-key': saveAiKey,
     'POST /api/billing/checkout': checkout,
-    'GET /api/billing/portal': (q, r) => sendJson(r, 200, { url: billing.portal(requireUser(q, { csrf: false }).user) }),
+    'POST /api/billing/confirm': confirmCheckout,
+    'GET /api/billing/portal': async (q, r) => sendJson(r, 200, { url: await billing.portal(requireUser(q, { csrf: false }).user) }),
     'POST /api/billing/webhook': webhook,
   };
 

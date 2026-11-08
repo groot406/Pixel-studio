@@ -8,7 +8,18 @@ import { CloudError } from './store.mjs';
 
 const estimateTokens = text => Math.ceil(Buffer.byteLength(String(text || '')) / 4);
 
-function upstreamError(status) {
+const PROVIDER_NAMES = { openai: 'OpenAI', gemini: 'Google Gemini' };
+/** Errors caused by the user's own key are theirs to fix, so say so (the operator's key problems stay generic). */
+function ownKeyError(provider, status) {
+  const name = PROVIDER_NAMES[provider] || provider;
+  if (status === 401 || status === 403) return new CloudError('OWN_KEY_REJECTED', `${name} rejected your API key. Check or replace it under Account → Your own AI.`, 400);
+  if (status === 429) return new CloudError('OWN_KEY_LIMIT', `Your ${name} account hit its rate or spending limit. Check your ${name} billing, or remove your key to use credits.`, 429);
+  return null;
+}
+
+function upstreamError(status, ownKey) {
+  const own = ownKey && ownKeyError('openai', status);
+  if (own) return own;
   if (status === 429) return new CloudError('AI_BUSY', 'The AI service is busy right now. Try again in a minute; no credits were used.', 503);
   if (status === 400) return new CloudError('PROMPT_TOO_LARGE', 'This request is too large for the model. Choose one animation or frame and try again.', 413);
   return new CloudError('AI_UNAVAILABLE', 'The AI service could not answer. Try again in a moment; no credits were used.', 502);
@@ -20,7 +31,7 @@ export const chatModels = () => Object.entries(CHAT_MODELS).map(([id, m]) => ({ 
  * Streams one chat completion. Calls onEvent({type:'delta', text}) as text arrives and resolves to
  * { text, model, inputTokens, outputTokens } (token counts estimated when the stream ends early).
  */
-export async function chatEdit({ key, prompt, model = DEFAULT_CHAT_MODEL, previews = [], signal, onEvent = () => {}, fetchImpl = globalThis.fetch }) {
+export async function chatEdit({ key, ownKey = false, prompt, model = DEFAULT_CHAT_MODEL, previews = [], signal, onEvent = () => {}, fetchImpl = globalThis.fetch }) {
   if (!key) throw new CloudError('AI_NOT_CONFIGURED', 'AI is not set up on this server yet.', 503);
   if (!CHAT_MODELS[model]) throw new CloudError('INVALID_MODEL', 'Choose one of the listed models.', 400);
   const instructions = isAssistantPrompt(prompt) ? ASSISTANT_INSTRUCTIONS : DATA_INSTRUCTIONS;
@@ -39,7 +50,7 @@ export async function chatEdit({ key, prompt, model = DEFAULT_CHAT_MODEL, previe
     if (signal?.aborted) throw new CloudError('CANCELLED', 'The request was cancelled.', 499);
     throw new CloudError('AI_UNAVAILABLE', 'The AI service could not be reached. Try again in a moment; no credits were used.', 502);
   }
-  if (!response.ok || !response.body) throw upstreamError(response.status);
+  if (!response.ok || !response.body) throw upstreamError(response.status, ownKey);
   let text = '', usage = null, buffer = '';
   const decoder = new TextDecoder();
   const result = () => ({ text, model, inputTokens: usage?.prompt_tokens ?? estimateTokens(prompt) + previews.length * 800, outputTokens: usage?.completion_tokens ?? estimateTokens(text) });
@@ -73,7 +84,7 @@ export async function chatEdit({ key, prompt, model = DEFAULT_CHAT_MODEL, previe
 }
 
 /** Server-side image keys (OPENAI_API_KEY, GEMINI_API_KEY) → { images } using the shared request builder. */
-export async function generateImages({ keys, signal, fetchImpl = globalThis.fetch, timeoutMs = 150_000, ...options }) {
+export async function generateImages({ keys, ownKey = false, signal, fetchImpl = globalThis.fetch, timeoutMs = 150_000, ...options }) {
   const key = keys[options.provider];
   if (!key) throw new CloudError('IMAGE_UNAVAILABLE', 'This image provider is not available on Pixel Studio Cloud.', 400);
   const controller = new AbortController();
@@ -85,8 +96,24 @@ export async function generateImages({ keys, signal, fetchImpl = globalThis.fetc
   } catch (error) {
     if (signal?.aborted) throw new CloudError('CANCELLED', 'The image request was cancelled.', 499);
     const safe = imageError(error);
+    const own = ownKey && ownKeyError(options.provider, safe.status);
+    if (own) throw own;
     // Key and quota problems are the operator's, not the user's.
     if (safe.status === 401 || safe.status === 429) throw new CloudError('IMAGE_BUSY', 'The image service is unavailable right now. Try again later; no credits were used.', 503);
     throw new CloudError(safe.code, safe.message, safe.status);
   } finally { clearTimeout(timer); signal?.removeEventListener('abort', forward); }
+}
+
+/** Checks a user's own key with a free, read-only call. Resolves true (works), false (rejected); throws when the
+ * provider cannot be reached. */
+export async function checkOwnKey(provider, key, { fetchImpl = globalThis.fetch } = {}) {
+  const request = provider === 'openai'
+    ? ['https://api.openai.com/v1/models', { headers: { Authorization: `Bearer ${key}` } }]
+    : ['https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', { headers: { 'x-goog-api-key': key } }];
+  let response;
+  try { response = await fetchImpl(request[0], { ...request[1], signal: AbortSignal.timeout(15_000) }); }
+  catch { throw new CloudError('KEY_CHECK_FAILED', `${PROVIDER_NAMES[provider]} could not be reached to check the key. Try again in a moment.`, 502); }
+  if ([400, 401, 403].includes(response.status)) return false;
+  if (!response.ok && response.status !== 429) throw new CloudError('KEY_CHECK_FAILED', `${PROVIDER_NAMES[provider]} could not check the key right now. Try again in a moment.`, 502);
+  return true;
 }

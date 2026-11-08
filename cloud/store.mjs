@@ -34,6 +34,10 @@ CREATE TABLE IF NOT EXISTS usage (
 );
 CREATE INDEX IF NOT EXISTS usage_user ON usage(user_id, at);
 CREATE TABLE IF NOT EXISTS processed_events (key TEXT PRIMARY KEY, at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS ai_keys (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, provider TEXT NOT NULL, secret TEXT NOT NULL,
+  hint TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (user_id, provider)
+);
 CREATE TABLE IF NOT EXISTS projects (
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, id TEXT NOT NULL, name TEXT NOT NULL,
   data TEXT NOT NULL, bytes INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (user_id, id)
@@ -53,6 +57,8 @@ export function openStore(path = ':memory:', { now = () => Date.now() } = {}) {
   const db = new DatabaseSync(path);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
   db.exec(SCHEMA);
+  // Added after launch: usage paid for with the user's own AI key (no credits).
+  if (!db.prepare('PRAGMA table_info(usage)').all().some(column => column.name === 'own_key')) db.exec('ALTER TABLE usage ADD COLUMN own_key INTEGER NOT NULL DEFAULT 0');
   const q = sql => db.prepare(sql);
   const transaction = fn => {
     db.exec('BEGIN IMMEDIATE');
@@ -127,11 +133,12 @@ export function openStore(path = ':memory:', { now = () => Date.now() } = {}) {
       }
       return user;
     },
-    charge(userId, { kind, model = null, inputTokens = 0, outputTokens = 0, credits }) {
+    /** Spends `credits` and records the request. With `ownKey` the user's own AI key paid, so no credits are spent. */
+    charge(userId, { kind, model = null, inputTokens = 0, outputTokens = 0, credits, ownKey = false }) {
       return transaction(() => {
-        const user = spendCredits(currentUser(userId), credits);
-        saveCredits(user);
-        q('INSERT INTO usage (user_id, kind, model, input_tokens, output_tokens, credits, at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(userId, kind, model, inputTokens, outputTokens, credits, now());
+        const user = ownKey ? currentUser(userId) : spendCredits(currentUser(userId), credits);
+        if (!ownKey) saveCredits(user);
+        q('INSERT INTO usage (user_id, kind, model, input_tokens, output_tokens, credits, own_key, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(userId, kind, model, inputTokens, outputTokens, ownKey ? 0 : credits, ownKey ? 1 : 0, now());
         return user;
       });
     },
@@ -143,9 +150,45 @@ export function openStore(path = ':memory:', { now = () => Date.now() } = {}) {
       return q('SELECT kind, COUNT(*) AS requests, SUM(credits) AS credits FROM usage WHERE user_id = ? AND at >= ? GROUP BY kind').all(userId, since)
         .map(row => ({ kind: row.kind, requests: row.requests, credits: row.credits }));
     },
+    /** Usage since `since`: totals, per UTC day and per model, split by who paid (credits or the user's own key). */
+    usageStats(userId, since) {
+      const rows = q(`SELECT strftime('%Y-%m-%d', at / 1000, 'unixepoch') AS day, kind, model, own_key, COUNT(*) AS requests,
+        SUM(credits) AS credits, SUM(input_tokens) AS input, SUM(output_tokens) AS output
+        FROM usage WHERE user_id = ? AND at >= ? GROUP BY day, kind, model, own_key ORDER BY day`).all(userId, since);
+      const add = (target, row) => {
+        target.requests += row.requests; target.credits += row.credits ?? 0;
+        target.inputTokens += row.input ?? 0; target.outputTokens += row.output ?? 0;
+        if (row.own_key) target.ownKeyRequests += row.requests;
+        if (row.kind === 'image') target.images += row.requests;
+        return target;
+      };
+      const empty = () => ({ requests: 0, credits: 0, inputTokens: 0, outputTokens: 0, ownKeyRequests: 0, images: 0 });
+      const total = empty(), days = new Map(), models = new Map();
+      for (const row of rows) {
+        add(total, row);
+        if (!days.has(row.day)) days.set(row.day, { day: row.day, ...empty() });
+        add(days.get(row.day), row);
+        const id = row.model || row.kind;
+        if (!models.has(id)) models.set(id, { model: id, kind: row.kind, ...empty() });
+        add(models.get(id), row);
+      }
+      return { total, days: [...days.values()], models: [...models.values()].sort((a, b) => b.requests - a.requests) };
+    },
+
+    // ---- the user's own AI keys (stored encrypted; see cloud/secrets.mjs) ----
+    aiKeys(userId) {
+      return q('SELECT provider, hint, created_at FROM ai_keys WHERE user_id = ? ORDER BY provider').all(userId)
+        .map(row => ({ provider: row.provider, hint: row.hint, addedAt: row.created_at }));
+    },
+    aiKeySecret(userId, provider) { return q('SELECT secret FROM ai_keys WHERE user_id = ? AND provider = ?').get(userId, provider)?.secret || null; },
+    setAiKey(userId, provider, { secret, hint }) {
+      q(`INSERT INTO ai_keys (user_id, provider, secret, hint, created_at) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(user_id, provider) DO UPDATE SET secret = excluded.secret, hint = excluded.hint, created_at = excluded.created_at`).run(userId, provider, secret, hint, now());
+    },
+    deleteAiKey(userId, provider) { return q('DELETE FROM ai_keys WHERE user_id = ? AND provider = ?').run(userId, provider).changes > 0; },
 
     // ---- billing ----
-    /** Records a webhook delivery key; false when it was already processed (Lemon Squeezy retries). */
+    /** Records a webhook delivery key; false when it was already processed (webhook retries, or a checkout confirmed on return and by webhook). */
     markProcessed(key) {
       try { q('INSERT INTO processed_events (key, at) VALUES (?, ?)').run(key, now()); return true; }
       catch (error) { if (/UNIQUE|PRIMARY KEY/i.test(error.message)) return false; throw error; }

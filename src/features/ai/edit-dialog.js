@@ -91,7 +91,7 @@ export function openAIEdit({ project, animationId, frameId, layerId, selection =
         <label class="field ai-edit-instruction-field" for="ai-edit-instruction"><span class="field-label">What would you like to change?</span><textarea id="ai-edit-instruction" rows="3" maxlength="6000" required placeholder="Make the sword swing clearer, with a little more movement in the coat…"></textarea></label>
 
         <div class="ai-edit-methods" role="tablist" aria-label="AI editing method">
-          <button id="ai-edit-local-tab" type="button" role="tab" aria-controls="ai-edit-local-panel" aria-selected="true">${icon('spark')} Local Codex</button>
+          <button id="ai-edit-local-tab" type="button" role="tab" aria-controls="ai-edit-local-panel" aria-selected="true">${icon('spark')} ${cloud ? 'Pixel Studio AI' : 'Local Codex'}</button>
           <button id="ai-edit-paste-tab" type="button" role="tab" aria-controls="ai-edit-paste-panel" aria-selected="false" tabindex="-1">${icon('paste')} Paste AI result</button>
         </div>
         <section id="ai-edit-local-panel" class="ai-edit-method-panel" role="tabpanel" aria-labelledby="ai-edit-local-tab">
@@ -101,11 +101,6 @@ export function openAIEdit({ project, animationId, frameId, layerId, selection =
             <button id="ai-edit-refresh" class="button small" type="button"${local ? '' : ' hidden'}>${icon('rotate-right')} Refresh</button>
             <a id="ai-edit-download" class="button" href="./downloads/pixel-studio-local.zip" download="pixel-studio-local.zip"${local ? ' hidden' : ''}>${icon('import')} Download local edition</a>
           </div>
-          <details id="ai-edit-setup" class="ai-edit-setup">
-            <summary>Local setup</summary>
-            <ol><li>Install Node.js 20 or newer and the Codex CLI.</li><li>Run <code>codex login</code> and sign in with your ChatGPT account.</li><li>Open the extracted Pixel Studio folder and run <code>npm start</code>. On a Mac, you can also open <strong>Start-Pixel-Studio.command</strong>.</li></ol>
-            <p>Use the localhost address printed by the launcher. Codex uses your account’s allowance and connects to OpenAI online.</p>
-          </details>
         </section>
         <section id="ai-edit-paste-panel" class="ai-edit-method-panel" role="tabpanel" aria-labelledby="ai-edit-paste-tab" hidden>
           <p class="ai-edit-help">Copy this edit prompt into ChatGPT, then paste its complete response below, including the final completion comment. The response must match this request and its output format.</p>

@@ -1,9 +1,10 @@
 /**
  * Effects panel: pixel effects (src/domain/effects.js) on the active container's cel — outline, selective outline,
  * inner glow, rim light, auto shade, dither, line clean-up and smooth jaggies — in the Edit scope (this frame / every frame), limited
- * to the selection when there is one. Each dialog shows a live before/after preview of the current frame.
+ * to the selection when there is one. With a part instance selected (and no pixel selection), the effect changes that
+ * object's own part, so the result moves with it (all copies in All frames; just this copy otherwise). Each dialog shows a live before/after preview of the current frame.
  */
-import { applyPixelEffect } from '../domain/effects.js';
+import { applyPixelEffect, applyInstanceEffect, INSTANCE_EFFECTS } from '../domain/effects.js';
 import { editScope, editScopeText } from './edit-scope.js';
 import { compositeFrame } from '../domain/project.js';
 import { rampFromPalette } from '../domain/colour.js';
@@ -28,8 +29,17 @@ export function blockedReason() {
   if (!d.canEditPixels()) return 'Unlock the objects in this container first.';
   return '';
 }
+/** The selected part instance the effects act on, when there is no pixel selection. */
+function selectedInstance() {
+  const { state } = d, sel = state.objectSelection;
+  if (!sel || state.selection) return null;
+  const op = d.currentFrame().cels.find(c => c.layerId === sel.layerId)?.source?.ops.find(o => o.type === 'use' && o.id === sel.key);
+  if (!op) return null;
+  return { layerId: sel.layerId, instanceId: op.id, name: op.name || op.partId };
+}
 export function scopeText() {
-  const { state } = d, layer = d.currentLayer();
+  const { state } = d, layer = d.currentLayer(), inst = selectedInstance();
+  if (inst) return editScope(state) === 'animation' ? `the object “${inst.name}” (every copy of it)` : `this copy of “${inst.name}” in ${editScopeText(state, d.currentAnimation())}`;
   return `“${layer.name}”${state.selection ? ', inside the selection,' : ''} in ${editScopeText(state, d.currentAnimation())}`;
 }
 
@@ -122,13 +132,15 @@ function effectDialog(effect) {
     <div class="maths-preview"><figure><figcaption>Before</figcaption><canvas id="fx-before" aria-label="Current frame before the effect"></canvas></figure><figure><figcaption>After</figcaption><canvas id="fx-after" aria-label="Preview with the effect"></canvas></figure></div>
     ${def.body}<p class="maths-info">Applies to ${d.escapeHTML(scopeText())}.</p><p id="fx-error" class="maths-error" role="alert"></p>
     <div class="modal-actions"><button type="button" id="fx-cancel" class="button">Cancel</button><button type="submit" class="button primary">Apply</button></div></form>`, 'EFFECTS');
-  const target = () => ({ ...d.objectTarget(), ...selectionTarget(state.selection, width, height) });
+  const inst = INSTANCE_EFFECTS.includes(effect) ? selectedInstance() : null;
+  const target = () => inst ? { ...d.objectTarget(inst.layerId), instanceId: inst.instanceId } : { ...d.objectTarget(), ...selectionTarget(state.selection, width, height) };
+  const apply = scope => (inst ? applyInstanceEffect : applyPixelEffect)(state.project, { ...target(), scope }, effect, def.options());
   d.paintSprite($('fx-before'), compositeFrame(state.project, frame), state.project.palette, true);
   let queued = false;
   const preview = () => {
     queued = false;
     try {
-      const result = applyPixelEffect(state.project, { ...target(), scope: 'frame' }, effect, def.options());
+      const result = apply('frame');
       const after = result.project.animations.find(a => a.id === d.currentAnimation().id).frames.find(f => f.id === frame.id);
       d.paintSprite($('fx-after'), compositeFrame(result.project, after), result.project.palette, true);
       $('fx-error').textContent = '';
@@ -156,9 +168,10 @@ function effectDialog(effect) {
   $('fx-form').onsubmit = event => {
     event.preventDefault();
     let result;
-    try { d.mutate(() => { result = applyPixelEffect(state.project, { ...target(), scope: editScope(state) }, effect, def.options()); state.project = result.project; }); }
+    try { d.mutate(() => { result = apply(editScope(state)); state.project = result.project; }); }
     catch (error) { $('fx-error').textContent = error.message; return; }
     $('modal').close(); d.renderAll();
+    if (inst) { d.toast(result.changed ? `${def.title} applied to “${inst.name}”${Object.values(result.grown).some(Boolean) ? ' · the object grew to fit it' : ''}.` : `${def.title} changed nothing here.`); return; }
     const changed = result.frameIds.length;
     d.toast(changed ? `${def.title} applied to ${changed} frame${changed === 1 ? '' : 's'}${result.skipped ? ` · ${result.skipped} with locked objects skipped` : ''}.` : `${def.title} changed nothing here.`);
   };

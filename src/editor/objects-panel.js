@@ -165,7 +165,8 @@ export function renderObjectsPanel({project,animation,frame,selected,selection=[
   document.getElementById('object-down').disabled=!editable || (outer?outerIndex<=0:index<=0 || item?.node?.type==='overrides' || siblings[index-1]?.type==='overrides');
   document.getElementById('object-detail').textContent=many?`${selection.length} objects selected · copy, paste, duplicate, delete, nudge and drag apply to all. Shift/Ctrl-click to add or remove.`
     : item?.node?.instance
-    ? `${item.node.instance.partId} · ${item.node.instance.x}, ${item.node.instance.y} · double-click to edit, drag to reorder`
+    ? `${item.node.instance.partId} · ${item.node.instance.x}, ${item.node.instance.y} · double-click to edit its pixels; Effects change this object. To draw something new, use New pixel object.`
+    : item?.node?.type==='overrides'?'Pixels painted over objects in this frame. They stay put when objects move: edit an object on the canvas (double-click) to change the object itself.'
     : item?.group?'Group visibility and locks apply across the project. Group order follows the selected editing scope.':'Drag rows to reorder or into a group. Right-click for copy, paste and more.';
   document.getElementById('object-copy').disabled=!item;
   document.getElementById('object-paste').disabled=!canPaste;

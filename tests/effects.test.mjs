@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { validateProject, blankProject } from '../src/domain/project.js';
 import { rampFromPalette, darkerMap } from '../src/domain/colour.js';
 import { selOut, autoShade, pixelPerfect } from '../src/domain/pixel-fx.js';
-import { rampsForPalette, gradientStops, applyPixelEffect, applyGradient, addShadingRamp, colourCycle, strokePoints, toolLinePoints, tileSeams } from '../src/domain/effects.js';
+import { rampsForPalette, gradientStops, applyPixelEffect, applyInstanceEffect, applyGradient, addShadingRamp, colourCycle, strokePoints, toolLinePoints, tileSeams } from '../src/domain/effects.js';
 
 const W = 16;
 /** 16×16, frames f0..f(n-1), layer L; a 6×6 square of colour 9 at (5,5) — raster, or a placed part when `retained`. */
@@ -108,4 +108,20 @@ test('a list of frame ids scopes an edit to those frames (plus the target frame)
   const moved = translateObject(scene(4, { retained: true }), { ...T, frameId: 'f0' }, 'o', 2, 0, ['f2']);
   assert.deepEqual(moved.animations[0].frames.map(f => f.cels[0].source.ops[0].x), [7, 5, 7, 5]);
   assert.throws(() => applyPixelEffect(scene(), { ...T, scope: [] }, 'outline', { color: 0 }), /Choose/);
+});
+
+test('effects on a selected instance change its part, growing it for an outline, so the result moves with it', () => {
+  const p = scene(2, { retained: true });
+  const all = applyInstanceEffect(p, { ...T, instanceId: 'o', scope: 'animation' }, 'outline', { color: 1 });
+  assert.deepEqual(all.grown, { left: 1, top: 1, right: 1, bottom: 1 });
+  assert.equal(all.partId, 'sq');
+  const part = all.project.parts.find(x => x.id === 'sq');
+  assert.equal(part.width, 8);
+  for (const k of [0, 1]) { assert.equal(at(all.project, 4, 5, k), 1); assert.equal(at(all.project, 5, 5, k), 9); assert.deepEqual(cel(all.project, k).source.overrides, []); }
+  const one = applyInstanceEffect(p, { ...T, instanceId: 'o', scope: 'frame' }, 'outline', { color: 1 });
+  assert.notEqual(one.partId, 'sq');
+  assert.equal(at(one.project, 4, 5, 0), 1);
+  assert.equal(at(one.project, 4, 5, 1), -1);
+  assert.equal(one.project.parts.find(x => x.id === 'sq').width, 6);
+  assert.throws(() => applyInstanceEffect(p, { ...T, instanceId: 'o' }, 'gradient', {}), /whole canvas/);
 });

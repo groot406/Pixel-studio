@@ -1,5 +1,5 @@
 /* Plugins & skills: manager dialog, plugin entries in the Effects panel and the Ctrl/⌘ K command palette. */
-.modal.plugins-modal { width: min(680px, calc(100% - 32px)); }
+.modal.plugins-modal { --modal-width: 680px; }
 .plugins-tabs { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 0; }
 .plugins-tabs .export-tab { min-height: 36px; }
 .plugins-manager { display: grid; gap: 16px; }

@@ -74,6 +74,8 @@
 .maths-preview figure { display: grid; gap: 5px; margin: 0; }
 .maths-preview figcaption { color: #8a9680; font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .maths-preview canvas, .easing-curve { width: 100%; height: auto; aspect-ratio: 1; border: 1px solid #dce4d5; border-radius: 7px; background: #f3f5ef; image-rendering: pixelated; }
+/* Square previews shrink on short screens so the options and buttons stay in view. */
+.maths-preview canvas { width: min(100%, max(128px, 32dvh)); justify-self: center; }
 .easing-curve { display: block; aspect-ratio: auto; height: 96px; margin-top: 10px; image-rendering: auto; background: #fff; }
 .light-grid { display: grid; grid-template-columns: repeat(3, 28px); gap: 3px; padding: 3px; width: max-content; border: 1px solid #dce4d5; border-radius: 8px; background: #fff; }
 .light-grid .seg-option { width: 28px; height: 28px; font-size: 13px; line-height: 1; }

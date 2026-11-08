@@ -1895,13 +1895,30 @@ function animationTick(time) {
   requestAnimationFrame(animationTick);
 }
 
+/** Marks the dialog while its body has more content below, so the sticky button row shows a divider shadow. */
+let modalOverflowWatch = null;
+function watchModalOverflow() {
+  if (modalOverflowWatch) return;
+  const modal = $('modal'), body = $('modal-content');
+  let frame = 0;
+  const update = () => { frame = 0; modal.classList.toggle('has-more', body.scrollHeight - body.scrollTop - body.clientHeight > 2); };
+  const schedule = () => { if (!frame) frame = requestAnimationFrame(update); };
+  body.addEventListener('scroll', schedule, { passive: true });
+  modalOverflowWatch = new ResizeObserver(schedule);
+  modalOverflowWatch.observe(body);
+  new MutationObserver(schedule).observe(body, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden', 'class', 'open'] });
+  window.addEventListener('resize', schedule);
+}
+
 function openDialog(title, content, eyebrow = 'PIXEL STUDIO') {
+  watchModalOverflow();
   if (finishDrawing()) renderAll();
   $('modal').dispatchEvent(new Event('pixel-studio:dialog-replace'));
   $('modal').classList.remove('versions-modal','wide','start-modal','part-library-modal','prompt-builder-modal','ai-edit-modal','shared-part-modal','palette-studio-modal','export-modal','help-modal');
   $('modal-title').textContent = title;
   $('modal-eyebrow').textContent = eyebrow;
   $('modal-content').innerHTML = content;
+  $('modal-content').scrollTop = 0;
   $('modal').setAttribute('aria-labelledby', 'modal-title');
   if (!$('modal').open) $('modal').showModal();
 }

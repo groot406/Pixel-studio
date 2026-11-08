@@ -234,14 +234,30 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--green); }
 .sample-note { margin: 11px 0 0; font-size: 8px; color: #adb5a1; line-height: 1.8; }
 .sample-note .text-button { color: #879a73; }
 
-/* Import, export and project details stay close to the work. */
-.modal { width: min(480px, calc(100% - 32px)); max-height: min(90dvh, 800px); margin: auto; padding: 0; border: 1px solid #d7e0cf; border-radius: 13px; background: var(--paper); color: var(--ink); box-shadow: 0 24px 100px #172d2552; overflow-y: auto; overscroll-behavior: contain; }
+/* Import, export and project details stay close to the work.
+   Dialogs size from --modal-width × --modal-scale (bigger on roomy screens) and use the full screen height before
+   scrolling. Only the body scrolls: the title stays put and the last row of buttons sticks to the bottom. */
+:root { --modal-scale: 1; --modal-gap: 32px; }
+@media (min-width: 1360px) and (min-height: 760px) { :root { --modal-scale: 1.12; } }
+@media (min-width: 1700px) and (min-height: 900px) { :root { --modal-scale: 1.25; } }
+@media (min-width: 2200px) and (min-height: 1100px) { :root { --modal-scale: 1.4; } }
+.modal { --modal-width: 480px; width: min(calc(var(--modal-width) * var(--modal-scale)), calc(100% - var(--modal-gap))); max-width: calc(100% - var(--modal-gap)); max-height: min(calc(100dvh - var(--modal-gap)), 1280px); margin: auto; padding: 0; border: 1px solid #d7e0cf; border-radius: 13px; background: var(--paper); color: var(--ink); box-shadow: 0 24px 100px #172d2552; overflow: hidden; overscroll-behavior: contain; }
+.modal[open] { display: flex; flex-direction: column; }
+.modal > .modal-heading { flex: 0 0 auto; }
+.modal > .modal-content { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.modal-content > .modal-actions:last-child,
+.modal-content > :last-child > .modal-actions:last-child,
+.modal-content > :last-child > :last-child > .modal-actions:last-child { position: sticky; bottom: 0; z-index: 3; padding: 12px 0 var(--modal-pad-bottom, 25px); background: var(--paper); transition: box-shadow .15s; }
+/* The footer carries the bottom padding itself, so it sticks flush to the dialog's bottom edge in every engine. */
+.modal > .modal-content:has(> .modal-actions:last-child, > :last-child > .modal-actions:last-child, > :last-child > :last-child > .modal-actions:last-child) { padding-bottom: 0; }
+.modal.has-more .modal-content .modal-actions:last-child { box-shadow: 0 -1px 0 var(--line), 0 -14px 16px -14px #172d2540; }
 .modal::backdrop { background: #243c2d55; backdrop-filter: blur(3px); }
 .modal-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 25px 25px 18px; }
 .modal-heading > .icon-button { margin: -7px -8px 0 0; }
 .modal-eyebrow { font-size: 8px; font-weight: 700; letter-spacing: 1.7px; color: #5e6f55; }
 .modal-heading h2 { margin: 7px 0 0; font-size: 23px; font-weight: 650; letter-spacing: -.6px; line-height: 1.25; }
 .modal-content { padding: 0 25px 25px; }
+.modal-content > .modal-actions:last-child { margin-top: 10px; }
 .modal-body-text { margin: 0 0 19px; color: #88967d; font-size: 12px; line-height: 1.7; }
 .modal-actions { display: flex; align-items: center; justify-content: flex-end; gap: 9px; margin-top: 22px; }
 .modal-actions .button { min-height: 37px; padding: 8px 15px; }
@@ -491,7 +507,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--green); }
   .sample-copy small { font-size: 8px; }
   .sample-card > svg { display: none; }
   .sample-note { font-size: 9px; }
-  .modal { max-height: 90dvh; }
+  .modal { --modal-gap: 20px; --modal-pad-bottom: 23px; }
   .modal-heading { padding: 23px 21px 17px; }
   .modal-content { padding: 0 21px 23px; }
   .modal .icon-button { width: 38px; height: 38px; padding: 10px; }
@@ -639,7 +655,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--green); }
 .canvas-size-fields .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .canvas-size-fields .field { min-width: 0; }
 .canvas-size-fields input, .canvas-size-fields select { width: 100%; min-width: 0; }
-.modal.wide { width: min(640px, calc(100% - 32px)); max-width: 640px; }
+.modal.wide { --modal-width: 640px; }
 .frame-card canvas, #preview-canvas, #png-import-canvas, .sample-thumb { object-fit: contain; }
 
 .sheet-preview-wrap, .sheet-export-preview {
@@ -689,7 +705,7 @@ canvas.sheet-export-preview { display: block; width: 100%; height: auto; max-hei
 
 @media (max-width: 760px) {
   #resize-canvas.dimension-badge { min-height: 36px; padding: 7px 8px; }
-  .modal.wide { width: calc(100% - 24px); }
+  .modal.wide { --modal-gap: 24px; }
   .sheet-preview-wrap, .sheet-export-preview { padding: 8px; }
   .sheet-row, .sheet-row-heading { grid-template-columns: 26px minmax(0, 1fr) 68px; gap: 7px; }
   .sheet-row > span:first-child, .sheet-row .row-badge { width: 25px; min-height: 32px; }
@@ -1033,8 +1049,7 @@ textarea.ai-text-input::placeholder { color: #7b8872; }
 .prompt-builder-entry { color: var(--green); background: #f0f5e8; border-color: #c8d8bc; }
 .ai-edit-entry { color: var(--green); border-color: #a5bfa8; }
 .animation-ai-edit { width: 100%; margin-top: 8px; }
-.modal.prompt-builder-modal { width: min(800px, calc(100% - 32px)); max-width: 800px; }
-.modal.prompt-builder-modal[open] { display: flex; flex-direction: column; overflow: hidden; }
+.modal.prompt-builder-modal { --modal-width: 800px; }
 .prompt-builder-modal .modal-heading { flex: 0 0 auto; }
 .prompt-builder-modal .modal-content { display: flex; flex: 1 1 auto; min-height: 0; overflow: hidden; padding-bottom: 0; }
 .prompt-builder { display: flex; flex-direction: column; width: 100%; min-width: 0; min-height: 0; }
@@ -1120,7 +1135,7 @@ textarea.ai-text-input::placeholder { color: #7b8872; }
 }
 
 @media (max-width: 540px) {
-  .modal.prompt-builder-modal { width: calc(100% - 20px); max-height: 94dvh; }
+  .modal.prompt-builder-modal { --modal-gap: 20px; }
   .prompt-builder-modal .modal-heading { gap: 12px; padding: 18px 15px 14px; }
   .prompt-builder-modal .modal-heading h2 { font-size: 22px; }
   .prompt-builder-modal .modal-content { padding-right: 14px; padding-left: 14px; }
@@ -1328,7 +1343,7 @@ dialog :is(p, li, code, pre, kbd, .notice, .field-label, .helper-text, .modal-bo
 .recovery-compare figure { margin: 0; text-align: center; }
 .recovery-compare canvas { display: block; width: 96px; height: 96px; object-fit: contain; border: 1px solid #e6dfbf; border-radius: 6px; image-rendering: pixelated; background: var(--paper); }
 .recovery-compare figcaption { margin-top: 4px; color: #6f6a4e; font-size: 10px; }
-.modal.versions-modal { width: min(640px, calc(100% - 32px)); }
+.modal.versions-modal { --modal-width: 640px; }
 .version-save { display: flex; gap: 9px; margin-bottom: 14px; }
 .version-save input { flex: 1; min-width: 0; min-height: 37px; padding: 8px 11px; border: 1px solid #dfe5da; border-radius: var(--radius); background: var(--paper); color: var(--ink); font: inherit; font-size: 12px; }
 .version-save input:focus { outline: 2px solid #b8cba8; outline-offset: 0; }

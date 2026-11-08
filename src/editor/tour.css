@@ -51,7 +51,7 @@ body[data-rich-tips="off"] .rich-tip, .tour-running .rich-tip { display: none; }
 @keyframes onb-pop { from { opacity: 0; scale: .92; } }
 
 /* Help center. */
-.modal.help-modal { width: min(620px, calc(100% - 32px)); }
+.modal.help-modal { --modal-width: 620px; }
 .help-center .help-tabs { margin-bottom: 14px; }
 .help-center .help-tabs .export-tab { min-height: 36px; }
 .help-pane { min-height: 320px; }

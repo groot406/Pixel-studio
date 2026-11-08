@@ -1,5 +1,5 @@
 /* Export dialog: image, sprite sheet and animation panels. */
-.modal.wide.export-modal { width: min(900px, calc(100% - 32px)); max-width: 900px; }
+.modal.wide.export-modal { --modal-width: 900px; }
 .export-modal .export-tabs { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .img-export { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; align-items: start; }
 .img-export-options .field { margin: 0 0 12px; }

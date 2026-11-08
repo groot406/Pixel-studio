@@ -2,7 +2,7 @@
 .palette-actions .palette-studio-button { grid-column: 1 / -1; border-color: #c9d8bd; background: var(--green-soft); color: var(--green); font-weight: 600; }
 .palette-actions .palette-studio-button:hover:not(:disabled) { background: #dfe9d6; border-color: #b7c9a8; }
 
-.modal.palette-studio-modal { width: min(1040px, calc(100% - 32px)); max-width: 1040px; height: min(94dvh, 800px); max-height: min(94dvh, 800px); flex-direction: column; overflow: hidden; }
+.modal.palette-studio-modal { --modal-width: 1040px; height: min(calc(100dvh - var(--modal-gap)), 860px); }
 .modal.palette-studio-modal[open] { display: flex; }
 .palette-studio-modal .modal-heading { padding: 18px 22px 10px; }
 .palette-studio-modal .modal-heading h2 { margin-top: 4px; font-size: 20px; }

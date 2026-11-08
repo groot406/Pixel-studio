@@ -1,5 +1,5 @@
 /* Generate image dialog: brief on the left, variations and clean-up on the right. */
-.modal.ai-image-modal { width: min(940px, calc(100% - 32px)); max-width: 940px; }
+.modal.ai-image-modal { --modal-width: 940px; }
 .ai-image .aii-columns { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 20px; align-items: start; }
 .ai-image .aii-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
 .ai-image .aii-provider { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, .8fr); gap: 10px; margin-top: 14px; }

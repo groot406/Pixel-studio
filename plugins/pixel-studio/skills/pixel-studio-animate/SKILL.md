@@ -10,8 +10,12 @@ Use together with the `pixel-studio` skill (PXA 2 grammar: `reference/pxa2-forma
 
 ## 1. Build the character from parts
 
-Animation in PXA 2 works best when each moving piece is its own **part** placed with `USE`: torso, head,
-upper/lower arms, upper/lower legs, tail, weapon. Draw the parts in the rest pose, facing the camera or to
+Animation in PXA 2 needs each moving piece to be its own **part** placed with `USE`: torso, head,
+upper/lower arms, upper/lower legs, tail, weapon. Do this from the start for every character — raster
+(`RASTER`/`SPAN`) layers cannot be posed. If a project was already drawn as raster layers, call `make_parts`
+(CLI: `pixelstudio rig file.pxa`): it turns each layer into a part (identical frames share one) and auto-rigs
+them where they touch, with the torso/body or largest piece as root. It can only bend where layers are split,
+so split arms, legs and props into their own layers or parts first for a fully poseable figure. Draw the parts in the rest pose, facing the camera or to
 the side, and give each instance a `PIVOT` at its joint (top-centre of a limb, bottom-centre of a head):
 
 ```

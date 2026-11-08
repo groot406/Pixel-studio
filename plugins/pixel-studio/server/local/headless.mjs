@@ -10,6 +10,7 @@ import { pixelize, detectGrid } from '../src/domain/pixelize.js';
 import { PALETTE_PRESETS } from '../src/domain/palette-presets.js';
 import { replacePalette, usedPaletteIndices } from '../src/domain/palette-theory.js';
 import { TEMPLATES, generateTemplate } from '../src/domain/templates.js';
+import { partsAndRig } from '../src/domain/auto-rig.js';
 import { encodeAIProject, decodeAIProject } from '../src/formats/pxa.js';
 import { encodePixelProject, decodePixelProject } from '../src/formats/pxs.js';
 import { encodePng } from '../src/formats/png.js';
@@ -167,7 +168,31 @@ export function lintPxa(text) {
     const empty = a.frames.map((f, i) => compositeFrame(project, f).every(v => v < 0) ? i : -1).filter(i => i >= 0);
     if (empty.length) warnings.push(`Animation "${a.name}" has blank frame${empty.length === 1 ? '' : 's'} at ${empty.join(', ')} (0-based).`);
   }
+  warnings.push(...rigWarnings(project));
   return { ok: true, project, summary, errors: [], warnings };
+}
+
+/** Nudges toward animatable structure: drawn-only sprites and unrigged parts cannot be posed. */
+function rigWarnings(project) {
+  const frames = project.animations.flatMap(a => a.frames), uses = f => f.cels.flatMap(c => (c.source?.ops || []).filter(op => op.type === 'use'));
+  if (Math.max(project.width, project.height) < 16) return [];
+  if (!frames.some(f => uses(f).length)) return ['No parts: everything is drawn as raster pixels, so nothing can be posed, rigged or reused. For characters, creatures and anything that should move, draw each moving piece (head, torso, arms, legs, weapon…) as a PART placed with USE, or call make_parts to turn layers into parts and auto-rig them.'];
+  if (!project.bones?.length && frames.some(f => uses(f).length > 1)) return ['The parts are not rigged: add BONE lines (see the guide), or call make_parts to auto-rig them, so the character can be posed and animated with apply_template.'];
+  return [];
+}
+
+/**
+ * Turn drawn pixel layers into reusable parts (one placed part per layer, shared between identical frames) and,
+ * unless rig is false, join the parts into a skeleton where they touch. Returns { project, converted, attached, rootBoneId }.
+ */
+export function makeParts(project, { animation, frame, layers, rig = true } = {}) {
+  const p = validateProject(project), anim = findAnimation(p, animation), base = findFrame(anim, frame);
+  const layerIds = layers?.length ? layers.map(ref => {
+    const layer = p.layers.find(l => l.id === ref || l.name === ref);
+    if (!layer) throw new Error(`No layer "${ref}". Layers: ${p.layers.map(l => `${l.id} ("${l.name}")`).join(', ')}.`);
+    return layer.id;
+  }) : undefined;
+  return partsAndRig(p, { animationId: anim.id, frameId: base.id, layerIds, rig });
 }
 
 function hintFor(message) {

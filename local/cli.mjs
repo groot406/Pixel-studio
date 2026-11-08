@@ -6,7 +6,7 @@ import { basename, extname, join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
-  exportProject, formatOf, formatSummary, imageToProject, lintPxa, loadProject, projectSummary, renderPng, saveProject, writeBytes, writeExport,
+  exportProject, formatOf, formatSummary, imageToProject, lintPxa, loadProject, makeParts, projectSummary, renderPng, saveProject, writeBytes, writeExport,
 } from './headless.mjs';
 
 const USAGE = `Pixel Studio CLI
@@ -20,6 +20,8 @@ Usage: pixelstudio <command> [options]
   convert <in> <out>                   Convert between .pxa, .pxs and .pixel.json (or .png → project)
   pixelize <image.png> [-o out.pxa]    Turn an image into a clean pixel-art project
         [--colors 16] [--pixel-size n] [--max-size 128] [--keep-background]
+  rig <file> [-o out.pxa]              Turn drawn layers into parts and auto-rig them into a skeleton
+        [--layers a,b] [--no-rig] [--animation id] [--frame n]
   export <file> --sheet|--gif|--apng|--png -o <out>
         [--animation id] [--scale n] [--columns n] [--project]
   mcp [--root dir]                     Start the MCP server on stdio (for Claude, Copilot, Cursor, Codex…)
@@ -112,6 +114,17 @@ const commands = {
     const out = options.out || `${basename(input, extname(input))}.pxa`;
     await saveProject(out, result.project);
     say(`Wrote ${out}: ${result.project.width}×${result.project.height}, ${result.project.palette.length} colours (from ${result.source.width}×${result.source.height}${result.grid?.scale > 1 ? `, detected ${result.grid.scale}px grid` : ''}).`);
+  },
+
+  async rig(args) {
+    const { positional, options } = parseArgs(args, ['no-rig']);
+    const file = need(positional[0], 'project file'), out = options.out || file;
+    const { project } = await loadProject(file);
+    const r = makeParts(project, { animation: frameRef(options.animation), frame: frameRef(options.frame), layers: options.layers?.split(',').map(s => s.trim()).filter(Boolean), rig: !options['no-rig'] });
+    await saveProject(out, r.project);
+    if (r.converted.length) say(`Parts: ${r.converted.map(c => `${c.instanceId}${c.parts > 1 ? ` (${c.parts} drawings)` : ''}`).join(', ')}.`);
+    if (r.attached.length) say(`Bones: ${r.attached.map(a => `${a.bone} → ${a.parent}`).join(', ')} (root ${r.rootBoneId}).`);
+    say(`Wrote ${out}.`);
   },
 
   async export(args) {

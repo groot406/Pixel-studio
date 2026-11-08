@@ -13,7 +13,7 @@ writing PXA.
 ## Tools
 
 Prefer the **Pixel Studio MCP tools** when they are available (`pixel_guide`, `create_project`, `read_project`,
-`validate_pxa`, `write_project`, `render_png`, `image_to_pixels`, `apply_template`, `set_palette`, `export`,
+`validate_pxa`, `write_project`, `render_png`, `image_to_pixels`, `make_parts`, `apply_template`, `set_palette`, `export`,
 and the live `editor_*` tools). If `set_workspace` is listed (the Pixel Studio plugin in Codex, whose server starts
 outside your project), call it first with the absolute path of your working directory so files land in the project.
 Without MCP, use the CLI from the Pixel Studio checkout:
@@ -23,6 +23,7 @@ pixelstudio info sprite.pxa                 # summary: size, palette, animations
 pixelstudio render sprite.pxa -o sprite.png --scale 8 [--frame 2] [--animation walk] [--strip]
 pixelstudio convert sprite.pxa sprite.pxs   # .pxa ⇄ .pxs ⇄ .pixel.json
 pixelstudio pixelize photo.png -o sprite.pxa --colors 16
+pixelstudio rig sprite.pxa                  # drawn layers → parts + auto-rigged skeleton
 pixelstudio export sprite.pxa --sheet -o sheet.png   # or --gif -o anim.gif
 ```
 
@@ -34,11 +35,20 @@ pixelstudio export sprite.pxa --sheet -o sheet.png   # or --gif -o anim.gif
    if you have never written PXA before.
 2. **Plan** the canvas (16×16 icons, 32×32 characters, 48–64 px for detailed sprites), a palette of 4–16
    colours, and the parts. Reuse a part with `USE` instead of drawing the same pixels twice.
+   **Characters, creatures, vehicles and anything that may move are built from rigged parts by default** —
+   even when only a still image was asked for — so the user can pose and animate them in the editor:
+   one `PART` per moving piece (head, torso, each upper/lower arm and leg, tail, weapon, shield, cape), placed
+   with `USE` + `PIVOT` on one layer, then one `BONE` per instance (see the `pixel-studio-animate` skill).
+   Never merge pieces that move separately (e.g. "sword and arm" or "cloak, armour and boots") into one layer.
+   Use `CEL … RASTER` / `SPAN` only for static art: tiles, icons, backgrounds, effects.
 3. **Write** the complete document with `write_project` (or `create_project` and then edit). It validates
    first and returns line-precise errors without touching the file; fix exactly the reported line.
 4. **Render and look**: `render_png` with `scale` 6–10 (and `strip: true` for animations). Actually inspect the
    image: silhouette, contrast, symmetry, stray pixels, frames that pop.
 5. **Iterate** on the PXA text — change only what is wrong — until it reads well at 1× scale.
+   If `validate_pxa`/`write_project` warns "No parts" or "not rigged", fix it: rewrite the pieces as parts, or
+   call `make_parts` (CLI: `pixelstudio rig`) to turn drawn layers into parts and auto-rig them where they
+   touch. Check the bones it reports and rename them (`head`, `arm-l`, `leg-r`…) so templates find the limbs.
 6. **Export** what the user needs: PNG, sprite sheet (+JSON), GIF.
 
 When the user has Pixel Studio Local open, `editor_get_project` returns their current tab and

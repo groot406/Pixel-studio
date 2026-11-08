@@ -11,7 +11,7 @@ import { buildCreationPrompt } from '../src/features/ai/prompt-builder.js';
 import { decodeAIProject } from '../src/formats/pxa.js';
 import {
   loadProject, saveProject, writeBytes, projectSummary, projectToPxa, lintPxa, renderPng, exportProject, writeExport,
-  imageToProject, listPalettePresets, setPalette, applyTemplate, createProject, TEMPLATE_IDS, formatOf,
+  imageToProject, listPalettePresets, setPalette, applyTemplate, makeParts, createProject, TEMPLATE_IDS, formatOf,
 } from './headless.mjs';
 import { callBridge, readBridgeInfo } from './bridge.mjs';
 
@@ -220,6 +220,30 @@ function toolTable() {
         const r = applyTemplate(project, a), out = await ctx.resolve(a.out || a.path);
         await saveProject(out, r.project);
         return [text(`Generated ${a.template} as animation "${r.animationId}" (${r.frameIds.length} frames, facing ${r.facing}) in ${ctx.rel(out)}. Bone roles: ${Object.entries(r.roles).map(([role, id]) => `${role}=${id}`).join(', ')}.`), (await preview(r.project, { animation: r.animationId, strip: true })).content];
+      },
+    },
+    make_parts: {
+      title: 'Make parts and auto-rig',
+      description: 'Turn drawn (RASTER) layers into reusable parts — one placed part per layer, identical drawings shared between frames — and, unless rig is false, auto-rig them into a skeleton: the torso/body (or largest part) becomes the root and every other part is jointed where it touches its neighbour. Pixels stay identical. Use this when a character was drawn as raster layers so it can be posed and animated with apply_template.',
+      inputSchema: {
+        type: 'object', required: ['path'], additionalProperties: false,
+        properties: {
+          path: path('Project file.'), out: outArg,
+          layers: { type: 'array', items: { type: 'string' }, description: 'Layer ids or names to convert. Default: every layer with drawn pixels.' },
+          rig: { type: 'boolean', default: true, description: 'Join the parts into a skeleton.' },
+          animation: { ...animationArg, description: 'Animation whose frame is used to find the joints. Default: first.' }, frame: frameArg,
+        },
+      },
+      run: async (a, ctx) => {
+        const { project } = await ctx.load(a.path);
+        const r = makeParts(project, a), out = await ctx.resolve(a.out || a.path);
+        await saveProject(out, r.project);
+        const lines = [
+          r.converted.length ? `Converted ${r.converted.length} layer${r.converted.length === 1 ? '' : 's'} to parts: ${r.converted.map(c => `${c.instanceId}${c.parts > 1 ? ` (${c.parts} drawings)` : ''}`).join(', ')}.` : 'No drawn layers to convert.',
+          r.attached.length ? `Rigged under root bone "${r.rootBoneId}": ${r.attached.map(b => `${b.bone} → ${b.parent}`).join(', ')}.` : a.rig === false ? 'Not rigged (rig false).' : 'No new bones were needed.',
+          `Saved ${ctx.rel(out)}. Next: apply_template (${TEMPLATE_IDS.slice(0, 4).join(', ')}…) to animate it. Tip: separate layers per limb give finer poses.`,
+        ];
+        return [text(lines.join('\n')), (await preview(r.project)).content];
       },
     },
     set_palette: {

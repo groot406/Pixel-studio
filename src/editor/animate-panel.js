@@ -6,6 +6,7 @@
 import { waveAnimate, spin3d } from '../domain/animate.js';
 import { compositeFrame } from '../domain/project.js';
 import { celObjects } from '../domain/objects.js';
+import { pixelLayers } from '../domain/auto-rig.js';
 import { openMode, closeMotionMode, activeMotionMode } from './motion-modes.js';
 import { toggleRigMode, closeRigMode, rigModeOpen } from './rig-mode.js';
 import { motionAskDialog } from './motion-ask.js';
@@ -36,8 +37,9 @@ function context() {
 
 /** Launchers are enabled whenever the frame has a placed object; the open mode's row is marked. */
 export function renderAnimatePanel() {
-  const { $, state } = d, { objects, primary } = context(), active = activeMotionMode();
+  const { $, state } = d, { objects, primary } = context(), active = activeMotionMode(), drawn = !objects.length && pixelLayers(state.project).length > 0;
   $('animate-hint').textContent = state.inPlaceEdit ? 'Finish editing the object on the canvas to animate it.'
+    : drawn && !rigModeOpen() ? 'Only drawn layers here: open Skeleton and press “Make parts & rig” to make them poseable.'
     : !objects.length ? 'Place a part on the canvas (drag one from Parts) to animate it.'
     : rigModeOpen() ? 'Skeleton mode: work on the canvas; Done or Enter returns here.'
     : primary ? `Animate “${primary.name}”: pick a motion, then work on the canvas.` : 'Pick a motion, then click the object on the canvas.';
@@ -45,7 +47,7 @@ export function renderAnimatePanel() {
   for (const row of ['skeleton', ...Object.keys(MODES), 'wave', 'spin3d']) {
     const button = $(`animate-${row}`), on = row === 'skeleton' ? rigModeOpen() : MODES[row] && active === MODES[row];
     const needsPrimary = row === 'wave' || row === 'spin3d';
-    button.disabled = Boolean(state.inPlaceEdit) || (!objects.length && !(row === 'skeleton' && state.project.bones?.length)) || (needsPrimary && !primary);
+    button.disabled = Boolean(state.inPlaceEdit) || (!objects.length && !(row === 'skeleton' && (state.project.bones?.length || drawn))) || (needsPrimary && !primary);
     button.classList.toggle('active', Boolean(on));
     button.setAttribute('aria-pressed', String(Boolean(on)));
     button.title = needsPrimary && !primary && objects.length ? 'Select an object first' : '';

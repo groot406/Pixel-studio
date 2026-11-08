@@ -74,6 +74,7 @@ Arguments marked * are required. Frames and animations accept an id, a name or a
 | `write_project` | `path`*, `pxa`*, `overwrite`, `preview`, `previewAnimation` | Validates, then saves (`.pxa` verbatim, `.pxs`/`.pixel.json` converted) and returns a preview strip; nothing is written on errors |
 | `render_png` | `path`*, `animation`, `frame`, `strip`, `scale`, `background` (`checker`/`transparent`/`#rrggbb`), `out` | Inline PNG image (and optional file) |
 | `image_to_pixels` | `image`* (PNG), `out`, `colors`, `palette`, `pixelSize`, `maxSize`, `removeBackground`, `name` | Grid-detected, cleaned, quantized pixel project + preview |
+| `make_parts` | `path`*, `out`, `layers` (ids or names), `rig` (default true), `animation`, `frame` | Turn drawn (raster) layers into parts and auto-rig them where they touch, ready for `apply_template` |
 | `apply_template` | `path`*, `template`* (`walk`, `run`, `jump`, `idle`, `wave`, `hover`), `out`, `animation`, `frame`, `rootBone`, `frames`, `frameMs`, `amplitude`, `bounce`, `exaggeration`, `facing`, `mode` (`new`/`replace`/`merge`), `name` | Procedural animation for a rigged (BONE) character + preview strip |
 | `set_palette` | `path`*, `out`, `preset` or `colors`, `remap` | Palette replaced (pixels remapped to the nearest colour by default) |
 | `export` | `path`*, `format`* (`png`, `spritesheet`, `gif`, `apng`, `sequence`), `out`*, `animation`, `frame`, `scale`, `scope`, `layout`, `spacing`, `padding`, `metadata`, `background` | Files written with the editor's exporter (sheets include Aseprite/Godot/Unity metadata) |
@@ -117,6 +118,7 @@ pixelstudio validate sprite.pxa
 pixelstudio render sprite.pxa -o sprite.png [--animation walk] [--frame 2] [--scale 8] [--strip] [--background checker]
 pixelstudio convert sprite.pxa sprite.pixel.json        # .pxa ⇄ .pxs ⇄ .pixel.json; .pxs flattens parts
 pixelstudio pixelize generated.png -o sprite.pxa --colors 16 [--pixel-size 8] [--max-size 128] [--keep-background]
+pixelstudio rig sprite.pxa [-o rigged.pxa] [--layers a,b] [--no-rig]   # drawn layers → parts + auto-rig
 pixelstudio export sprite.pxa --sheet -o sheet.png      # also --gif, --apng, --png, --sequence (zip)
 pixelstudio mcp --root ~/PixelStudio
 pixelstudio skills install [--target claude|copilot|codex|cursor|all] [--project]

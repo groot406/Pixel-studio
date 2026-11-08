@@ -15,6 +15,7 @@ import { renderParts } from '../domain/artwork.js';
 import { closeMotionMode } from './motion-modes.js';
 import { characters } from '../domain/poses.js';
 import { markKinds } from '../domain/timing.js';
+import { pixelLayers, partsAndRig } from '../domain/auto-rig.js';
 import { initRigLibrary, libraryHTML, paintThumbs, libraryAction, libraryChange } from './rig-library.js';
 
 const PINK = '#ff2d87';
@@ -163,13 +164,17 @@ function boneList() {
 function hint() {
   if (st().inPlaceEdit) return 'Finish editing the object on the canvas first.';
   if (r.step === 'rig') return r.child ? `<b>Click ${d.escapeHTML(r.child.name)}’s parent</b> right where they join (the joint), or click it again to cancel.`
-    : bones().length ? '<b>Click a part</b>, then its parent at the joint. Or drag from a part onto its parent.' : '<b>Click a child part</b> (say an upper arm), then click its parent (the body) where they join. Or drag from child to parent.';
+    : bones().length ? '<b>Click a part</b>, then its parent at the joint. Or drag from a part onto its parent.' : pixelLayers(st().project).length ? '<b>Make parts & rig</b> turns drawn layers into parts and joins them for you. Or click a child part, then its parent where they join.' : '<b>Click a child part</b> (say an upper arm), then click its parent (the body) where they join. Or drag from child to parent, or press Auto-rig.';
   if (!bones().length) return 'Rig some parts first.';
   return '<b>Drag a part</b> to bend it at its joint · drag a hand or foot to reach (IK) · drag the root to move the figure.';
 }
+function autoButton() {
+  const drawn = pixelLayers(st().project).length;
+  return button('auto', drawn ? 'Make parts & rig' : 'Auto-rig', { icon: 'bone', title: drawn ? 'Turn drawn layers into parts and join them where they touch (torso or largest part becomes the root)' : 'Join every unrigged part to the part it touches' });
+}
 function controls() {
   if (r.step === 'rig') return `<div class="rig-list">${boneList()}</div>
-    <span class="rig-row">${button('rest', 'Set rest pose', { disabled: !bones().length, title: 'Remember this frame’s pose; Reset returns to it' })}${button('pose', 'Pose', { primary: true, icon: 'ik', disabled: !bones().length })}</span>`;
+    <span class="rig-row">${autoButton()}${button('rest', 'Set rest pose', { disabled: !bones().length, title: 'Remember this frame’s pose; Reset returns to it' })}${button('pose', 'Pose', { primary: true, icon: 'ik', disabled: !bones().length })}</span>`;
   const frames = animation().frames, i = frameIndex(), later = frames.slice(i + 1);
   const rot = bones().length && bones().every(b => !opOf({ layerId: b.layerId, key: b.instanceId }) || opOf({ layerId: b.layerId, key: b.instanceId }).sampling === 'rotsprite');
   const tween = r.tween ? `<div class="rig-tween"><span class="motion-field"><span>To key frame</span><select data-field="tween-to" aria-label="Target key frame">${later.map((f, k) => `<option value="${f.id}"${f.id === r.tween.to ? ' selected' : ''}>Frame ${i + k + 2}</option>`).join('')}</select></span>
@@ -270,6 +275,14 @@ function act(name, el) {
   if (name === 'pose') { Object.assign(r, { step: 'pose', child: null, info: '' }); renderBar(); d.renderAll(); return; }
   if (name === 'prev' || name === 'next') { d.selectFrameAt(frameIndex() + (name === 'prev' ? -1 : 1)); return; }
   if (name === 'key') { d.addFrame(true); return; }
+  if (name === 'auto') {
+    let result;
+    commit(p => (result = partsAndRig(p, { animationId: animation().id, frameId: st().frameId })).project);
+    if (!result) return;
+    const made = result.converted.length, joined = result.attached.length;
+    d.toast(made || joined ? `${made ? `${made} layer${made === 1 ? '' : 's'} turned into parts. ` : ''}${joined ? `${joined} bone${joined === 1 ? '' : 's'} added. Check the joints, then Pose or try a template.` : ''}` : 'Nothing to rig: place parts first.');
+    r.bone = result.rootBoneId || r.bone; renderBar(); d.renderCanvas(); return;
+  }
   if (name === 'rest') return commit(p => setRestPose(p, poseOpts()), 'Rest pose saved: Reset returns here.');
   if (name === 'copy') { clipboard = copyPose(state.project, poseOpts()); renderBar(); d.toast('Pose copied. Go to another frame and Paste.'); return; }
   if (name === 'paste') return commit(p => pastePose(p, { ...poseOpts(), pose: clipboard }).project);

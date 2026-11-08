@@ -68,7 +68,7 @@ const clone = (value) => JSON.parse(JSON.stringify(value));
 const STORAGE_KEY = 'pixel-studio.project.v1';
 const TOOL_NAMES = {pencil:'Pencil',eraser:'Eraser',line:'Line',fill:'Flood fill',replace:'Replace color',eyedropper:'Eyedropper',rectangle:'Rectangle',ellipse:'Ellipse',object:'Select / move objects',select:'Select / move pixels',wand:'Magic wand',resize:'Transform',dither:'Dither brush',shade:'Shade',gradient:'Gradient',curve:'Curve'};
 const TOOL_HINTS = {
-  pencil:'Draw on the active pixel object. Hold Alt to pick a color.',
+  pencil:'Draw on the active pixel object. ⌘/Ctrl- or Alt-click picks a color.',
   eraser:'Erase on the active pixel object. Right-click also erases.',
   line:'Drag a straight line. Hold Shift for 45° steps.',
   fill:'Fill a connected area on the active pixel object.',
@@ -1749,13 +1749,15 @@ function deselectObjectOutside(event) {
 function pointerDown(event) {
   if (event.button !== 0 && event.button !== 2) return;
   if (state.drawing) return;
-  if (state.tool === 'curve' && curvePointerDown(event)) return;
+  // ⌘/Ctrl-click (or Alt) picks a colour with the drawing tools; the object tools keep Ctrl/⌘-click for multi-select.
+  const pick = event.button === 0 && (event.altKey || ((event.metaKey || event.ctrlKey) && (PAINT_TOOLS.includes(state.tool) || state.tool === 'gradient')));
+  if (state.tool === 'curve' && !(pick && (event.metaKey || event.ctrlKey)) && curvePointerDown(event)) return;
   const point = canvasPoint(event);
   if (!inside(point)) { if(event.button===0 && ['object','resize'].includes(state.tool) && !state.inPlaceEdit && state.objectSelection){state.objectSelection=null;renderAll();} return; }
   event.preventDefault();
   $('pixel-canvas').focus({preventScroll:true});
   $('pixel-canvas').setPointerCapture(event.pointerId);
-  const tool = event.altKey ? 'eyedropper' : event.button === 2 && state.tool!=='shade' ? 'eraser' : state.tool;
+  const tool = pick ? 'eyedropper' : event.button === 2 && state.tool!=='shade' ? 'eraser' : state.tool;
   const shade = shadeDirection(event.button === 2);
   state.cursor = point;
   if (tool === 'eyedropper') {

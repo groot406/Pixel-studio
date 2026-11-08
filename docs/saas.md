@@ -124,7 +124,7 @@ fly deploy
 
 Back up the SQLite file, for example with volume snapshots or Litestream.
 
-To try it locally, run `npm run cloud` and open <http://localhost:8080> (the marketing page; the editor is at `/app`). Without `RESEND_API_KEY`, no email is sent: the sign-in link is printed to the terminal, and outside production the sign-in dialog also shows it. AI stays off until `OPENAI_API_KEY` is set, and is only available on Pro.
+To try it locally, run `npm run cloud` (it loads a gitignored `.env` in the repo root if there is one; see `cloud/.env.example`) and open <http://localhost:8080> (the marketing page; the editor is at `/app`). Without `RESEND_API_KEY`, no email is sent: the sign-in link is printed to the terminal, and outside production the sign-in dialog also shows it. AI stays off until `OPENAI_API_KEY` is set, and is only available on Pro.
 
 ## Scaling notes
 

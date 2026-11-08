@@ -13,7 +13,7 @@
   "scripts": {
     "start": "node local/start.mjs --open",
     "dev": "node --watch local/start.mjs --dev",
-    "cloud": "node cloud/start.mjs",
+    "cloud": "node --env-file-if-exists=.env cloud/start.mjs",
     "build": "node scripts/build.mjs",
     "test": "node --test tests/*.test.mjs",
     "check": "node scripts/check.mjs && npm test && npm run build",

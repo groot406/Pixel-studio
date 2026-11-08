@@ -11,7 +11,7 @@ import { buildCreationPrompt } from '../src/features/ai/prompt-builder.js';
 import { decodeAIProject } from '../src/formats/pxa.js';
 import {
   loadProject, saveProject, writeBytes, projectSummary, projectToPxa, lintPxa, renderPng, exportProject, writeExport,
-  imageToProject, listPalettePresets, setPalette, applyTemplate, makeParts, createProject, TEMPLATE_IDS, formatOf,
+  imageToProject, listPalettePresets, setPalette, applyTemplate, makeParts, setOutline, createProject, TEMPLATE_IDS, formatOf,
 } from './headless.mjs';
 import { callBridge, readBridgeInfo } from './bridge.mjs';
 
@@ -243,6 +243,39 @@ function toolTable() {
           r.attached.length ? `Rigged under root bone "${r.rootBoneId}": ${r.attached.map(b => `${b.bone} → ${b.parent}`).join(', ')}.` : a.rig === false ? 'Not rigged (rig false).' : 'No new bones were needed.',
           `Saved ${ctx.rel(out)}. Next: apply_template (${TEMPLATE_IDS.slice(0, 4).join(', ')}…) to animate it. Tip: separate layers per limb give finer poses.`,
         ];
+        return [text(lines.join('\n')), (await preview(r.project)).content];
+      },
+    },
+    outline: {
+      title: 'Live outline / remove baked outline',
+      description: 'Manage outlines without baking them into pixels. live turns on the live outline (drawn around the art whenever a frame is shown or exported, so it stays correct while parts move, rotate or squash); strip removes baked-in outline pixels (outline-coloured pixels on the edges of each layer drawing and part, in every frame). Use strip + live together to convert an outlined sprite before animating it.',
+      inputSchema: {
+        type: 'object', required: ['path'], additionalProperties: false,
+        properties: {
+          path: path('Project file.'), out: outArg,
+          live: { description: 'true (darkest outline colour), false (off), or settings.', anyOf: [{ type: 'boolean' }, { type: 'object', additionalProperties: false, properties: {
+            style: { type: 'string', enum: ['single', 'selective'], description: 'single: one colour; selective: darker shade of each edge colour.' },
+            color: { type: 'integer', minimum: 0, description: 'Palette index (single).' }, mode: { type: 'string', enum: ['outside', 'inside'] },
+            corners: { type: 'boolean', description: 'Include diagonal neighbours.' }, thickness: { type: 'integer', minimum: 1, maximum: 3 },
+            separate: { type: 'boolean', description: 'Outline each layer on its own (lines where layers overlap).' }, skip: { type: 'array', items: { type: 'string' }, description: 'Layer ids left without outline (e.g. background).' },
+          } }] },
+          strip: { description: 'true (detected outline colours) or options.', anyOf: [{ type: 'boolean' }, { type: 'object', additionalProperties: false, properties: {
+            colors: { type: 'array', items: { type: 'integer', minimum: 0 }, description: 'Outline palette indices to remove. Default: detected from the edges.' },
+            passes: { type: 'integer', minimum: 1, maximum: 3, description: 'Baked outline thickness.' }, parts: { type: 'boolean', default: true },
+          } }] },
+          layers: { type: 'array', items: { type: 'string' }, description: 'Layer ids or names to work on. Default: visible unlocked layers (strip) / all layers (live).' },
+        },
+      },
+      run: async (a, ctx) => {
+        const { project } = await ctx.load(a.path);
+        const r = setOutline(project, a), out = await ctx.resolve(a.out || a.path);
+        await saveProject(out, r.project);
+        const o = r.outline;
+        const lines = [
+          a.strip ? `Removed ${r.removed} baked outline pixel${r.removed === 1 ? '' : 's'}${r.parts ? ` (${r.parts} part${r.parts === 1 ? '' : 's'} cleaned)` : ''}.` : null,
+          o ? `Live outline: ${o.style === 'single' ? `colour ${o.color}` : 'selective (auto)'}, ${o.mode}${o.corners ? ', corners' : ''}${o.thickness > 1 ? `, ${o.thickness}px` : ''}${o.separate ? ', per layer' : ''}${o.skip ? `, skips ${o.skip.join(', ')}` : ''}.` : 'Live outline: off.',
+          `Saved ${ctx.rel(out)}.`,
+        ].filter(Boolean);
         return [text(lines.join('\n')), (await preview(r.project)).content];
       },
     },

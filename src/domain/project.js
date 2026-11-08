@@ -1,5 +1,6 @@
 /** Exact, indexed pixel operations. Transparent pixels use index -1. */
 import { artworkId, artworkBudget, validateParts, validateSource, renderParts, renderSource, cloneArtwork } from './artwork.js';
+import { readOutline, compositeWithOutline } from './live-outline.js';
 import { SIZE, MAX_SIZE, MAX_TOTAL_PIXELS, MAX_COLORS, MAX_LAYERS, pixelCount } from './limits.js';
 export { SIZE, MAX_SIZE, MAX_TOTAL_PIXELS, MAX_COLORS, MAX_LAYERS } from './limits.js';
 export { linePoints, rectanglePoints, ellipsePoints } from './geometry.js';
@@ -198,7 +199,8 @@ export function validateProject(input) {
   });
   const bones = input.version === 3 ? readBones(input.bones, layerIds, animations) : [];
   const poses = bones.length ? readPoses(input.poses, bones) : [];
-  return { format: 'pixel-studio', version: input.version === 3 ? 3 : 2, name, width, height, palette, layers, animations, ...(input.version === 3 ? { parts } : {}), ...(bones.length ? { bones } : {}), ...(poses.length ? { poses } : {}) };
+  const outline = readOutline(input.outline, palette.length, layerIds.size ? layerIds : null);
+  return { format: 'pixel-studio', version: input.version === 3 ? 3 : 2, name, width, height, palette, layers, animations, ...(input.version === 3 ? { parts } : {}), ...(bones.length ? { bones } : {}), ...(poses.length ? { poses } : {}), ...(outline ? { outline } : {}) };
 }
 
 const MAX_BONES = 256, BONE_ID = /^[A-Za-z0-9_-]{1,100}$/;
@@ -314,10 +316,18 @@ export function makeLayeredFrame(project, sourceFrame) {
 }
 
 /** Flatten visible layers from bottom to top. The returned array never aliases a cel. */
-export function compositeFrame(project, frame) {
+/**
+ * The visible picture of a frame. The live outline (project.outline) is drawn unless `outline: false` — use that when
+ * the result is written back into the artwork, so the outline is never baked in.
+ */
+export function compositeFrame(project, frame, { outline = true } = {}) {
   const count = pixelCount(project.width, project.height);
-  const pixels = Array(count).fill(-1);
   const animation = project.animations.find(a => a.frames.some(f => f.id === frame.id));
+  if (outline && project.outline) {
+    const layers = getAnimationLayers(project, animation, frame).filter(l => l.visible).map(l => ({ id: l.id, pixels: getLayerPixels(frame, l.id) }));
+    return compositeWithOutline(layers, project.width, project.height, project.palette, project.outline);
+  }
+  const pixels = Array(count).fill(-1);
   for (const layer of getAnimationLayers(project, animation, frame)) {
     if (!layer.visible) continue;
     const cel = getLayerPixels(frame, layer.id);

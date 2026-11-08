@@ -13,7 +13,7 @@ writing PXA.
 ## Tools
 
 Prefer the **Pixel Studio MCP tools** when they are available (`pixel_guide`, `create_project`, `read_project`,
-`validate_pxa`, `write_project`, `render_png`, `image_to_pixels`, `make_parts`, `apply_template`, `set_palette`, `export`,
+`validate_pxa`, `write_project`, `render_png`, `image_to_pixels`, `make_parts`, `outline`, `apply_template`, `set_palette`, `export`,
 and the live `editor_*` tools). If `set_workspace` is listed (the Pixel Studio plugin in Codex, whose server starts
 outside your project), call it first with the absolute path of your working directory so files land in the project.
 Without MCP, use the CLI from the Pixel Studio checkout:
@@ -24,6 +24,7 @@ pixelstudio render sprite.pxa -o sprite.png --scale 8 [--frame 2] [--animation w
 pixelstudio convert sprite.pxa sprite.pxs   # .pxa ⇄ .pxs ⇄ .pixel.json
 pixelstudio pixelize photo.png -o sprite.pxa --colors 16
 pixelstudio rig sprite.pxa                  # drawn layers → parts + auto-rigged skeleton
+pixelstudio outline sprite.pxa --strip --live  # remove baked outlines, use a live one
 pixelstudio export sprite.pxa --sheet -o sheet.png   # or --gif -o anim.gif
 ```
 
@@ -49,6 +50,9 @@ pixelstudio export sprite.pxa --sheet -o sheet.png   # or --gif -o anim.gif
    If `validate_pxa`/`write_project` warns "No parts" or "not rigged", fix it: rewrite the pieces as parts, or
    call `make_parts` (CLI: `pixelstudio rig`) to turn drawn layers into parts and auto-rig them where they
    touch. Check the bones it reports and rename them (`head`, `arm-l`, `leg-r`…) so templates find the limbs.
+   For anything that animates, draw parts **without** an outer outline and add `OUTLINE <dark index>` (or
+   `OUTLINE AUTO`) after the layers: the live outline is recomputed for every frame, so rotated or moved
+   parts never get broken or doubled outlines. `outline` with `strip: true, live: true` fixes existing art.
 6. **Export** what the user needs: PNG, sprite sheet (+JSON), GIF.
 
 When the user has Pixel Studio Local open, `editor_get_project` returns their current tab and

@@ -6,7 +6,7 @@ import { basename, extname, join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
-  exportProject, formatOf, formatSummary, imageToProject, lintPxa, loadProject, makeParts, projectSummary, renderPng, saveProject, writeBytes, writeExport,
+  exportProject, formatOf, formatSummary, imageToProject, lintPxa, loadProject, makeParts, projectSummary, setOutline, renderPng, saveProject, writeBytes, writeExport,
 } from './headless.mjs';
 
 const USAGE = `Pixel Studio CLI
@@ -22,6 +22,9 @@ Usage: pixelstudio <command> [options]
         [--colors 16] [--pixel-size n] [--max-size 128] [--keep-background]
   rig <file> [-o out.pxa]              Turn drawn layers into parts and auto-rig them into a skeleton
         [--layers a,b] [--no-rig] [--animation id] [--frame n]
+  outline <file> [-o out.pxa]          Live outline and baked-outline removal
+        [--live [auto|<colour index>|off]] [--strip] [--colors 0,1] [--passes n] [--layers a,b]
+        [--inside] [--corners] [--separate] [--thickness n]
   export <file> --sheet|--gif|--apng|--png -o <out>
         [--animation id] [--scale n] [--columns n] [--project]
   mcp [--root dir]                     Start the MCP server on stdio (for Claude, Copilot, Cursor, Codex…)
@@ -125,6 +128,22 @@ const commands = {
     if (r.converted.length) say(`Parts: ${r.converted.map(c => `${c.instanceId}${c.parts > 1 ? ` (${c.parts} drawings)` : ''}`).join(', ')}.`);
     if (r.attached.length) say(`Bones: ${r.attached.map(a => `${a.bone} → ${a.parent}`).join(', ')} (root ${r.rootBoneId}).`);
     say(`Wrote ${out}.`);
+  },
+
+  async outline(args) {
+    const { positional, options } = parseArgs(args.map((a, i) => (a === '--live' && !/^(auto|off|\d+)$/.test(args[i + 1] ?? '') ? '--live=on' : a)), ['strip', 'inside', 'corners', 'separate']);
+    const file = need(positional[0], 'project file'), out = options.out || file;
+    if (!options.live && !options.strip) throw new UsageError('Use --live and/or --strip.');
+    const live = !options.live ? undefined : options.live === 'off' ? false : {
+      ...(options.live === 'auto' ? { style: 'selective' } : /^\d+$/.test(options.live) ? { style: 'single', color: Number(options.live) } : {}),
+      mode: options.inside ? 'inside' : 'outside', corners: Boolean(options.corners), separate: Boolean(options.separate), thickness: number(options.thickness, 'thickness') ?? 1,
+    };
+    const strip = options.strip ? { colors: options.colors?.split(',').map(Number), passes: number(options.passes, 'passes') ?? 1 } : undefined;
+    const { project } = await loadProject(file);
+    const r = setOutline(project, { live, strip, layers: options.layers?.split(',').map(s => s.trim()).filter(Boolean) });
+    await saveProject(out, r.project);
+    if (strip) say(`Removed ${r.removed} baked outline pixels${r.parts ? ` (${r.parts} parts cleaned)` : ''}.`);
+    say(`Live outline ${r.outline ? 'on' : 'off'}. Wrote ${out}.`);
   },
 
   async export(args) {

@@ -139,7 +139,7 @@ export const TOURS = [
     { target: '#effect-rimLight', title: 'Light & shade', demo: 'shade', text: 'Inner glow, Rim light (choose where the light comes from) and Auto shade add bevel shading from your palette ramps.' },
     { target: '#effect-cleanup', title: 'Clean up lines', demo: 'corner', text: 'Removes doubled L-shaped corner pixels from 1 px lines; Smooth jaggies anti-aliases edges with palette colours.' },
     { target: '#effect-check', title: 'Pixel cleanup', text: 'Marks stray pixels, doubled corners, jaggies and banding on the canvas, with a Fix for each stray or corner and Fix all safe.' },
-    { target: '#magic-outline', title: 'Outline all frames', demo: 'outline', text: 'Adds one outline around the combined artwork in every frame, from the toolbox.' },
+    { target: '#magic-outline', title: 'Live outline', demo: 'outline', text: 'A live outline that follows every edit and animation frame, plus a cleaner that removes baked-in outlines.' },
   ] },
 ];
 
@@ -186,7 +186,7 @@ export const TIPS = [
   { sel: '#onion-settings', name: 'Onion skin settings', keys: '⇧ O', text: 'How many frames before and after, opacity, tinted or true colour, key poses only, and whether to ghost all layers, this layer or the selected object.' },
   { sel: '#duplicate-frame', name: 'Duplicate frame', keys: 'D', text: 'Copy this frame to keep drawing the next one.' },
   { sel: '#play-toggle', name: 'Play / pause', keys: 'Space', text: 'Start or stop the live preview.' },
-  { sel: '#magic-outline', name: 'Outline all frames', demo: 'outline', text: 'One outline around the combined artwork in every frame.' },
+  { sel: '#magic-outline', name: 'Live outline', demo: 'outline', text: 'A live outline that always follows the artwork; can also strip baked outlines.' },
 ];
 
 /** One-time hints shown the first time a complex feature opens. */

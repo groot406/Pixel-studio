@@ -15,7 +15,8 @@ upper/lower arms, upper/lower legs, tail, weapon. Do this from the start for eve
 (`RASTER`/`SPAN`) layers cannot be posed. If a project was already drawn as raster layers, call `make_parts`
 (CLI: `pixelstudio rig file.pxa`): it turns each layer into a part (identical frames share one) and auto-rigs
 them where they touch, with the torso/body or largest piece as root. It can only bend where layers are split,
-so split arms, legs and props into their own layers or parts first for a fully poseable figure. Draw the parts in the rest pose, facing the camera or to
+so split arms, legs and props into their own layers or parts first for a fully poseable figure. Leave the outer outline off
+the parts and use a live `OUTLINE <index>` line instead (tool `outline`, `strip: true` removes baked outlines) so it stays clean in every pose. Draw the parts in the rest pose, facing the camera or to
 the side, and give each instance a `PIVOT` at its joint (top-centre of a limb, bottom-centre of a head):
 
 ```

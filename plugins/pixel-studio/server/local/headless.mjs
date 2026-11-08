@@ -11,6 +11,7 @@ import { PALETTE_PRESETS } from '../src/domain/palette-presets.js';
 import { replacePalette, usedPaletteIndices } from '../src/domain/palette-theory.js';
 import { TEMPLATES, generateTemplate } from '../src/domain/templates.js';
 import { partsAndRig } from '../src/domain/auto-rig.js';
+import { readOutline, stripOutlines, suggestOutlineColours } from '../src/domain/live-outline.js';
 import { encodeAIProject, decodeAIProject } from '../src/formats/pxa.js';
 import { encodePixelProject, decodePixelProject } from '../src/formats/pxs.js';
 import { encodePng } from '../src/formats/png.js';
@@ -107,6 +108,7 @@ export function projectSummary(project) {
     totalFrames: p.animations.reduce((n, a) => n + a.frames.length, 0),
     bones: (p.bones || []).map(b => ({ id: b.id, name: b.name ?? b.id, parent: b.parent || null, layerId: b.layerId, instanceId: b.instanceId })),
     poses: (p.poses || []).map(pose => ({ id: pose.id, name: pose.name })),
+    outline: p.outline || null,
   };
 }
 
@@ -120,6 +122,7 @@ export function formatSummary(s) {
   for (const a of s.animations) lines.push(`  ${a.index}: ${a.id} "${a.name}" ${a.frames} frame${a.frames === 1 ? '' : 's'} @ ${a.fps} fps, ${a.durationMs} ms`);
   if (s.bones.length) lines.push(`Skeleton: ${s.bones.length} bones (${s.bones.map(b => b.name).join(', ')})`);
   if (s.poses.length) lines.push(`Poses: ${s.poses.map(p => p.name).join(', ')}`);
+  if (s.outline) lines.push(`Live outline: ${s.outline.style === 'single' ? `colour ${s.outline.color}` : 'selective'}, ${s.outline.mode}`);
   return lines.join('\n');
 }
 
@@ -180,6 +183,31 @@ function rigWarnings(project) {
   if (!project.bones?.length && frames.some(f => uses(f).length > 1)) return ['The parts are not rigged: add BONE lines (see the guide), or call make_parts to auto-rig them, so the character can be posed and animated with apply_template.'];
   return [];
 }
+
+/**
+ * Outline settings. strip removes baked-in outline pixels (colors: palette indices, default: detected) from the
+ * layers' drawings and parts; live sets the live outline (an object like project.outline, true for the darkest
+ * removed/detected colour, false to turn it off; omitted keeps it). Returns { project, removed, parts, outline }.
+ */
+export function setOutline(project, { live, strip, layers } = {}) {
+  let p = validateProject(project), removed = 0, parts = 0, colors = [];
+  const layerIds = layers?.length ? layers.map(ref => (p.layers.find(l => l.id === ref || l.name === ref) || (() => { throw new Error(`No layer "${ref}".`); })()).id) : undefined;
+  if (strip) {
+    const opts = strip === true ? {} : strip;
+    colors = opts.colors?.length ? opts.colors : suggestOutlineColours(p, { layerIds });
+    const r = stripOutlines(p, { colors, passes: opts.passes ?? 1, parts: opts.parts !== false, layerIds });
+    p = r.project; removed = r.removed; parts = r.parts;
+  }
+  if (live === false) delete p.outline;
+  else if (live) {
+    const darkest = (colors.length ? colors : suggestOutlineColours(p).concat(p.palette.map((_, i) => i))).reduce((a, b) => lum(p.palette[a]) <= lum(p.palette[b]) ? a : b);
+    const o = live === true ? { style: 'single', color: darkest } : { ...live, ...(live.style !== 'selective' && live.color === undefined ? { color: darkest } : {}) };
+    if (layerIds && !o.skip) o.skip = p.layers.filter(l => !layerIds.includes(l.id)).map(l => l.id);
+    p.outline = readOutline(o, p.palette.length);
+  }
+  return { project: validateProject(p), removed, parts, outline: p.outline || null };
+}
+const lum = hex => parseInt(hex.slice(1, 3), 16) * .299 + parseInt(hex.slice(3, 5), 16) * .587 + parseInt(hex.slice(5, 7), 16) * .114;
 
 /**
  * Turn drawn pixel layers into reusable parts (one placed part per layer, shared between identical frames) and,

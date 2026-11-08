@@ -44,6 +44,7 @@ ORDER layer-id layer-id ... optionally appears once immediately after ANIM, befo
 FRAMEORDER layer-id layer-id ... optionally appears once after FRAME, before CEL. It overrides that frame's bottom-to-top stack with every layer exactly once. Omission uses animation order. FRAME FROM does not inherit frame order.
 BONE id layer-id instance-id PARENT parent-bone-id|- [JOINT x y] [LIMIT min max] [REST degrees] [NAME "name"] rigs a skeleton (after the animations, before END). A bone is one object (instance-id in layer-id, the same object in every frame); its joint is that object's PIVOT, pinned to point JOINT x y of the parent's part (part pixels, decimals allowed, 0.5 = a pixel centre). Omit JOINT to use where the child's pivot sits on the parent in the first frame showing both. A root bone uses PARENT - and no JOINT. LIMIT bounds the angle relative to the parent (a root: its own ROTATE), REST is the relative angle of the rest pose. Posing a rig = ROTATE each part per frame (children keep their joints on the parent); place each child so its PIVOT lies on the parent's joint. Example: BONE torso fig body PARENT -, BONE arm fig arm PARENT torso JOINT 2.5 1.5 LIMIT -120 120.
 POSE id "name" bone-id=degrees ... [MOVE root-bone-id dx dy] saves a named pose in the pose library (after the BONE lines): each bone's angle relative to its parent (a root: its own ROTATE), whole degrees; MOVE offsets a root's pivot from where it stands in its animation's first frame. Poses are not frames: the editor applies them to frames (Skeleton mode → Poses). Example: POSE crouch "Crouch" body=0 leg-l=40 shin-l=-80 leg-r=-40 shin-r=80 MOVE body 0 3.
+OUTLINE color|AUTO [INSIDE] [CORNERS] [THICK 1-3] [SEPARATE] [SKIP layer-id ...] (once, after the LAYER lines) turns on the live outline: drawn around the visible art whenever a frame is shown or exported, never stored in the pixels, so it stays correct when parts move, rotate or squash. color is a palette index; AUTO darkens each edge's own colour (selective outline). INSIDE recolours the art's edge instead of adding pixels; CORNERS includes diagonal neighbours; SEPARATE outlines each layer on its own (lines between overlapping layers); SKIP leaves layers (e.g. a background) unoutlined. With OUTLINE, draw parts and layers without their own outer outline.
 CEL layer-id selects a frame's layer. CEL layer-id CLEAR resets that cel. CEL layer-id RASTER selects raw pixels (an empty or already raster cel); SPAN and SHIFT dx dy are allowed until another CEL. SHIFT translates only the selected raster cel, clips edges and clears exposed pixels. RASTER retains compact pixel deltas without creating shared parts; use it for static art only, since raster cels cannot be posed or rigged (build characters from PART + USE + BONE).
 Limits: canvas/parts 1–256 per dimension; 1–64 colors; 1–32 layers; at most 256 parts; 1–100 animations, 1–256 frames each, 1024 total; 4,194,304 canvas pixel slots across all cels (64 cels of 256×256); same budget for part pixels; 32,768 expanded operations and 33,554,432 rendering work units. FPS 1–60; duration 1–60000 ms. Names: project 120, layer/animation 80 characters. Text 4 MiB; line 4096 characters. END is required. Preserve hidden artwork and deliberate blank frames.`;
 
@@ -230,6 +231,9 @@ export function decodePXA2(text) {
         const layer=project.layers.find(l=>l.id===t[1]);
         if (!layer || !['ROOT','GROUP'].includes(t[2]) || layer.group !== undefined) throw new Error('STACK needs a declared layer ID once, and ROOT or GROUP.');
         layer.group=t[2]==='GROUP';
+      } else if (cmd === 'OUTLINE') {
+        if (!project.layers.length || animation || project.outline) throw new Error('Declare OUTLINE once, after the layers and before the animations.');
+        project.outline = outlineDeclaration(t);
       } else if (cmd === 'PART') {
         if (!project.layers.length || animation) throw new Error('Declare parts after layers and before animations.');
         part = partDeclaration(t, project.parts); expandedOps += part.ops.length;
@@ -313,6 +317,20 @@ export function decodePXA2(text) {
   }
   if (part) throw new Error('Missing ENDPART.');
   return bones.length ? rigBones(validateProject(project), bones, poses) : validateProject(project);
+}
+function outlineDeclaration(t) {
+  if (t.length < 2) throw new Error('OUTLINE needs a colour index or AUTO.');
+  const o = t[1] === 'AUTO' ? { style: 'selective' } : { style: 'single', color: numberToken(t[1]) };
+  for (let i = 2; i < t.length;) {
+    const key = t[i];
+    if (key === 'INSIDE') { o.mode = 'inside'; i++; }
+    else if (key === 'CORNERS') { o.corners = true; i++; }
+    else if (key === 'SEPARATE') { o.separate = true; i++; }
+    else if (key === 'THICK') { o.thickness = numberToken(t[i + 1]); i += 2; }
+    else if (key === 'SKIP') { o.skip = t.slice(i + 1).map(artworkId); if (!o.skip.length) throw new Error('SKIP needs layer IDs.'); i = t.length; }
+    else throw new Error(`Unknown OUTLINE option ${key}.`);
+  }
+  return o;
 }
 function poseDeclaration(t) {
   if (t.length < 4) throw new Error('POSE needs id "name" and bone-id=degrees.');
@@ -414,6 +432,7 @@ export function encodePXA2(input) {
   const lines = ['PXA 2', `SIZE ${p.width} ${p.height}`, `NAME ${q(p.name)}`, `PAL ${p.palette.join(' ')}`];
   for (const l of p.layers) lines.push(`LAYER ${l.id} ${q(l.name)} ${+l.visible} ${+l.locked}`);
   for (const l of p.layers) if(l.group !== undefined) lines.push(`STACK ${l.id} ${l.group?'GROUP':'ROOT'}`);
+  if (p.outline) { const o = p.outline; lines.push(`OUTLINE ${o.style === 'single' ? o.color : 'AUTO'}${o.mode === 'inside' ? ' INSIDE' : ''}${o.corners ? ' CORNERS' : ''}${o.thickness > 1 ? ` THICK ${o.thickness}` : ''}${o.separate ? ' SEPARATE' : ''}${o.skip?.length ? ` SKIP ${o.skip.join(' ')}` : ''}`); }
   for (const part of p.parts || []) lines.push(`PART ${part.id} ${part.width} ${part.height}`, ...part.ops.map(encodeOperation), 'ENDPART');
   let previous;
   for (const a of p.animations) {

@@ -42,7 +42,7 @@ test('MCP handshake lists tools, resources and prompts', async t => {
   assert.deepEqual((await rpc('ping')).result, {});
   const { tools } = (await rpc('tools/list')).result;
   const names = tools.map(tool => tool.name);
-  for (const name of ['pixel_guide', 'create_project', 'project_info', 'read_project', 'write_project', 'render_png', 'image_to_pixels', 'apply_template', 'set_palette', 'export', 'list_palette_presets', 'editor_status', 'editor_get_project', 'editor_apply_project', 'editor_open_file']) assert.ok(names.includes(name), name);
+  for (const name of ['pixel_guide', 'create_project', 'project_info', 'read_project', 'write_project', 'render_png', 'image_to_pixels', 'make_parts', 'outline', 'apply_template', 'set_palette', 'export', 'list_palette_presets', 'editor_status', 'editor_get_project', 'editor_apply_project', 'editor_open_file']) assert.ok(names.includes(name), name);
   for (const tool of tools) assert.equal(tool.inputSchema.type, 'object', tool.name);
   const guide = (await rpc('resources/read', { uri: 'pixelstudio://guide/pxa2' })).result.contents[0];
   assert.match(guide.text, /^PXA 2: uppercase commands/);

@@ -33,6 +33,7 @@ import { initObjectPose, renderObjectPose, renderPivotMarker } from './object-po
 import { initAnimatePanel, renderAnimatePanel } from './animate-panel.js';
 import { initMotionAsk, motionAskDialog } from './motion-ask.js';
 import { initMotionModes, syncMotionMode, drawMotionOverlay } from './motion-modes.js';
+import { initOutlineDialog, renderOutlineButton } from './outline-dialog.js';
 import { initRigMode, syncRigMode, drawRigOverlay, toggleRigMode } from './rig-mode.js';
 import { initTimeline, renderFrameCards, frameAction, timelineKey, nextPreviewIndex, loopLabel } from './timeline.js';
 import { initOnion, drawOnion, onionSummary } from './onion.js';
@@ -1275,7 +1276,7 @@ function renderAll() {
   syncMotionMode();
   syncRigMode();
   if (document.activeElement !== $('project-name')) $('project-name').value = state.project.name;
-  renderProjectTabs();renderPanelState();renderTools(); renderPalette(); renderTimeline(); renderAnimations(); renderLayers(); renderSelection(); renderCanvas(); renderPreview(); renderPlaybackControls();renderInPlaceControls();renderEditScope();renderAnimatePanel();renderEffectsPanel();renderPluginPanel();
+  renderProjectTabs();renderPanelState();renderTools(); renderPalette(); renderTimeline(); renderAnimations(); renderLayers(); renderSelection(); renderCanvas(); renderPreview(); renderPlaybackControls();renderInPlaceControls();renderEditScope();renderAnimatePanel();renderEffectsPanel();renderPluginPanel();renderOutlineButton();
 }
 /**
  * The edit scope switch in the canvas toolbar. Normally it chooses between every frame of the current
@@ -1513,7 +1514,7 @@ function magicOutlineDialog() {
     event.preventDefault();
     const color=Number($('outline-color').value),thickness=Number($('outline-thickness').value),diagonal=$('outline-corners').value==='8';
     const outlined=[];
-    forEachFrame(frame=>outlined.push({frame,pixels:outlinePixels(compositeFrame(state.project,frame),state.project.width,state.project.height,color,thickness,diagonal)}));
+    forEachFrame(frame=>outlined.push({frame,pixels:outlinePixels(compositeFrame(state.project,frame,{outline:false}),state.project.width,state.project.height,color,thickness,diagonal)}));
     if (!outlined.some(item=>item.pixels.some(pixel=>pixel>=0))) { toast('No room for an outline. Add some canvas space around your visible artwork.'); return; }
     mutate(()=>{
       const layer=insertLayer('Magic outline');
@@ -2467,7 +2468,7 @@ function bindEvents() {
   bindFileDrop();
   const mathsDeps={state,$,icon,escapeHTML,mutate,snapshot,remember,versionBefore,renderAll,renderCanvas,renderPreview,renderTools,toast,openDialog,paintSprite,finishDrawing,drawPoints,
     currentAnimation,currentFrame,currentLayer,selectedObject,selectedItems,transformItems,resizableObject,objectTarget,canEditPixels,canvasPixels,canvasPosition,normalizeSelection,selectObject,selectFrameAt,addFrame,undo:()=>restore(state.undo,state.redo)};
-  initToolExtras(mathsDeps);initObjectPose(mathsDeps);initMotionModes(mathsDeps);initRigMode(mathsDeps);initAnimatePanel(mathsDeps);initMotionAsk(mathsDeps);initTimeline(mathsDeps);initOnion(mathsDeps);initEffectsPanel(mathsDeps);initPaletteTools(mathsDeps);initPaletteStudio(mathsDeps);
+  initToolExtras(mathsDeps);initObjectPose(mathsDeps);initMotionModes(mathsDeps);initRigMode(mathsDeps);initAnimatePanel(mathsDeps);initMotionAsk(mathsDeps);initTimeline(mathsDeps);initOnion(mathsDeps);initEffectsPanel(mathsDeps);initPaletteTools(mathsDeps);initPaletteStudio(mathsDeps);initOutlineDialog(mathsDeps,{bake:magicOutlineDialog});
   initAiImage({...mathsDeps,replaceProject,insertLayer,canAddFrame,canAddLayer,decodeImage,imageRgba});
   const pluginDeps={...mathsDeps,openPluginManager:tab=>openPluginManager(tab),openPromptBuilder:promptBuilderDialog};
   initPluginManager(pluginDeps);initPlugins(pluginDeps);initCommandPalette(pluginDeps);
@@ -2596,7 +2597,6 @@ function bindEvents() {
   $('add-pixel-object').onclick=()=>addObject(false);
   $('add-object-group').onclick=()=>addObject(true);
   $('outline-objects').onclick=magicOutlineDialog;
-  $('magic-outline').onclick = magicOutlineDialog;
   $('clear-selection').onclick = clearSelectionPixels;
   $('deselect-selection').onclick = deselectPixels;
   $('play-toggle').onclick = togglePlay;

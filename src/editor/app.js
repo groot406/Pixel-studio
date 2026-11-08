@@ -50,6 +50,7 @@ import { initHelpCenter, openHelpCenter } from './help-center.js';
 import { initPlugins, renderPluginPanel, pluginRegistry } from '../plugins/editor.js';
 import { initPluginManager, openPluginManager } from '../plugins/manager-dialog.js';
 import { initCommandPalette } from '../plugins/command-palette.js';
+import { initAssistant, renderAssistant } from './assistant-panel.js';
 import { initEditorBridge } from '../bridge/editor-bridge.js';
 import { initVersions, versionsDialog, saveVersion, versionBefore, noteChange, autoSnapshot } from './versions-dialog.js';
 
@@ -207,7 +208,7 @@ function activateDocument(id) {
   for (const key of ['project','animationId','frameId','layerId','objectSelection','undo','redo','selection','scale','fit','color','previewIndex']) state[key]=document[key];
   state.cursor=null; state.drawing=null; state.swap=false; state.swapFirst=null; state.previewTime=0;
   state.transformScope=state.selection?'selection':'frame';
-  normalizeSelection(); renderAll(); renderSaveStatus();
+  normalizeSelection(); renderAll(); renderSaveStatus(); renderAssistant();
   requestAnimationFrame(fitCanvas);
 }
 function switchDocument(id) {
@@ -2472,6 +2473,7 @@ function bindEvents() {
   initAiImage({...mathsDeps,replaceProject,insertLayer,canAddFrame,canAddLayer,decodeImage,imageRgba});
   const pluginDeps={...mathsDeps,openPluginManager:tab=>openPluginManager(tab),openPromptBuilder:promptBuilderDialog};
   initPluginManager(pluginDeps);initPlugins(pluginDeps);initCommandPalette(pluginDeps);
+  initAssistant({...mathsDeps,replaceProject});
   // Holding Shift previews the straight line a pencil or eraser click will draw.
   const trackShift=event=>{if(state.shiftHeld!==event.shiftKey){state.shiftHeld=event.shiftKey;if(state.cursor)renderCanvas();}};
   window.addEventListener('keydown',trackShift);window.addEventListener('keyup',trackShift);

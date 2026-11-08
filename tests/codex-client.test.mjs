@@ -17,6 +17,12 @@ test('Codex adapter supports palette output instead of forcing a full PXA docume
   assert.equal(result.model, 'test-model');
 });
 
+test('assistant prompts get assistant instructions instead of the data-only ones', async t => {
+  const result = await client(t).edit({ prompt: 'PXACHAT 1\nWhat is in this project?' });
+  assert.match(result.text, /Pixel Studio assistant/);
+  assert.doesNotMatch(result.text, /pixel-art data editor/);
+});
+
 test('API-key authentication is reported without generating', async t => {
   const connection = client(t, 'apikey');
   assert.equal((await connection.getStatus()).connected, false);

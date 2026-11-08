@@ -67,6 +67,12 @@ node local/start.mjs --port 4318 --open
 
 Tests bind temporary loopback ports and use a fake Codex process. They do not contact OpenAI or consume model allowance. `dist/` is generated and ignored by Git; edit `src/` and `public/` instead. The build copies browser-native modules without bundling or altering artwork/assets.
 
+## Assistant (chat)
+
+Click **Assistant** (or press **⌘/Ctrl J**) to open a floating chat you can drag and resize. Ask about the open project ("which animations are there?") or tell it what to do: rig the sprite into parts and add a walk cycle, make a new animation, fix outlines with the live outline, swap the palette, run any editor command (the same ones as the command palette), or draw something new in a new tab. It works in steps. It reads the project, acts, looks at the rendered result and corrects itself, showing each step as it goes. Every change is a normal Undo step, and **Undo these changes** reverts a whole reply. A version is saved before each request. **Stop** cancels.
+
+Pixel Studio Local uses your Codex / ChatGPT sign-in (pick the model in the panel settings). The hosted edition asks for an OpenAI API key, which stays in this browser and can optionally be remembered. Tick *Show the assistant the current frame* to send a picture with each message (on by default; needs an image-capable model).
+
 ## AI editing
 
 Drawing works without Codex. On macOS, Pixel Studio uses the Codex runtime bundled with `/Applications/ChatGPT.app` when available, keeping its model list in sync with the desktop app. Otherwise it uses the `codex` CLI on your PATH. Sign in with ChatGPT through the desktop app or CLI:
@@ -251,6 +257,7 @@ src/
   formats/        PXA text, PXS binary, spritesheets, PNG/APNG, GIF, ZIP and export metadata
   storage/        IndexedDB workspace and memory fallback
   features/ai/    Prompt creation, edit validation, patch engine, review dialog
+  features/assistant/ In-app assistant: agent loop, editor tools and model providers (panel: editor/assistant-panel.js)
   plugins/        Plugin manifest/result validation, worker sandbox, registry, manager dialog, command palette
   editor/app.js   Editor state, DOM wiring, rendering, history and save ordering
   editor/*.js     Panels and tools wired from app.js (objects, parts, maths tools, tours & help…)

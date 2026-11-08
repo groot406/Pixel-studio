@@ -28,6 +28,15 @@ function builtIns() {
   return out;
 }
 
+/** Every command the palette offers: the editor's own buttons plus plugin effects and commands. Also used by the assistant. */
+export function commandItems() {
+  return [
+    ...builtIns(),
+    { key: 'plugins-manager', title: 'Plugins & skills', description: 'Install, enable and write plugins', group: 'App', disabled: '', run: () => d.openPluginManager() },
+    ...pluginPaletteCommands().map(c => ({ ...c, group: 'Plugin' })),
+  ];
+}
+
 export function initCommandPalette(deps) {
   d = deps;
   window.addEventListener('keydown', event => {
@@ -48,11 +57,7 @@ export function openCommandPalette() {
     dialog.addEventListener('click', event => { if (event.target === dialog) dialog.close(); });
   }
   const input = dialog.querySelector('input'), list = dialog.querySelector('ul');
-  const items = [
-    ...builtIns(),
-    { key: 'plugins-manager', title: 'Plugins & skills', description: 'Install, enable and write plugins', group: 'App', disabled: '', run: () => d.openPluginManager() },
-    ...pluginPaletteCommands().map(c => ({ ...c, group: 'Plugin' })),
-  ];
+  const items = commandItems();
   let shown = [], active = 0;
   const draw = () => {
     const q = input.value.trim().toLowerCase().split(/\s+/).filter(Boolean);

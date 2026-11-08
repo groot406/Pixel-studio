@@ -20,5 +20,8 @@ export function readPreviewImages(images = []) {
 export function isPixelPrompt(prompt) {
   return typeof prompt === 'string' && prompt.trim().length > 0
     && Buffer.byteLength(prompt) <= MAX_PROMPT_BYTES
-    && /\b(?:PXA [12]|PXAPATCH 2|PXAINPAINT 1|PXAPALETTE 1|PXAMOTION 1)\b/.test(prompt);
+    && /\b(?:PXA [12]|PXAPATCH 2|PXAINPAINT 1|PXAPALETTE 1|PXAMOTION 1|PXACHAT 1)\b/.test(prompt);
 }
+
+/** The in-app assistant's prompts start with this line; they get assistant instructions instead of the data-only ones. */
+export const isAssistantPrompt = prompt => /^PXACHAT 1\b/.test(prompt);

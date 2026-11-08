@@ -18,6 +18,7 @@ import { encodePng } from '../formats/png.js';
 let d;
 const KEY_STORE = 'pixel-studio.image-keys';
 const memoryKeys = {};
+export const hasStoredKey = provider => !!storedKeys()[provider];
 const prefs = {
   subject: '', size: 32, view: 'side', style: 'snes', outline: true, usePalette: false, background: 'magenta', frames: 1,
   reference: false, provider: '', models: {}, n: 2, quality: 'low', sizing: 'auto', colors: '16', dither: false, removeBg: true, destination: 'project',
@@ -31,8 +32,9 @@ export function initAiImage(deps) { d = deps; }
 function storedKeys() {
   try { const value = JSON.parse(localStorage.getItem(KEY_STORE) || '{}'); return value && typeof value === 'object' ? value : {}; } catch { return {}; }
 }
-function keyFor(provider) { return memoryKeys[provider] || storedKeys()[provider] || ''; }
-function rememberKey(provider, key, remember) {
+/** API keys are shared with the assistant (OpenAI). */
+export function keyFor(provider) { return memoryKeys[provider] || storedKeys()[provider] || ''; }
+export function rememberKey(provider, key, remember) {
   memoryKeys[provider] = key;
   const stored = storedKeys();
   if (remember && key) stored[provider] = key; else delete stored[provider];

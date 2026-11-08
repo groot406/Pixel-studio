@@ -44,6 +44,7 @@ export const SHORTCUTS = [
   { keys: '⇧ + click', action: 'Straight pencil / eraser line from the last point; add objects to the selection', group: 'editing' },
   { keys: '⇧ + drag', action: 'Square, circle or 45° line', group: 'editing' },
   { keys: '⌘/Ctrl + K', action: 'Command palette: search actions and plugin commands', group: 'editing' },
+  { keys: '⌘/Ctrl + J', action: 'Assistant: ask about or change the project in chat', group: 'editing' },
   { keys: '← / →', action: 'Previous / next frame', group: 'frames' },
   { keys: 'D', action: 'Duplicate frame (all selected frames)', group: 'frames' },
   { keys: 'M', action: 'Mark frame: key → breakdown → in-between → none', group: 'frames' },

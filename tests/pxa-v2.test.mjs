@@ -47,7 +47,7 @@ test('paint commits local overrides and shared part edits survive reload', () =>
 test('v2 rejects incomplete, ambiguous and excessive input before use', () => {
   for (const [from,to] of [
     ['END\n',''], ['USE glint star','USE glint missing'], ['AT glint 7 4','AT missing 7 4'],
-    ['SPAN 2 2 2','SPAN 4 2 2{200}'], ['PART star 5 5','PART star 257 5'],
+    ['SPAN 2 2 2','SPAN 4 2 2{200}'], ['PART star 5 5','PART star 2049 5'],
     ['FRAME f1 125 FROM f0','FRAME f1 125 FROM f1'], ['LAYER back','LAYER effects'],
     ['SPAN 2 2 2','USE recursive star 0 0'], ['FRAME f1','FRAME f0'],
     ['RECT 0 2 5 1 1','RECT 0 2 6 1 1'], ['PAL #111111','PAL nope'],

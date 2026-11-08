@@ -1,0 +1,130 @@
+/* Phone layout: the canvas fills the screen; the sidebars open as bottom sheets from a dock. See mobile-layout.js. */
+.mobile-dock, .mobile-sheet-head { display: none; }
+
+@media (max-width: 760px) {
+  :root { --dock-h: calc(58px + env(safe-area-inset-bottom, 0px)); --mobile-top: 98px; }
+  body { padding-bottom: var(--dock-h); overflow: hidden; }
+
+  /* One-row header: logo mark, project name with a save dot, icon actions that scroll if they must. */
+  .app-header, .app-header:has(.header-actions) { display: flex; position: relative; align-items: center; gap: 8px; height: 54px; min-height: 0; padding: 0 8px 0 12px; }
+  .brand { flex: 0 0 auto; }
+  .brand > span:last-child { display: none; }
+  .project-info { display: flex; flex: 1 1 0; align-items: center; gap: 6px; min-width: 0; padding: 0; border: 0; }
+  #project-name { flex: 1 1 auto; max-width: none; min-width: 0; font-size: 14px; line-height: 22px; }
+  .save-status { flex: 0 0 auto; width: 18px; height: 18px; margin: 0; padding: 0; justify-content: center; overflow: hidden; font-size: 0; color: transparent; white-space: nowrap; }
+  .save-status[data-state="error"] { color: transparent; }
+  .save-status i { flex: 0 0 7px; width: 7px; height: 7px; }
+  .header-actions { flex: 0 1 auto; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+  .header-actions::-webkit-scrollbar { display: none; }
+  .header-actions > .icon-button { display: none; }
+  .header-actions .button { flex: 0 0 auto; width: 36px; min-height: 36px; padding: 8px; border-color: transparent; }
+  .header-actions .button.primary { border-color: var(--green); }
+  .app-header .header-actions .button, .header-actions #prompt-builder-button, .header-actions #ai-edit-button { position: static; width: 36px; min-height: 36px; padding: 8px; }
+  .app-header .header-actions .button span, .header-actions #prompt-builder-button span, .header-actions #ai-edit-button span { display: none; }
+  .app-header .header-actions .button svg { width: 18px; height: 18px; }
+  .header-actions #new-project, .header-actions #prompt-builder-button { display: none; }
+
+  /* Tab bar: tabs get the room; sidebar toggles are replaced by the dock. */
+  .project-tabs-bar { height: 44px; gap: 2px; padding: 0 6px; }
+  .project-tabs-bar .panel-toggle#toggle-tools-panel, .project-tabs-bar .panel-toggle#toggle-details-panel { display: none; }
+  .project-tabs-bar .button > span:not(.sr-only) { display: none; }
+  .project-tabs-bar .panel-toggle, .project-tabs-bar .saved-projects-button, .project-tabs-bar .view-button { flex: 0 0 auto; width: 36px; min-height: 36px; padding: 9px; }
+  .project-tabs-bar #new-project-tab { flex-basis: 34px; width: 34px; height: 36px; }
+  .project-tab { min-width: 0; max-width: 200px; }
+  .project-tab-select { max-width: 150px; height: 36px; font-size: 12px; }
+  .project-tab-close { flex-basis: 30px; width: 30px; height: 34px; }
+
+  /* The editor is an app screen, not a long page. */
+  .workbench, .workbench.tools-collapsed, .workbench.details-collapsed { display: flex; flex-direction: column; height: calc(100dvh - var(--mobile-top) - var(--dock-h)); min-height: 0; }
+  .editor-column { order: 0; flex: 1 1 auto; height: auto; min-height: 0; grid-template-rows: minmax(0, 1fr) auto; }
+  .workbench .timeline { max-height: 40dvh; }
+  .workbench:not(.timeline-collapsed) .timeline { height: min(196px, 32dvh); }
+  .panel-splitter { display: none !important; }
+  .workbench.timeline-collapsed .timeline { padding: 6px 8px; }
+  .workbench.timeline-collapsed .timeline-heading { gap: 6px; }
+  .workbench.timeline-collapsed .timeline-title h2 { font-size: 0; }
+  .workbench.timeline-collapsed .timeline-title h2 .count-badge { font-size: 11px; }
+  .workbench.timeline-collapsed .timeline-mini { flex: 1 1 auto; min-width: 0; }
+  .workbench.timeline-collapsed #add-frame { width: 40px; min-height: 40px; padding: 10px; font-size: 0; }
+  .workbench.timeline-collapsed #add-frame svg { width: 18px; height: 18px; }
+
+  /* Canvas toolbar fits one row: icon-only edit switch, options scroll. */
+  .canvas-toolbar { gap: 6px; height: 46px; flex-basis: 46px; padding: 0 8px; }
+  .canvas-title { flex: 0 0 auto; font-size: 0; gap: 0; }
+  .canvas-title .dimension-badge { font-size: 10px; }
+  .edit-scope { flex: 0 0 auto; padding: 2px; }
+  .edit-scope-copy { display: none; }
+  .edit-scope-option { height: 32px; padding: 0 8px; }
+  .canvas-options > :first-child { margin-left: auto; }
+  .canvas-options { flex: 1 1 auto; justify-content: flex-start; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+  .canvas-options::-webkit-scrollbar { display: none; }
+  .canvas-options > * { flex: 0 0 auto; }
+  .canvas-options .icon-button { width: 32px; height: 34px; padding: 7px; }
+  .canvas-options .onion-caret { width: 18px; padding: 7px 2px; }
+  .canvas-options .toolbar-divider { margin: 0 2px; }
+  .canvas-stage { min-height: 0; padding: 18px; }
+  .canvas-bottom { height: 36px; padding: 0 8px; }
+  .canvas-coordinates .status-separator, .canvas-coordinates #cursor-position { display: none; }
+
+  /* Sidebars only appear as a sheet above the dock. */
+  .workbench > .left-panel, .workbench > .right-panel { display: none; }
+  .workbench > aside.mobile-sheet {
+    position: fixed; z-index: 40; right: 0; bottom: var(--dock-h); left: 0; order: 9;
+    display: block; max-height: min(62dvh, 560px); overflow: auto; overscroll-behavior: contain;
+    padding: 0 14px 16px; border: 0; border-top: 1px solid var(--line); border-radius: 16px 16px 0 0;
+    background: var(--paper); box-shadow: 0 -10px 30px #2a3a2224;
+    animation: mobile-sheet-in .18s ease-out;
+  }
+  .workbench > aside.mobile-sheet > :not(.mobile-show):not(.mobile-sheet-head) { display: none !important; }
+  .workbench > aside.mobile-sheet > .mobile-show { display: block !important; margin-top: 0; padding-top: 0; }
+  .workbench > aside.mobile-sheet > .mobile-show + .mobile-show { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+  .mobile-sheet-head {
+    position: sticky; z-index: 2; top: 0; display: flex; align-items: center; gap: 8px; margin: 0 -14px 4px; padding: 14px 10px 4px 16px;
+    background: var(--paper);
+  }
+  .mobile-sheet-head strong { flex: 1 1 auto; font-size: 14px; }
+  .mobile-sheet-head .icon-button { width: 36px; height: 36px; padding: 9px; }
+  .mobile-sheet-grip { position: absolute; top: 5px; left: 50%; width: 38px; height: 4px; margin-left: -19px; border-radius: 2px; background: #cfd8c8; }
+  @keyframes mobile-sheet-in { from { transform: translateY(24px); opacity: .4; } }
+  @media (prefers-reduced-motion: reduce) { .workbench > aside.mobile-sheet { animation: none; } }
+
+  /* Bottom dock. */
+  .mobile-dock {
+    position: fixed; z-index: 41; right: 0; bottom: 0; left: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
+    height: var(--dock-h); padding: 0 4px env(safe-area-inset-bottom, 0px); border-top: 1px solid var(--line); background: #fafbf7;
+  }
+  .mobile-dock button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-width: 0; margin: 4px 2px; padding: 0; border: 0; border-radius: 10px; background: transparent; color: #5e6f55; font: inherit; font-size: 11px; font-weight: 600; }
+  .mobile-dock button.active { background: #e4eddb; color: var(--green); }
+  .mobile-dock svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  .dock-tool { display: inline-flex; width: 22px; height: 22px; }
+  .dock-swatch { width: 22px; height: 22px; border: 2px solid #fff; border-radius: 6px; background: var(--swatch, transparent); box-shadow: 0 0 0 1px #9aa792; }
+  .dock-swatch.transparent { background: repeating-conic-gradient(#d6dccf 0 25%, #fff 0 50%) 0 0 / 8px 8px; }
+
+  /* Floating things that sat on the canvas must clear the dock. */
+  .toast { bottom: calc(var(--dock-h) + 12px); }
+}
+
+@media (max-width: 370px) {
+  .header-actions .button { width: 32px; padding: 7px; }
+  .mobile-dock button { font-size: 10px; }
+}
+
+/* Tablets and narrow windows keep the sidebars but compact the header and canvas toolbar. */
+@media (min-width: 761px) and (max-width: 1000px) {
+  .app-header { grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 14px; padding: 0 14px; }
+  .brand small, .brand > span:last-child { display: none; }
+  .project-info { padding-left: 14px; }
+  .header-actions { gap: 5px; }
+  .header-actions .button:not(.primary) { width: 36px; padding: 8px; }
+  .header-actions .button:not(.primary) span { display: none; }
+  .canvas-toolbar { gap: 6px; padding: 0 10px; }
+  .canvas-title { font-size: 0; }
+  .canvas-title .dimension-badge { font-size: 10px; }
+  .edit-scope { flex: 0 0 auto; }
+  .edit-scope-copy { display: none; }
+  .edit-scope-option { padding: 0 8px; }
+  .canvas-options { flex: 1 1 auto; justify-content: flex-start; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+  .canvas-options > :first-child { margin-left: auto; }
+  .canvas-options > * { flex: 0 0 auto; }
+  .canvas-options .icon-button { width: 30px; padding: 7px; }
+}

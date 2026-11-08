@@ -21,7 +21,8 @@
  * frame count, bottom to top. Cel storage remains in project declaration order.
  * Writers retain schema 2 when no animation has an explicit layer order.
  * Schema 4 also stores layer-count u8 indices after each frame duration for
- * frame-specific order. Object/group structure is baked into raster cels.
+ * frame-specific order. Schema 5 is schema 4 with u16 width and height (canvases wider or taller than 256).
+ * Object/group structure is baked into raster cels.
  */
 import {
   MAX_COLORS, MAX_SIZE, MAX_LAYERS, MAX_TOTAL_PIXELS,
@@ -156,10 +157,11 @@ class Reader {
 
 function encodePayload(project) {
   const writer = new Writer();
-  const schema = project.animations.some(a=>a.frames.some(f=>f.layerOrder)) ? 4 : project.animations.some(animation => animation.layerOrder) ? 3 : 2;
+  const big = project.width > 256 || project.height > 256;
+  const schema = big ? 5 : project.animations.some(a=>a.frames.some(f=>f.layerOrder)) ? 4 : project.animations.some(animation => animation.layerOrder) ? 3 : 2;
   writer.u8(schema);
-  writer.u8(project.width & 255);
-  writer.u8(project.height & 255);
+  if (big) { writer.u16(project.width); writer.u16(project.height); }
+  else { writer.u8(project.width & 255); writer.u8(project.height & 255); }
   writer.u8(project.palette.length);
   writer.u8(project.layers.length);
   writer.u8(project.animations.length);
@@ -186,7 +188,7 @@ function encodePayload(project) {
     for (const frame of animation.frames) {
       writer.string(frame.id, 100, 'Frame ID');
       writer.u16(frame.duration);
-      if(schema===4)for(const layer of getAnimationLayers(project,animation,frame))writer.u8(project.layers.indexOf(layer));
+      if(schema>=4)for(const layer of getAnimationLayers(project,animation,frame))writer.u8(project.layers.indexOf(layer));
       for (const layer of project.layers) writer.pixels(getLayerPixels(frame, layer.id));
     }
   }
@@ -196,9 +198,9 @@ function encodePayload(project) {
 function decodePayload(bytes) {
   const reader = new Reader(bytes);
   const schema = reader.u8();
-  if (![2, 3, 4].includes(schema)) invalid('This pixel file uses an unsupported payload schema. Expected version 2, 3 or 4.');
-  const width = reader.u8() || 256;
-  const height = reader.u8() || 256;
+  if (![2, 3, 4, 5].includes(schema)) invalid('This pixel file uses an unsupported payload schema. Expected version 2, 3, 4 or 5.');
+  const width = schema === 5 ? reader.u16() : reader.u8() || 256;
+  const height = schema === 5 ? reader.u16() : reader.u8() || 256;
   if (width < 1 || height < 1 || width > MAX_SIZE || height > MAX_SIZE) {
     invalid(`Pixel file dimensions must be from 1 to ${MAX_SIZE} pixels.`);
   }
@@ -255,7 +257,7 @@ function decodePayload(bytes) {
       const duration = reader.u16();
       if (duration < 1 || duration > 60000) invalid('A frame duration must be from 1 to 60,000 milliseconds.');
       let frameOrder;
-      if(schema===4) {
+      if(schema>=4) {
         const indices=Array.from({length:layerCount},()=>reader.u8());
         if(new Set(indices).size!==layerCount || indices.some(index=>index>=layerCount))invalid('Frame layer order must contain every layer index exactly once.');
         frameOrder=indices.map(index=>layers[index].id);

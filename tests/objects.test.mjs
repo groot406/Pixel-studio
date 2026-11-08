@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { decodeAIProject, encodeAIProject } from '../src/formats/pxa.js';
 import { encodePixelProject, decodePixelProject } from '../src/formats/pxs.js';
-import { validateProject, compositeFrame, makeLayeredFrame, blankProject, getAnimationLayers } from '../src/domain/project.js';
+import { validateProject, compositeFrame, makeLayeredFrame, blankProject, getAnimationLayers, MAX_SIZE } from '../src/domain/project.js';
 import { copyObject, pasteObject, copyObjects } from '../src/domain/object-clipboard.js';
 import { celObjects, frameObjects, reorderObject, reorderObjectContainer, translateObject, forkObject, updateObject, deleteObject, addObjectContainer, moveObjectToGroup, removeObjectContainer, hitTestObject, objectBounds, placeObject, dropObject, placeObjectContainer, orderObjects, translateObjects, translatePixelObject, deleteObjects, isEmptyNode } from '../src/domain/objects.js';
 import { paintSharedPart, flattenCel } from '../src/domain/parts.js';
@@ -52,7 +52,7 @@ test('frame-only ordering, instance movement and deletion preserve every other a
   const deleted=deleteObject(moved,target,'square','frame');
   assert.ok(!deleted.animations[0].frames[0].cels[1].source.ops.some(o=>o.id==='square'));
   assert.ok(deleted.animations[0].frames[1].cels[1].source.ops.some(o=>o.id==='square'));
-  assert.throws(()=>translateObject(p,target,'square',256,0),/integer/);
+  assert.throws(()=>translateObject(p,target,'square',4*MAX_SIZE,0),/integer/);
 });
 
 test('hit testing respects topmost overlap, hidden objects, erasures, transforms and locked selection',()=>{

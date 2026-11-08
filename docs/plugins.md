@@ -78,7 +78,7 @@ Adds a command to the command palette and the Effects panel’s plugin list. `sc
 ```
 
 ### Handler context (one argument, plain data; the handler may be async)
-- Always: `width`, `height` (1–256), `palette` (array of `#rrggbb`, up to 64), `params` (chosen values by id),
+- Always: `width`, `height` (1–2048), `palette` (array of `#rrggbb`, up to 64), `params` (chosen values by id),
   `activeColor` (palette index or -1), `scope`.
 - `frame` / `selection`: `pixels` — an Int16Array of width × height palette indices, row by row, `-1` = transparent;
   `frameIndex`, `frameCount`; `selection` — null or `{ x, y, width, height, mask }` (mask: Uint8Array, 1 = selected).

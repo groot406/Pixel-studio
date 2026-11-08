@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { validateProject, blankProject } from '../src/domain/project.js';
+import { validateProject, blankProject, MAX_SIZE } from '../src/domain/project.js';
 import { decodeAIProject, encodeAIProject } from '../src/formats/pxa.js';
 import { decodePixelProject, encodePixelProject } from '../src/formats/pxs.js';
 import { createSheetMetadata, validateSheetMetadata } from '../src/formats/spritesheet.js';
@@ -35,7 +35,7 @@ test('format round trips retain hidden layers, transparent frames, duplicate col
   await assert.rejects(decodePixelProject(bytes), /checksum|trailer/);
 });
 
-test('256×256 canvases round trip through PXS and PXA 2; 257 is rejected', async () => {
+test('256×256 canvases round trip through PXS and PXA 2; above MAX_SIZE is rejected', async () => {
   const source = blankProject('Big', 256, 256);
   const cel = source.animations[0].frames[0].cels[0].pixels;
   for (let i = 0; i < cel.length; i += 7) cel[i] = i % 3 === 0 ? 0 : -1;
@@ -44,8 +44,16 @@ test('256×256 canvases round trip through PXS and PXA 2; 257 is rejected', asyn
   assert.equal(pxs.width, 256); assert.equal(pxs.height, 256);
   assert.deepEqual(artwork(pxs), artwork(source));
   assert.deepEqual(artwork(decodeAIProject(encodeAIProject(source, { version: 2 }))), artwork(source));
-  assert.throws(() => validateProject({ ...source, width: 257, animations: [] }), /size|width|dimension/i);
-  assert.throws(() => blankProject('Too big', 257, 1));
+  assert.throws(() => validateProject({ ...source, width: MAX_SIZE + 1 }), /size|width|dimension/i);
+  assert.throws(() => blankProject('Too big', MAX_SIZE + 1, 1));
+});
+
+test('canvases wider than 256 round trip through PXS (u16 dimensions)', async () => {
+  const source = blankProject('Wide', 600, 300);
+  source.animations[0].frames[0].cels[0].pixels[599 * 1 + 600 * 299] = 0;
+  const pxs = await decodePixelProject(await encodePixelProject(source));
+  assert.equal(pxs.width, 600); assert.equal(pxs.height, 300);
+  assert.deepEqual(artwork(pxs), artwork(source));
 });
 
 test('existing scoped AI edits preserve locks, timing, other frames, and IDs', () => {

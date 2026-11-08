@@ -84,11 +84,11 @@ test('palette recolor preserves every pixel index and reports all changed swatch
   assert.throws(() => prepareAIResult(request, response(request, 'SET 0 #123456\nSET 0 #ffffff')), /Duplicate/);
 });
 
-test('supports the original 64-color PXA alphabet and maximum canvas', () => {
-  const source = fixture(MAX_SIZE, MAX_SIZE);
+test('supports the original 64-color PXA alphabet and a large canvas', () => {
+  const source = fixture(256, 256);
   source.palette = Array.from({ length: MAX_COLORS }, (_, index) => `#${index.toString(16).padStart(6, '0')}`);
-  const request = createAIRequest(source, { ...options, selection: { x: MAX_SIZE - 4, y: MAX_SIZE - 4, width: 4, height: 4 } });
-  const result = prepareAIResult(request, response(request, `TARGET 0 0 1\nSPAN ${MAX_SIZE - 1} ${MAX_SIZE - 4} a@$Z`));
+  const request = createAIRequest(source, { ...options, selection: { x: 252, y: 252, width: 4, height: 4 } });
+  const result = prepareAIResult(request, response(request, `TARGET 0 0 1\nSPAN 255 252 a@$Z`));
   assert.equal(result.changedPixels, 4);
   assert.deepEqual(result.project.animations[0].frames[0].cels[1].pixels.slice(-4), [36, 62, 63, 35]);
   assert.match(request.prompt, new RegExp(AI_PIXEL_ALPHABET.replace(/[$]/g, '\\$')));

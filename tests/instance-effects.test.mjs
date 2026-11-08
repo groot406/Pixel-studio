@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validateProject, compositeFrame, blankProject } from '../src/domain/project.js';
+import { validateProject, compositeFrame, blankProject, MAX_SIZE } from '../src/domain/project.js';
 import { objectBounds, hitTestObject, celObjects, turnObjects, rotateObjects, setObjectEffects, updateObject } from '../src/domain/objects.js';
 import { growPart } from '../src/domain/parts.js';
 import { canvasToPartPoint, instancePivot, instancePixel, instanceBox, waveShift } from '../src/domain/geometry.js';
@@ -127,7 +127,7 @@ test('PXA 2 round trips every effect, including FRAME FROM deltas that animate t
 });
 
 test('invalid effect values are rejected', () => {
-  for (const pose of [{ pivot: { x: 513, y: 0 } }, { pivot: { x: 0 } }, { skew: { x: 61, y: 0 } }, { skew: { x: 0, y: -61 } }, { skew: { x: 1.5, y: 0 } },
+  for (const pose of [{ pivot: { x: 2 * MAX_SIZE + 1, y: 0 } }, { pivot: { x: 0 } }, { skew: { x: 61, y: 0 } }, { skew: { x: 0, y: -61 } }, { skew: { x: 1.5, y: 0 } },
     { deform: { kind: 'wave', axis: 'x', amplitude: 0, wavelength: 4, phase: 0 } }, { deform: { kind: 'wave', axis: 'x', amplitude: 33, wavelength: 4, phase: 0 } },
     { deform: { kind: 'wave', axis: 'z', amplitude: 1, wavelength: 4, phase: 0 } }, { deform: { kind: 'wave', axis: 'x', amplitude: 1, wavelength: 1, phase: 0 } },
     { deform: { kind: 'bulge', strength: 101 } }, { deform: { kind: 'twist', angle: 361 } }, { deform: { kind: 'swirl' } }, { sampling: 'bilinear' }])

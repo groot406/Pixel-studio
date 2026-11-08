@@ -10,7 +10,9 @@ import { initAiImage, openAiImageDialog } from './ai-image-dialog.js';
 import { hexToRgb } from '../domain/colour.js';
 import { resizeBox } from '../domain/resize.js';
 import { renderObjectsPanel } from './objects-panel.js';
-import { initPanelLayout } from './panel-layout.js';
+import { initPanelLayout, LAYOUT_KEY } from './panel-layout.js';
+import { initSpacePan } from './space-pan.js';
+import { initMobileLayout, MOBILE_QUERY } from './mobile-layout.js';
 import { initWorkspaceViews } from './workspace-views.js';
 import { initTabTools, bindTabs, TAB_SHORTCUTS } from './tab-menu.js';
 import { editScope, editFrameIds, editScopeText } from './edit-scope.js';
@@ -382,7 +384,7 @@ async function savedProjectsDialog() {
     });
   } catch { $('modal-content').innerHTML='<p class="modal-body-text">Saved projects are unavailable in this browser. Keep your work by exporting pixel data.</p>'; }
 }
-let workspaceViews=null;
+let workspaceViews=null, mobileLayout=null;
 function renderPanelState() {
   for (const [name,id] of [['tools','toggle-tools-panel'],['details','toggle-details-panel']]) {
     $('workbench').classList.toggle(`${name}-collapsed`,state.panels[name]);
@@ -725,6 +727,7 @@ function shiftLineStart(tool=state.tool) {
   return state.shiftHeld && !state.drawing && FREEHAND_TOOLS.includes(tool) && state.lastPaint?.documentId===state.documentId ? state.lastPaint : null;
 }
 function renderTools() {
+  if(mobileLayout)queueMicrotask(mobileLayout.sync);
   document.querySelectorAll('[data-tool]').forEach(button => {
     const active = button.dataset.tool === state.tool;
     button.classList.toggle('active', active);
@@ -785,6 +788,7 @@ function selectColor(index) {
   renderTools();
 }
 function renderPalette() {
+  if(mobileLayout)queueMicrotask(mobileLayout.sync);
   const palette = state.project.palette;
   $('palette-count').textContent = palette.length;
   $('palette-grid').innerHTML = palette.map((color, index) => `<button class="swatch${state.color === index ? ' selected' : ''}${state.swap && state.swapFirst === index ? ' swap-target' : ''}" style="--swatch:${color}" title="Color ${index + 1}: ${color.toUpperCase()}" aria-label="Color ${index + 1}: ${color.toUpperCase()}" aria-pressed="${state.color === index}" data-color="${index}"></button>`).join('') + `<button class="swatch transparent${state.color === -1 ? ' selected' : ''}" data-color="-1" title="Transparent" aria-label="Transparent" aria-pressed="${state.color === -1}"><span>∕</span></button>`;
@@ -2051,7 +2055,7 @@ function animationDialog(id = null) {
   $('new-animation-name').select();
 }
 function dimensionFields(prefix, width, height) {
-  const sizes = [16,24,32,48,64,96,128,192,256];
+  const sizes = [16,24,32,48,64,96,128,192,256,512];
   const preset = width === height && sizes.includes(width) ? String(width) : 'custom';
   return `<div class="canvas-size-fields"><label class="field"><span class="field-label">Canvas size</span><select id="${prefix}-preset">${sizes.map(size=>`<option value="${size}"${preset === String(size) ? ' selected' : ''}>${size} × ${size}</option>`).join('')}<option value="custom"${preset === 'custom' ? ' selected' : ''}>Custom dimensions</option></select></label><div class="form-grid"><label class="field"><span class="field-label">Width (pixels)</span><input id="${prefix}-width" type="number" min="1" max="${MAX_SIZE}" step="1" value="${width}" required></label><label class="field"><span class="field-label">Height (pixels)</span><input id="${prefix}-height" type="number" min="1" max="${MAX_SIZE}" step="1" value="${height}" required></label></div></div>`;
 }
@@ -2244,11 +2248,12 @@ async function importPng(file) {
     const profiles = edgeProfiles(source, sourceWidth, sourceHeight);
     const detected = detectGrid(source, sourceWidth, sourceHeight, {profiles});
     const hasAlpha = (() => { for (let i = 3; i < source.length; i += 4) if (source[i] < 250) return true; return false; })();
-    const small = sourceWidth <= MAX_SIZE && sourceHeight <= MAX_SIZE;
+    // Images up to 256 px are usually pixel art already; bigger ones default to averaging down.
+    const small = sourceWidth <= 256 && sourceHeight <= 256;
     const defaultSizing = detected.scale > 1 ? 'detect' : small ? 'actual' : 'average';
     const sizeOption = (value, label) => `<option value="${value}"${defaultSizing === value ? ' selected' : ''}>${label}</option>`;
     const colorChoices = [8,16,32,MAX_COLORS];
-    openDialog('Make it real pixel art', `<p class="modal-body-text">${escapeHTML(file.name || 'Pasted image')} · ${sourceWidth} × ${sourceHeight} pixels</p><div class="png-import-preview"><canvas id="png-import-canvas"></canvas><span id="png-detect-note" class="png-detect-note"></span></div><label class="field"><span class="field-label">Import into</span><select id="png-destination"><option value="project">New project · use the image colors</option><option value="frame">New frame · on the selected layer</option><option value="layer">New layer · in the current frame</option></select></label><label class="field"><span class="field-label">Image sizing</span><select id="png-sizing">${sizeOption('detect','Clean up AI or upscaled pixel art · detect the pixel grid')}${sizeOption('average','Pixelate a photo or painting · average down')}${sizeOption('fit','Fit inside the canvas · sharp nearest-neighbor scaling')}${sizeOption('actual','Keep original pixels · center and crop if needed')}</select></label><div id="png-cleanup" class="form-grid png-cleanup"><label class="field" id="png-scale-field"><span class="field-label">Pixel size (image pixels)</span><input id="png-scale" type="number" min="1" max="64" step="0.01" value="${detected.scale > 1 ? +detected.scale.toFixed(2) : 8}"></label><label class="field" id="png-target-field"><span class="field-label">Longest side (pixels)</span><input id="png-target" type="number" min="4" max="${MAX_SIZE}" step="1" value="${Math.min(64, MAX_SIZE)}"></label><label class="field" id="png-colors-field"><span class="field-label">Colors</span><select id="png-colors"><option value="palette">Use current palette</option>${colorChoices.map(n=>`<option value="${n}"${n===16?' selected':''}>${n} colors</option>`).join('')}</select></label><label class="check-row"><input id="png-remove-bg" type="checkbox"${hasAlpha ? '' : ' checked'}> Remove background</label><label class="check-row"><input id="png-trim" type="checkbox" checked> Trim empty space</label></div><label class="check-row"><input id="png-dither" type="checkbox"> Dither when mapping colors</label><div id="png-dimensions">${dimensionFields('png',Math.min(sourceWidth,MAX_SIZE),Math.min(sourceHeight,MAX_SIZE))}</div>${skipEmptyControl('png-skip-empty')}<p class="helper-text" id="png-help"></p><p id="png-import-error" class="sheet-error" role="alert" hidden></p><div class="modal-actions"><button id="cancel-png" class="button">Cancel</button><button id="confirm-png" class="button primary">Import image</button></div>`, 'IMAGE IMPORT');
+    openDialog('Make it real pixel art', `<p class="modal-body-text">${escapeHTML(file.name || 'Pasted image')} · ${sourceWidth} × ${sourceHeight} pixels</p><div class="png-import-preview"><canvas id="png-import-canvas"></canvas><span id="png-detect-note" class="png-detect-note"></span></div><label class="field"><span class="field-label">Import into</span><select id="png-destination"><option value="project">New project · use the image colors</option><option value="frame">New frame · on the selected layer</option><option value="layer">New layer · in the current frame</option></select></label><label class="field"><span class="field-label">Image sizing</span><select id="png-sizing">${sizeOption('detect','Clean up AI or upscaled pixel art · detect the pixel grid')}${sizeOption('average','Pixelate a photo or painting · average down')}${sizeOption('fit','Fit inside the canvas · sharp nearest-neighbor scaling')}${sizeOption('actual','Keep original pixels · center and crop if needed')}</select></label><div id="png-cleanup" class="form-grid png-cleanup"><label class="field" id="png-scale-field"><span class="field-label">Pixel size (image pixels)</span><input id="png-scale" type="number" min="1" max="64" step="0.01" value="${detected.scale > 1 ? +detected.scale.toFixed(2) : 8}"></label><label class="field" id="png-target-field"><span class="field-label">Longest side (pixels)</span><input id="png-target" type="number" min="4" max="${MAX_SIZE}" step="1" value="${Math.min(64, MAX_SIZE)}"></label><label class="field" id="png-colors-field"><span class="field-label">Colors</span><select id="png-colors"><option value="palette">Use current palette</option>${colorChoices.map(n=>`<option value="${n}"${n===16?' selected':''}>${n} colors</option>`).join('')}</select></label><label class="check-row"><input id="png-remove-bg" type="checkbox"${hasAlpha ? '' : ' checked'}> Remove background</label><label class="check-row"><input id="png-trim" type="checkbox" checked> Trim empty space</label></div><label class="check-row"><input id="png-dither" type="checkbox"> Dither when mapping colors</label><div id="png-dimensions">${dimensionFields('png',Math.min(sourceWidth,256),Math.min(sourceHeight,256))}</div>${skipEmptyControl('png-skip-empty')}<p class="helper-text" id="png-help"></p><p id="png-import-error" class="sheet-error" role="alert" hidden></p><div class="modal-actions"><button id="cancel-png" class="button">Cancel</button><button id="confirm-png" class="button primary">Import image</button></div>`, 'IMAGE IMPORT');
     bindSkipEmpty('png-skip-empty');
     let rgba, quantized, canvasSize, cleaned = null, cleanKey = '', autoSize = true;
     const cleanup = () => {
@@ -2799,6 +2804,7 @@ function bindEvents() {
   window.addEventListener('pagehide',() => { finishDrawing(); saveNow(); });
   document.addEventListener('visibilitychange',() => { state.previewTime=0;if(document.hidden){finishDrawing();saveNow();} });
   new ResizeObserver(fitCanvas).observe($('canvas-stage'));
+  initSpacePan($('canvas-stage'));
   new ResizeObserver(revealActiveTab).observe($('project-tabs'));
 }
 
@@ -2854,8 +2860,12 @@ async function init() {
   workspaceViews=initWorkspaceViews({state,toast,icon,escapeHTML,layout:()=>panelLayout,
     setSidebars:({tools,details})=>{state.panels={tools:!!tools,details:!!details};renderPanelState();persistSession();requestAnimationFrame(fitCanvas);}});
   initTabTools({state,toast,icon,escapeHTML,name:tabName,isSaved:isTabSaved,switchDocument,closeDocuments,reopenClosedTab,duplicateTab,renameTab,moveTab});
+  const freshLayout=!localStorage.getItem(LAYOUT_KEY);
   panelLayout=initPanelLayout({onLayout:()=>{requestAnimationFrame(()=>fitCanvas());workspaceViews?.afterLayout();}});
   workspaceViews.afterLayout();
+  mobileLayout=initMobileLayout({icon,getScale:()=>state.scale,setZoom,isDrawing:()=>!!state.drawing,cancelStroke:()=>{finishDrawing(true);renderAll();}});
+  // Phones start with the frames strip minimised so the canvas gets the room.
+  if(matchMedia(MOBILE_QUERY).matches && freshLayout)panelLayout.setTimelineCollapsed(true);
   initOnboarding({state,$,escapeHTML,toast});initHelpCenter({state,$,escapeHTML,toast,openDialog});
   initEditorBridge({toast,openDialog,escapeHTML,getProject:()=>({project:state.project,animationId:currentAnimation().id,frameId:currentFrame().id}),
     applyProject(project,{mode,message}){

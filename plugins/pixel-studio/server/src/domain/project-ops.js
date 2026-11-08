@@ -2,7 +2,7 @@
  * Pure project operations shared by the headless tools (CLI, MCP) and the in-app assistant: look-ups, summaries,
  * PXA linting, outlines, parts and rigging, palettes, rig templates and new projects. No Node or DOM APIs.
  */
-import { blankProject, validateProject, compositeFrame, MAX_COLORS } from './project.js';
+import { blankProject, validateProject, compositeFrame, MAX_COLORS, MAX_SIZE } from './project.js';
 import { PALETTE_PRESETS } from './palette-presets.js';
 import { replacePalette, usedPaletteIndices } from './palette-theory.js';
 import { TEMPLATES, generateTemplate } from './templates.js';
@@ -223,7 +223,7 @@ export function applyTemplate(project, { template, animation, frame, rootBone, f
 
 /** A new blank project (single transparent frame). `palette`: preset id or colour list. */
 export function createProject({ name = 'Untitled sprite', width = 32, height = 32, palette, fps = 8, frames = 1, animation = 'Idle' } = {}) {
-  for (const [label, v] of [['width', width], ['height', height]]) if (!Number.isInteger(v) || v < 1 || v > 256) throw new Error(`${label} must be a whole number from 1 to 256.`);
+  for (const [label, v] of [['width', width], ['height', height]]) if (!Number.isInteger(v) || v < 1 || v > MAX_SIZE) throw new Error(`${label} must be a whole number from 1 to ${MAX_SIZE}.`);
   if (!Number.isInteger(frames) || frames < 1 || frames > 256) throw new Error('frames must be 1–256.');
   let p = blankProject(String(name).slice(0, 120), width, height);
   if (palette) {

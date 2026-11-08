@@ -1385,3 +1385,7 @@ dialog :is(p, li, code, pre, kbd, .notice, .field-label, .helper-text, .modal-bo
   .recovery-banner { grid-template-columns: 22px minmax(0, 1fr); }
   .recovery-actions { grid-column: 1 / -1; justify-content: flex-end; }
 }
+
+/* Hold Space: temporary hand tool for moving the view. */
+.canvas-stage.space-pan, .canvas-stage.space-pan * { cursor: grab !important; }
+.canvas-stage.space-panning, .canvas-stage.space-panning * { cursor: grabbing !important; }

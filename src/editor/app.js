@@ -932,6 +932,13 @@ function selectAllObjects() {
   finishDrawing();state.selection=null;setObjectSelection(items);renderAll();
   toast(`${items.length} object${items.length===1?'':'s'} selected.`);
 }
+const TEXT_INPUTS = new Set(['text','search','number','email','url','password','tel','']);
+/** Fields where typing (and native text undo) must win over editor shortcuts. */
+function isTextField(el) {
+  if (!el?.closest) return false;
+  if (el.closest('textarea,[contenteditable="true"],[contenteditable=""]')) return true;
+  return el.tagName === 'INPUT' && TEXT_INPUTS.has((el.getAttribute('type') || '').toLowerCase());
+}
 function objectTarget(layerId=currentLayer().id) { return {animationId:currentAnimation().id,frameId:currentFrame().id,layerId}; }
 function selectObject(item) {
   finishDrawing();state.layerId=item.layerId;state.objectSelection={layerId:item.layerId,key:item.key};state.objectMulti=null;state.selection=null;
@@ -2644,6 +2651,8 @@ function bindEvents() {
   $('zoom-in').onclick = () => setZoom(state.scale + 2);
   $('zoom-out').onclick = () => setZoom(state.scale - 2);
   $('zoom-fit').onclick = () => { state.fit = true; fitCanvas(); };
+  // Clicking the canvas leaves any panel field, so keyboard shortcuts (⌘/Ctrl Z…) reach the editor again.
+  $('canvas-stage').addEventListener('pointerdown',()=>{const el=document.activeElement;if(el && el!==document.body && !el.closest('#canvas-stage') && !el.closest('dialog[open]'))el.blur();},true);
   $('pixel-canvas').addEventListener('pointerdown',pointerDown);
   $('canvas-stage').addEventListener('pointerdown',deselectObjectOutside);
   $('pixel-canvas').addEventListener('dblclick',doubleClickObject);
@@ -2740,7 +2749,9 @@ function bindEvents() {
       if (event.key === 'Escape') { event.preventDefault(); finishDrawing(true); renderAll(); }
       return;
     }
-    if ($('modal').open || event.target.closest('input,textarea,select,[contenteditable="true"]')) return;
+    if ($('modal').open || isTextField(event.target)) return;
+    // Selects, checkboxes and sliders keep their own arrow/space keys, but editor shortcuts still work there.
+    if (event.target.closest('input,select') && !(event.ctrlKey || event.metaKey) && !['escape','?'].includes(event.key.toLowerCase())) return;
     if (curveKey(event)) return;
     const key = event.key.toLowerCase();
     if(state.inPlaceEdit){canvasPartKey(event,key);return;}

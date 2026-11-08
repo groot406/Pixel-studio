@@ -420,11 +420,21 @@ function toast(message, actions = []) {
   for (const { label, run } of actions) {
     const button = document.createElement('button');
     button.type = 'button'; button.className = 'toast-action'; button.textContent = label;
-    button.onclick = () => { box.hidden = true; run(); };
+    button.onclick = () => { hideToast(box); run(); };
     box.append(button);
   }
   box.hidden = false;
-  toastTimer = setTimeout(() => { box.hidden = true; }, actions.length ? 9000 : 3800);
+  // Modal dialogs and their blurred backdrop sit in the browser's top layer. The toast is a popover, so it joins
+  // the top layer too; showing it again moves it above whatever dialog is open now.
+  if (box.popover && box.showPopover) {
+    if (box.matches(':popover-open')) box.hidePopover();
+    box.showPopover();
+  }
+  toastTimer = setTimeout(() => hideToast(box), actions.length ? 9000 : 3800);
+}
+function hideToast(box) {
+  box.hidden = true;
+  if (box.popover && box.hidePopover && box.matches(':popover-open')) box.hidePopover();
 }
 const SAVE_DELAY=500;
 /** Autosave: debounced after each change, deferred while a stroke is in progress, then run when the browser is idle. */

@@ -315,7 +315,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--green); }
 .option-row p { margin: 4px 0 0; color: #a5b298; font-size: 10px; line-height: 1.6; }
 .modal-content .check-row { font-size: 11px; color: #849875; gap: 8px; margin-top: 14px; }
 .modal-content .check-row input { width: 14px; height: 14px; }
-.toast { position: fixed; z-index: 1000; bottom: 24px; left: 50%; transform: translateX(-50%); width: max-content; max-width: calc(100% - 32px); padding: 12px 18px; border: 1px solid #ffffff1a; border-radius: 8px; background: #2e4938; color: #f1f6e7; box-shadow: 0 8px 30px #263b2e22; font-size: 11px; line-height: 1.6; text-align: center; pointer-events: none; }
+.toast { position: fixed; z-index: 1000; inset: auto; margin: 0; overflow: visible; bottom: 24px; left: 50%; transform: translateX(-50%); width: max-content; max-width: calc(100% - 32px); padding: 12px 18px; border: 1px solid #ffffff1a; border-radius: 8px; background: #2e4938; color: #f1f6e7; box-shadow: 0 8px 30px #263b2e22; font-size: 11px; line-height: 1.6; text-align: center; pointer-events: none; }
 .toast.with-actions { pointer-events: auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px 10px; }
 .toast-action { padding: 3px 10px; border: 1px solid #ffffff40; border-radius: 6px; background: #ffffff14; color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
 .toast-action:hover { background: #ffffff2e; }

@@ -1,7 +1,7 @@
 import { createInPlaceEdit, setInPlaceScope, inPlaceRestriction, inPlaceDirty, inPlacePoint, beginInPlaceStroke, moveInPlaceStroke, finishInPlaceStroke, restoreInPlace, previewInPlaceEdit, prepareInPlaceEdit, PART_EDIT_TOOLS, inPlaceCanvasRect, inPlacePlacement, inPlaceMode, beginInPlaceSelection, moveInPlaceSelection, finishInPlaceSelection, selectAllInPlace, deselectInPlace, nudgeInPlaceSelection, clearInPlaceSelection, copyInPlaceSelection, pasteInPlace } from '../features/objects/in-place-edit.js';
 import { mapPaletteColors, copyObjects, pasteObject, objectPixelBounds } from '../domain/object-clipboard.js';
 import { commitRasterEdits, writeCelPixels, cloneArtwork } from '../domain/artwork.js';
-import { celObjects, isEmptyNode, reorderObject, reorderObjectContainer, updateObject, translateObject, forkObject, deleteObject, addObjectContainer, moveObjectToGroup, removeObjectContainer, objectBounds, hitTestObject, dropObject, resizeObject, frameObjects, orderObjects, translateObjects, deleteObjects, turnObjects, rotateObjects, tiltObjects } from '../domain/objects.js';
+import { celObjects, isEmptyNode, reorderObject, reorderObjectContainer, updateObject, translateObject, forkObject, deleteObject, addObjectContainer, moveObjectToGroup, removeObjectContainer, objectBounds, hitTestObject, dropObject, resizeObject, frameObjects, orderObjects, translateObjects, translatePixelObject, deleteObjects, turnObjects, rotateObjects, tiltObjects } from '../domain/objects.js';
 import { transformedSize } from '../domain/geometry.js';
 import { detectGrid, edgeProfiles } from '../domain/pixelize.js';
 import { placeRgba, cleanImage, quantizeImage } from '../domain/image-pipeline.js';
@@ -1600,18 +1600,19 @@ function beginObjectMove(event,point,hit) {
   const items=selectedItems(), together=items.length>1 && items.some(item=>sameItem(item,hit));
   if(together){finishDrawing();state.selection=null;setObjectSelection(items,hit);renderAll();}
   else selectObject(hit);
-  if(!together && hit.type!=='instance')return;
+  if(!together && !['instance','pixels'].includes(hit.type))return;
   if(!together) {
-    const layer=currentLayer(), op=currentFrame().cels.find(c=>c.layerId===layer.id).source.ops.find(op=>op.type==='use'&&op.id===hit.key);
-    if(layer.locked || op.locked){toast('Unlock this object or its group before moving it.');return;}
+    const layer=currentLayer(), op=hit.type==='instance'?currentFrame().cels.find(c=>c.layerId===layer.id).source.ops.find(op=>op.type==='use'&&op.id===hit.key):null;
+    if(layer.locked || op?.locked){toast('Unlock this object or its group before moving it.');return;}
   }
   $('pixel-canvas').setPointerCapture(event.pointerId);
-  state.drawing={tool:'object',pointerId:event.pointerId,origin:point,last:point,before:snapshot(),target:objectTarget(),key:hit.key,items:together?items:null};
+  state.drawing={tool:'object',pointerId:event.pointerId,origin:point,last:point,before:snapshot(),target:objectTarget(),key:hit.key,pixels:hit.type==='pixels',items:together?items:null};
 }
 function doubleClickObject(event) {
   if(state.inPlaceEdit || state.tool!=='object')return;
   const point=canvasPoint(event), hit=hitTestObject(state.project,currentAnimation(),currentFrame(),point.x,point.y);
   if(hit?.type==='instance'){event.preventDefault();finishDrawing();selectObject(hit);editSharedObject(hit);}
+  else if(hit?.type==='pixels'){event.preventDefault();finishDrawing();selectObject(hit);state.tool='pencil';renderAll();toast('Pixel object: paint on it directly with the Pencil. Press V to move it again.');}
 }
 /** Clicking empty stage around the canvas with the object tool clears the object selection. */
 function deselectObjectOutside(event) {
@@ -1702,7 +1703,7 @@ function pointerMove(event) {
     } else if(drawing.tool==='tilt') {
       moveTilt(drawing,event);
     } else if(drawing.tool==='object') {
-      try{state.project=drawing.items?translateObjects(drawing.before.project,drawing.target,drawing.items,point.x-drawing.origin.x,point.y-drawing.origin.y,state.objectScope).project:translateObject(drawing.before.project,drawing.target,drawing.key,point.x-drawing.origin.x,point.y-drawing.origin.y,state.objectScope);}
+      try{state.project=drawing.items?translateObjects(drawing.before.project,drawing.target,drawing.items,point.x-drawing.origin.x,point.y-drawing.origin.y,state.objectScope).project:(drawing.pixels?translatePixelObject:translateObject)(drawing.before.project,drawing.target,drawing.key,point.x-drawing.origin.x,point.y-drawing.origin.y,state.objectScope);}
       catch(error){$('cursor-position').textContent=error.message;}
     } else if (drawing.tool==='select') {
       updateSelection(point);
@@ -2685,7 +2686,7 @@ function bindEvents() {
       if(delta && many){event.preventDefault();const step=event.shiftKey?8:1;try{mutate(()=>{state.project=translateObjects(state.project,objectTarget(),selectedItems(),delta[0]*step,delta[1]*step,state.objectScope).project;});}catch(error){toast(error.message);}return;}
       if((key==='delete' || key==='backspace') && many){event.preventDefault();objectAction('delete',item);return;}
       if(state.tool==='resize' && (key===',' || key==='.')){event.preventDefault();turnSelection(key===','?'R270':'R90');return;}
-      if(delta && node?.instance){event.preventDefault();const step=event.shiftKey?8:1;try{mutate(()=>{state.project=translateObject(state.project,objectTarget(item.layerId),item.key,delta[0]*step,delta[1]*step,state.objectScope);});}catch(error){toast(error.message);}return;}
+      if(delta && (node?.instance || node?.type==='pixels')){event.preventDefault();const step=event.shiftKey?8:1;try{mutate(()=>{state.project=(node.instance?translateObject:translatePixelObject)(state.project,objectTarget(item.layerId),item.key,delta[0]*step,delta[1]*step,state.objectScope);});}catch(error){toast(error.message);}return;}
       if(key==='enter' && node?.instance && !many){event.preventDefault();editSharedObject(item);return;}
       if((key==='delete' || key==='backspace') && node?.instance){event.preventDefault();objectAction('delete',{...item,node});return;}
     }

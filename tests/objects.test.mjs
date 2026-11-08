@@ -4,7 +4,7 @@ import { decodeAIProject, encodeAIProject } from '../src/formats/pxa.js';
 import { encodePixelProject, decodePixelProject } from '../src/formats/pxs.js';
 import { validateProject, compositeFrame, makeLayeredFrame, blankProject, getAnimationLayers } from '../src/domain/project.js';
 import { copyObject, pasteObject, copyObjects } from '../src/domain/object-clipboard.js';
-import { celObjects, frameObjects, reorderObject, reorderObjectContainer, translateObject, forkObject, updateObject, deleteObject, addObjectContainer, moveObjectToGroup, removeObjectContainer, hitTestObject, objectBounds, placeObject, dropObject, placeObjectContainer, orderObjects, translateObjects, deleteObjects, isEmptyNode } from '../src/domain/objects.js';
+import { celObjects, frameObjects, reorderObject, reorderObjectContainer, translateObject, forkObject, updateObject, deleteObject, addObjectContainer, moveObjectToGroup, removeObjectContainer, hitTestObject, objectBounds, placeObject, dropObject, placeObjectContainer, orderObjects, translateObjects, translatePixelObject, deleteObjects, isEmptyNode } from '../src/domain/objects.js';
 import { paintSharedPart, flattenCel } from '../src/domain/parts.js';
 import { createAIRequest, prepareAIResult } from '../src/features/ai/requests.js';
 import { projectFingerprint } from '../src/features/ai/patch-engine.js';
@@ -260,12 +260,17 @@ test('several objects can be ordered, copied, pasted, moved and deleted together
   assert.deepEqual(pasted.items.slice(1).map(i=>i.key),['glint','square']);
 
   const moved=translateObjects(p,target,mixed,2,-1,'animation');
-  assert.equal(moved.moved,2);
+  assert.equal(moved.moved,3);
   for(const f of moved.project.animations[0].frames)for(const op of f.cels.find(c=>c.layerId==='effects').source.ops.filter(o=>o.type==='use')) {
     const was=p.animations[0].frames.find(x=>x.id===f.id).cels.find(c=>c.layerId==='effects').source.ops.find(o=>o.id===op.id);
     assert.deepEqual([op.x,op.y],[was.x+2,was.y-1]);
   }
-  assert.throws(()=>translateObjects(p,target,[{layerId:'back',key:'pixels-0'}],1,0),/placed objects/);
+  const back=f=>f.cels.find(c=>c.layerId==='back').pixels;
+  for(const f of moved.project.animations[0].frames) {
+    const was=back(p.animations[0].frames.find(x=>x.id===f.id)), w=p.width;
+    back(f).forEach((v,i)=>{const x=i%w,y=Math.floor(i/w),sx=x-2,sy=y+1;assert.equal(v,sx>=0&&sy<p.height&&sx<w?was[sy*w+sx]:-1);});
+  }
+  assert.throws(()=>translateObjects(p,target,[{layerId:'overlay',key:'nope'}],1,0),/Choose an object/);
 
   const deleted=deleteObjects(p,target,[{layerId:'effects',key:'glint'},{layerId:'effects',key:'square'}],'frame');
   assert.ok(!celObjects(deleted.animations[0].frames[0].cels.find(c=>c.layerId==='effects')).some(n=>n.instance));
@@ -283,4 +288,38 @@ test('ungrouped containers emptied by delete or move disappear; partly used ones
   assert.ok(!deleteObject(once,at,'square','animation').layers.some(l=>l.id===added.layerId));
   const back=moveObjectToGroup(moved,at,'square','effects','animation');
   assert.ok(!back.layers.some(l=>l.id===added.layerId));
+});
+
+test('pixel objects move like placed objects: plain raster layers and drawing runs between instances, with erasures',()=>{
+  const p=decodeAIProject(`PXA 2
+SIZE 8 4
+NAME "Pixels"
+PAL #000000 #ff0000
+LAYER L "Shield" 1 0
+ANIM A "Idle" 8
+FRAME f0 100 CLEAR
+CEL L RASTER
+SPAN 0 1 11
+FRAME f1 100 CLEAR
+CEL L RASTER
+SPAN 1 1 1
+END`), t={animationId:p.animations[0].id,frameId:p.animations[0].frames[0].id,layerId:p.layers[0].id};
+  assert.equal(hitTestObject(p,p.animations[0],p.animations[0].frames[0],0,1).type,'pixels');
+  const moved=translatePixelObject(p,t,'pixels',3,1,'animation');
+  const rows=f=>f.cels[0].pixels.map(v=>v<0?'.':'1').join('').match(/.{8}/g);
+  assert.deepEqual(rows(moved.animations[0].frames[0]),['........','........','...11...','........']);
+  assert.deepEqual(rows(moved.animations[0].frames[1]),['........','........','....1...','........']);
+  const one=translatePixelObject(p,t,'pixels',-1,0,'frame');
+  assert.deepEqual(rows(one.animations[0].frames[0])[1],'1.......');
+  assert.deepEqual(rows(one.animations[0].frames[1])[1],'.1......');
+
+  const q=overlapping(), cel=q.animations[0].frames[0].cels.find(c=>c.layerId==='effects');
+  cel.source.ops.unshift({type:'rect',x:0,y:0,width:2,height:2,color:1},{type:'rect',x:1,y:1,width:1,height:1,color:-1});
+  const r=validateProject(q), key=celObjects(r.animations[0].frames[0].cels.find(c=>c.layerId==='effects')).find(n=>n.type==='pixels').key;
+  const after=translatePixelObject(r,target,key,1,0,'frame'), ops=after.animations[0].frames[0].cels.find(c=>c.layerId==='effects').source.ops;
+  const instances=c=>c.source.ops.filter(o=>o.type==='use');
+  assert.deepEqual(instances(after.animations[0].frames[0].cels.find(c=>c.layerId==='effects')),instances(r.animations[0].frames[0].cels.find(c=>c.layerId==='effects')));
+  assert.ok(ops.some(o=>o.type==='span' && o.y===1 && o.x===1 && o.values[0]===1 && o.values[1]===-1),'the erased pixel moves with its drawing');
+  const locked=structuredClone(r);locked.layers.find(l=>l.id==='effects').locked=true;
+  assert.throws(()=>translatePixelObject(locked,target,key,1,0),/Unlock/);
 });

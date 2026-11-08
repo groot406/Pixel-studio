@@ -1,7 +1,7 @@
 /** Object editing over the established cel format. Groups retain isolated erase/override semantics. */
 import { validateProject, getAnimationLayers, insertProjectLayer, removeProjectLayer, uid, MAX_LAYERS, MAX_TOTAL_PIXELS } from './project.js';
 import { PIVOT_MIN, PIVOT_MAX } from './limits.js';
-import { cloneArtwork, sourceForCel, renderParts, hasLockedInstances } from './artwork.js';
+import { cloneArtwork, sourceForCel, renderParts, hasLockedInstances, renderOperations, pixelSpans, translatePixels } from './artwork.js';
 import { linePoints, ellipsePoints, instancePixel, instanceSize, instanceBox, transformedSize, swapsAxes, composeTransform, transformPoint } from './geometry.js';
 import { nextPartId } from './parts.js';
 import { boneDescendants, relPose, layoutFrame } from './skeleton.js';
@@ -178,6 +178,32 @@ export function translateObject(project,target,key,dx,dy,scope='animation') {
   return validateProject(p);
 }
 
+/**
+ * Move a pixel object (plain raster, or a run of drawing operations between placed objects) in every frame of the
+ * scope that has it. Pixels pushed past the canvas edge are clipped; erasing operations move with the drawing.
+ */
+export function translatePixelObject(project,target,key,dx,dy,scope='animation') {
+  if(!Number.isInteger(dx) || !Number.isInteger(dy))throw new Error('Object movement uses whole pixels.');
+  const {p,layer,frames}=context(project,target,scope);
+  unlocked(layer);
+  const {width,height}=p;
+  let moved=0;
+  for(const frame of frames) {
+    const cel=frame.cels.find(c=>c.layerId===layer.id), node=cel && celObjects(cel).find(n=>n.key===key);
+    if(!node || node.type!=='pixels')continue;
+    moved++;
+    if(!cel.source){cel.pixels=translatePixels(cel.pixels,width,height,dx,dy);continue;}
+    const ops=cel.source.ops.slice(node.start,node.end);
+    if(!ops.length)continue;
+    const values=translatePixels(renderOperations(ops,width,height),width,height,dx,dy);
+    // Erasing operations also count as drawn, so they keep clearing what lies beneath them.
+    const touched=translatePixels(renderOperations(ops.map(op=>op.type==='span'?{...op,values:op.values.map(()=>0)}:{...op,color:0}),width,height),width,height,dx,dy);
+    cel.source.ops.splice(node.start,ops.length,...pixelSpans(values,width,i=>touched[i]>=0));
+  }
+  if(!moved)throw new Error('This pixel object is not in the current frame.');
+  return validateProject(p);
+}
+
 /** Selected objects of one frame without duplicates or children of a selected group, bottom to top (layer order, then stack order). */
 export function orderObjects(project,frame,items) {
   const seen=new Set(), groups=new Set(items.filter(i=>i.key==='@group').map(i=>i.layerId));
@@ -192,19 +218,23 @@ export function orderObjects(project,frame,items) {
     .sort((a,b)=>rank.get(a.layerId)-rank.get(b.layerId) || a.index-b.index).map(({layerId,key})=>({layerId,key}));
 }
 
-/** Move every selected placed object by the same amount; pixel objects stay put. Returns the project and how many moved. */
+/** Move every selected object (placed objects, pixel objects, or whole groups) by the same amount. Returns the project and how many moved. */
 export function translateObjects(project,target,items,dx,dy,scope='animation') {
   const frame=project.animations.find(a=>a.id===target.animationId)?.frames.find(f=>f.id===target.frameId);
   if(!frame)throw new Error('This object no longer exists.');
+  const expanded=orderObjects(project,frame,items).flatMap(item=>item.key!=='@group'?[item]
+    :celObjects(frame.cels.find(c=>c.layerId===item.layerId)).filter(n=>n.type!=='overrides').map(n=>({layerId:item.layerId,key:n.key})));
   let p=project, moved=0;
-  const carried=new Set(items.flatMap(item=>boneDescendants(project,item.layerId,item.key)).map(r=>`${r.layerId}/${r.instanceId}`));
-  for(const item of orderObjects(project,frame,items)) {
-    const node=celObjects(frame.cels.find(c=>c.layerId===item.layerId)).find(n=>n.key===item.key);
-    if(!node?.instance)continue;
+  const carried=new Set(expanded.flatMap(item=>boneDescendants(project,item.layerId,item.key)).map(r=>`${r.layerId}/${r.instanceId}`));
+  const nodes=expanded.map(item=>({item,node:celObjects(frame.cels.find(c=>c.layerId===item.layerId)).find(n=>n.key===item.key)}));
+  // Pixel object keys count runs from the bottom, so move the top ones first in case a run is clipped away.
+  for(const {item,node} of nodes.reverse()) {
+    if(!node || node.type==='overrides')continue;
     if(carried.has(`${item.layerId}/${item.key}`)){moved++;continue;}
-    p=translateObject(p,{...target,layerId:item.layerId},item.key,dx,dy,scope);moved++;
+    const at={...target,layerId:item.layerId};
+    p=node.instance?translateObject(p,at,item.key,dx,dy,scope):translatePixelObject(p,at,item.key,dx,dy,scope);moved++;
   }
-  if(!moved)throw new Error('Only placed objects can be moved.');
+  if(!moved)throw new Error('Choose an object to move.');
   return {project:p,moved};
 }
 

@@ -15,7 +15,8 @@ The editor stays free and works without an account. Customers pay for the parts 
 `cloud/` contains a single Node process with no npm dependencies. It needs Node 22.13 or later, because it uses `node:sqlite`.
 
 - `cloud/start.mjs`: builds `dist/`, opens the SQLite database, serves the site and the API, and expires lapsed plans every hour.
-- `cloud/server.mjs`: routes, security headers, CSRF checks and rate limits. The `index.html` it serves gets `<meta name="pixel-studio-cloud">`, which turns on the account button and the cloud AI paths in the browser.
+- `cloud/server.mjs`: routes, security headers, CSRF checks and rate limits. `/` serves the marketing page (`public/landing.html`) and `/app` serves the editor. The editor page gets `<meta name="pixel-studio-cloud">`, which turns on the account button and the cloud AI paths in the browser. `/index.html` and `/app/` redirect to `/app`.
+- `cloud/landing.mjs`: fills the pricing cards on the marketing page from `plans.js`, so prices are defined in one place.
 - `cloud/store.mjs`: users, sessions, sign-in tokens, subscriptions, usage, processed webhooks and projects. Tokens are stored as SHA-256 hashes only.
 - `cloud/ai.mjs`: assistant and AI edit through the OpenAI Chat Completions API (streamed), and image generation through the shared image providers.
 - `cloud/billing.mjs`: Lemon Squeezy checkouts, customer portal and signed webhooks.
@@ -48,10 +49,14 @@ Every request that changes data needs the session cookie (`HttpOnly`, `SameSite=
 | | Free | Pro |
 | --- | --- | --- |
 | Price | €0 | €8/month or €72/year |
-| AI credits | 30/month | 1,000/month |
-| Cloud projects | 3 (2 MB each) | 200 (8 MB each) |
+| AI credits | none | 1,000/month |
+| Cloud projects | 1 (2 MB) | 200 (8 MB each) |
+| Sprite sheet, GIF and APNG export | – | ✓ |
+| Credit packs | – | ✓ |
 
-You can also buy a credit pack: 1,000 credits for €10. Pack credits never expire.
+Free costs nothing to run: it has no AI. Pro users can also buy a credit pack: 1,000 credits for €10. Pack credits never expire, but they can only be used while Pro is active.
+
+Each plan lists its features in `allows` (`PRO_FEATURES` in `plans.js`). The server enforces AI, image generation, credit packs and the project limit, and returns `402 PRO_REQUIRED` for Free users. The export tabs are only gated in the browser, so a determined user can bypass that gate. Those exports cost you nothing, so this is acceptable.
 
 - The monthly allowance refills on the 1st (UTC) and is used before pack credits.
 - Chat is charged by the actual token count, using the list price of `gpt-5-mini` (default) or `gpt-5`.
@@ -119,12 +124,12 @@ fly deploy
 
 Back up the SQLite file, for example with volume snapshots or Litestream.
 
-To try it locally, run `npm run cloud` and open <http://localhost:8080>. The sign-in link is printed to the terminal, and AI stays off until `OPENAI_API_KEY` is set.
+To try it locally, run `npm run cloud` and open <http://localhost:8080> (the marketing page; the editor is at `/app`). Without `RESEND_API_KEY`, no email is sent: the sign-in link is printed to the terminal, and outside production the sign-in dialog also shows it. AI stays off until `OPENAI_API_KEY` is set, and is only available on Pro.
 
 ## Scaling notes
 
 - The server runs as a single instance. Rate limits and the "one AI request per user at a time" rule are kept in memory, and SQLite is a local file. To run several instances, move to Postgres and Redis, or keep one instance and scale it vertically, which is plenty for thousands of users.
-- Free credits are given per email address. If people abuse this with throwaway addresses, lower the free allowance, block disposable domains, or add a CAPTCHA to `/api/account/login`.
+- Free accounts get no AI credits, so throwaway addresses only cost storage (1 project of at most 2 MB). If that becomes a problem, block disposable domains or add a CAPTCHA to `/api/account/login`.
 - Spending: set provider budget alerts and hard limits in the OpenAI and Gemini dashboards.
 
 ## Launch checklist

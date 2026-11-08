@@ -47,7 +47,7 @@ export function createBilling({ config, store, fetchImpl = globalThis.fetch, log
           type: 'checkouts',
           attributes: {
             checkout_data: { email: user.email, custom: { user_id: user.id } },
-            product_options: { redirect_url: `${config.publicUrl}/?billing=done`, enabled_variants: [Number(variantFor(config, product))] },
+            product_options: { redirect_url: `${config.publicUrl}/app?billing=done`, enabled_variants: [Number(variantFor(config, product))] },
             checkout_options: { embed: false },
             ...(config.lsTestMode ? { test_mode: true } : {}),
           },

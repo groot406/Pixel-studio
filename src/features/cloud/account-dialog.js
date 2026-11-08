@@ -3,7 +3,7 @@
  * checkout), the billing portal, cloud projects, data export and account deletion. Only shown in the hosted edition.
  */
 import { packProject, unpackProject } from '../../domain/versions.js';
-import { PLANS, formatPrice } from './plans.js';
+import { PLANS, formatPrice, planAllows } from './plans.js';
 import {
   isCloudEdition, currentAccount, refreshAccount, onAccountChange, noteCredits, sendSignInLink, signOut, deleteAccount,
   startCheckout, openBillingPortal, listCloudProjects, loadCloudProject, saveCloudProject, deleteCloudProject, cloudIdFor, linkCloudId,
@@ -36,20 +36,27 @@ function renderButton(account) {
     return;
   }
   const { balance } = account.credits;
-  label.textContent = `${account.plan === 'pro' ? 'Pro · ' : ''}${balance.toLocaleString()} credits`;
+  label.textContent = account.plan === 'pro' ? `Pro · ${balance.toLocaleString()} credits` : 'Free · Upgrade';
   button.title = `${account.email} · ${PLANS[account.plan]?.name || 'Free'} plan · ${balance.toLocaleString()} AI credits left`;
   button.dataset.plan = account.plan;
-  button.dataset.low = String(balance < 10);
+  button.dataset.low = String(account.plan === 'pro' && balance < 10);
 }
 
-/** Messages after returning from the sign-in link or a checkout (?signin=ok|expired, ?billing=done). */
+/** Messages after returning from the sign-in link or a checkout (?signin=ok|expired, ?billing=done), and the
+ * landing page's "Get Pro" link (?upgrade=pro). */
 function handleReturn() {
   const params = new URLSearchParams(location.search);
-  const signin = params.get('signin'), billing = params.get('billing');
-  if (!signin && !billing) return;
-  params.delete('signin'); params.delete('billing');
+  const signin = params.get('signin'), billing = params.get('billing'), upgrade = params.get('upgrade');
+  if (!signin && !billing && !upgrade) return;
+  params.delete('signin'); params.delete('billing'); params.delete('upgrade');
   history.replaceState(null, '', `${location.pathname}${params.size ? `?${params}` : ''}${location.hash}`);
   if (signin === 'ok') d.toast(`Signed in as ${currentAccount()?.email || 'you'}.`);
+  // A signed-out visitor who chose "Get Pro" signs in first; show the plans when they come back.
+  const INTENT = 'pixel-studio.upgrade-intent';
+  if (upgrade && !currentAccount()?.signedIn) { try { sessionStorage.setItem(INTENT, '1'); } catch { /* ignore */ } }
+  let wantsPro = !!upgrade;
+  if (signin === 'ok') { try { wantsPro = sessionStorage.getItem(INTENT) === '1'; sessionStorage.removeItem(INTENT); } catch { /* ignore */ } }
+  if (wantsPro && currentAccount()?.plan !== 'pro') accountDialog();
   if (signin === 'expired') accountDialog({ notice: 'That sign-in link has expired or was already used. Ask for a new one below.' });
   if (billing === 'done') {
     d.toast('Thank you! Your purchase is being confirmed…');
@@ -106,8 +113,10 @@ function signInDialog(account, notice) {
     const email = d.$('cloud-email').value.trim(), status = d.$('cloud-signin-status'), send = d.$('cloud-send');
     send.disabled = true; status.textContent = 'Sending…';
     try {
-      await sendSignInLink(email);
-      status.innerHTML = `<strong>Check your inbox.</strong> We sent a sign-in link to ${esc(email)}. It works once, for 15 minutes. You can close this window.`;
+      const sent = await sendSignInLink(email);
+      status.innerHTML = sent.devLink
+        ? `<strong>Development server:</strong> no email provider is set up (RESEND_API_KEY), so nothing was sent. <a href="${esc(sent.devLink)}">Open the sign-in link</a>.`
+        : `<strong>Check your inbox.</strong> We sent a sign-in link to ${esc(email)}. It works once, for 15 minutes. You can close this window.`;
     } catch (error) { status.textContent = error.message; send.disabled = false; }
   };
   d.$('cloud-email').focus();
@@ -115,7 +124,7 @@ function signInDialog(account, notice) {
 
 function accountHTML(account, notice) {
   const { credits, subscription: sub } = account, plan = PLANS[account.plan] || PLANS.free;
-  const used = Math.max(0, credits.monthly - credits.allowance), share = credits.monthly ? Math.min(100, Math.round(credits.allowance / credits.monthly * 100)) : 0;
+  const share = credits.monthly ? Math.min(100, Math.round(credits.allowance / credits.monthly * 100)) : 0;
   const usage = (account.usage || []).map(u => `${u.requests} ${u.kind === 'image' ? 'image' : 'AI'} request${u.requests === 1 ? '' : 's'} (${u.credits} credits)`).join(' · ');
   const subLine = sub && account.plan === 'pro'
     ? sub.status === 'cancelled' ? `Cancelled · Pro until ${date(sub.endsAt)}` : sub.status === 'past_due' ? 'Payment failed · update your card under Billing' : sub.renewsAt ? `Renews ${date(sub.renewsAt)}` : ''
@@ -124,12 +133,12 @@ function accountHTML(account, notice) {
     ${notice ? `<div class="notice">${esc(notice)}</div>` : ''}
     <div class="account-head"><div><strong>${esc(account.email)}</strong><span class="plan-badge" data-plan="${esc(account.plan)}">${esc(plan.name)}</span>${subLine ? `<small>${esc(subLine)}</small>` : ''}</div>
       <div class="account-head-actions">${account.canManageBilling ? '<button type="button" class="button subtle" id="cloud-billing">Billing &amp; invoices</button>' : ''}<button type="button" class="button subtle" id="cloud-signout">Sign out</button></div></div>
-    <section class="account-section"><h3>AI credits</h3>
+    ${planAllows(account.plan, 'ai') || credits.balance > 0 ? `<section class="account-section"><h3>AI credits</h3>
       <div class="credit-meter" role="meter" aria-valuemin="0" aria-valuemax="${credits.monthly}" aria-valuenow="${credits.allowance}" aria-label="Monthly credits left"><i style="width:${share}%"></i></div>
-      <p class="field-hint"><strong>${credits.balance.toLocaleString()}</strong> credits left: ${credits.allowance.toLocaleString()} of ${credits.monthly.toLocaleString()} monthly (refills on the 1st)${credits.purchased ? ` + ${credits.purchased.toLocaleString()} bought (never expire)` : ''}. ${used ? `Used this month: ${usage || `${used} credits`}.` : ''}</p>
-      <p class="field-hint">A typical assistant reply costs 2–10 credits, an AI edit 5–40 and an image 6–84 (by quality). Your own API key in the assistant and image settings costs no credits.</p>
-      ${account.billing ? `<div class="modal-actions left">${account.packs.map(p => `<button type="button" class="button" data-checkout="${esc(p.id)}">Buy ${p.credits.toLocaleString()} credits · ${formatPrice(p.price)}</button>`).join('')}</div>` : ''}
-    </section>
+      <p class="field-hint"><strong>${credits.balance.toLocaleString()}</strong> credits left: ${credits.allowance.toLocaleString()} of ${credits.monthly.toLocaleString()} monthly (refills on the 1st)${credits.purchased ? ` + ${credits.purchased.toLocaleString()} bought (never expire)` : ''}.${usage ? ` This month: ${esc(usage)}.` : ''}</p>
+      <p class="field-hint">A typical assistant reply costs 2–10 credits, an AI edit 5–40 and an image 6–84 (by quality).</p>
+      ${account.billing && planAllows(account.plan, 'creditPacks') ? `<div class="modal-actions left">${account.packs.map(p => `<button type="button" class="button" data-checkout="${esc(p.id)}">Buy ${p.credits.toLocaleString()} credits · ${formatPrice(p.price)}</button>`).join('')}</div>` : ''}
+    </section>` : ''}
     ${account.plan === 'free' ? `<section class="account-section"><h3>Plans</h3>${plansHTML(account)}</section>` : ''}
     <section class="account-section"><h3>Cloud projects</h3>
       <p class="field-hint">Projects saved here open on any device where you sign in. Your projects on this device are not uploaded unless you save them here.</p>

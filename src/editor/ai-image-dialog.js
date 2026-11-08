@@ -141,7 +141,7 @@ export function openAiImageDialog() {
   // ----- provider and prompt -----
   function providerOptions() {
     const list = [];
-    if (s.local?.cloud) { for (const [id, p] of Object.entries(IMAGE_PROVIDERS)) if (s.local.providers?.[id]?.available || !s.local.signedIn) list.push([`local:${id}`, `${p.label} · Pixel Studio Cloud credits`]); }
+    if (s.local?.cloud) { for (const [id, p] of Object.entries(IMAGE_PROVIDERS)) if (s.local.providers?.[id]?.available || !s.local.signedIn || s.local.proRequired) list.push([`local:${id}`, `${p.label} · Pixel Studio Cloud credits`]); }
     else if (s.local) for (const [id, p] of Object.entries(IMAGE_PROVIDERS)) list.push([`local:${id}`, `${p.label} · via Pixel Studio Local${s.local.providers?.[id]?.available ? '' : ' (no key)'}`]);
     else if (s.local === false) for (const [id, p] of Object.entries(IMAGE_PROVIDERS)) list.push([`key:${id}`, `${p.label} · your API key`]);
     list.push(['chat', 'Any chatbot · copy the prompt, paste the image']);
@@ -174,6 +174,7 @@ export function openAiImageDialog() {
     let text = '';
     if (kind === 'chat') text = 'Copy the prompt into ChatGPT, Gemini, Copilot or any image-capable chatbot, then paste (⌘V) or drop the image it makes here. Free with your existing chat plan.';
     else if (kind === 'local' && s.local.cloud && !s.local.signedIn) text = 'Sign in (Account, top right) to generate images with your AI credits.';
+    else if (kind === 'local' && s.local.cloud && s.local.proRequired) text = 'Image generation is part of Pixel Studio Pro. Upgrade under Account (top right).';
     else if (kind === 'local' && s.local.cloud) { const cost = imageCredits(id, { n: prefs.n, quality: id === 'openai' ? prefs.quality : 'medium' }); text = `Uses ${cost} credit${cost === 1 ? '' : 's'} (${s.local.credits?.balance ?? 0} left).`; }
     else if (kind === 'local' && !s.local.providers?.[id]?.available) text = `No ${meta.label} key found. Start Pixel Studio Local with ${id === 'openai' ? 'OPENAI_API_KEY' : 'GEMINI_API_KEY'} set, or add "${id}" to ~/.pixelstudio/keys.json, then reopen this dialog.`;
     else if (kind === 'local') text = `${meta.label} key found on this computer. It stays there; Pixel Studio Local sends the request for you.`;
@@ -455,7 +456,7 @@ export function openAiImageDialog() {
     if (isLoopback() || isCloudEdition()) {
       try {
         const response = await fetch('/api/image/status', { cache: 'no-store', credentials: 'same-origin' }), body = await response.json();
-        if (response.ok && body.local === true && typeof body.csrfToken === 'string') local = { providers: body.providers || {}, csrfToken: body.csrfToken, cloud: body.cloud === true, signedIn: body.signedIn === true, credits: body.credits };
+        if (response.ok && body.local === true && typeof body.csrfToken === 'string') local = { providers: body.providers || {}, csrfToken: body.csrfToken, cloud: body.cloud === true, signedIn: body.signedIn === true, proRequired: body.proRequired === true, credits: body.credits };
       } catch { /* static server */ }
     }
     if (s.disposed) return;

@@ -6,13 +6,14 @@ import { readFile, realpath, stat } from 'node:fs/promises';
 import { extname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { timingSafeEqual } from 'node:crypto';
-import { CHAT_MODELS, DEFAULT_CHAT_MODEL, MIN_CHAT_CREDITS, PLANS, CREDIT_PACKS, CURRENCY, chatCredits, imageCredits, creditBalance, planFor } from '../src/features/cloud/plans.js';
+import { CHAT_MODELS, DEFAULT_CHAT_MODEL, MIN_CHAT_CREDITS, PLANS, CREDIT_PACKS, CURRENCY, chatCredits, imageCredits, creditBalance, planFor, planAllows } from '../src/features/cloud/plans.js';
 import { IMAGE_PROVIDERS } from '../src/features/ai/image-api.js';
 import { isPixelPrompt, readPreviewImages, MAX_PROMPT_BYTES, MAX_PREVIEW_BYTES, MAX_PREVIEW_COUNT } from '../local/pixel-request.mjs';
 import { validateImageRequest, MAX_IMAGE_BODY_BYTES } from '../local/image-client.mjs';
 import { CloudError } from './store.mjs';
 import { chatEdit, chatModels, generateImages } from './ai.mjs';
 import { verifySignature } from './billing.mjs';
+import { renderLanding } from './landing.mjs';
 
 const MAX_EDIT_BODY = MAX_PROMPT_BYTES + Math.ceil(MAX_PREVIEW_BYTES * MAX_PREVIEW_COUNT * 4 / 3) + 64 * 1024;
 const MAX_PROJECT_BODY = 12 * 1024 * 1024;
@@ -21,7 +22,7 @@ const EMAIL = /^[^\s@<>()[\]\\,;:"]{1,64}@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?
 const PROJECT_ID = /^[A-Za-z0-9_-]{6,64}$/;
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon',
+  '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif', '.ico': 'image/x-icon',
   '.pxa': 'text/plain; charset=utf-8', '.pxs': 'application/octet-stream', '.txt': 'text/plain; charset=utf-8',
   '.md': 'text/plain; charset=utf-8', '.zip': 'application/zip', '.woff2': 'font/woff2', '.webmanifest': 'application/manifest+json',
 };
@@ -80,13 +81,15 @@ export function createRateLimiter({ now = () => Date.now() } = {}) {
   };
 }
 
+const PRO_AI_MESSAGE = 'AI is part of Pixel Studio Pro. Upgrade under Account (top right) to get 1,000 AI credits every month.';
+
 export function createCloudServer({ config, store, mailer, billing, distDirectory = fileURLToPath(new URL('../dist/', import.meta.url)), fetchImpl = globalThis.fetch, log = console.log }) {
   const origin = new URL(config.publicUrl).origin;
   const secureCookie = config.publicUrl.startsWith('https://');
   const allow = createRateLimiter();
   const busyUsers = new Set();
   const controllers = new Set();
-  let distRoot, indexHtml, closing = false;
+  let distRoot, indexHtml, landingHtml, closing = false;
 
   const clientIp = request => (config.trustProxy && String(request.headers['x-forwarded-for'] || '').split(',')[0].trim()) || request.socket.remoteAddress || 'unknown';
   const sessionCookie = (token, maxAge) => `${COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secureCookie ? '; Secure' : ''}`;
@@ -130,8 +133,10 @@ export function createCloudServer({ config, store, mailer, billing, distDirector
       throw fail('TOO_MANY_REQUESTS', 'Too many sign-in emails. Wait a few minutes, then try again.', 429);
     }
     const token = store.createLoginToken(email);
-    await mailer.sendSignIn(email, `${config.publicUrl}/api/account/verify?token=${encodeURIComponent(token)}`);
-    sendJson(response, 200, { sent: true });
+    const link = `${config.publicUrl}/api/account/verify?token=${encodeURIComponent(token)}`;
+    await mailer.sendSignIn(email, link);
+    // Development without an email provider: nothing is sent, so hand the link to the browser instead.
+    sendJson(response, 200, { sent: true, ...(!config.production && !config.resendApiKey ? { devLink: link } : {}) });
   }
   // GET shows a confirm button; only the POST consumes the token, so link scanners in mail clients cannot use it up.
   function verifyPage(url, response) {
@@ -148,12 +153,12 @@ export function createCloudServer({ config, store, mailer, billing, distDirector
     const token = new URLSearchParams((await readBody(request, 4096)).toString('utf8')).get('token') || '';
     const user = token && store.consumeLoginToken(token);
     if (!user) {
-      response.writeHead(303, { Location: '/?signin=expired' });
+      response.writeHead(303, { Location: '/app?signin=expired' });
       response.end();
       return;
     }
     const session = store.createSession(user.id);
-    response.writeHead(303, { Location: '/?signin=ok', 'Set-Cookie': sessionCookie(session.token, 30 * 86_400) });
+    response.writeHead(303, { Location: '/app?signin=ok', 'Set-Cookie': sessionCookie(session.token, 30 * 86_400) });
     response.end();
   }
   async function logout(request, response) {
@@ -178,15 +183,21 @@ export function createCloudServer({ config, store, mailer, billing, distDirector
   }
 
   // ---------- AI (same contracts as Pixel Studio Local) ----------
+  function requirePro(user, feature) {
+    if (!planAllows(user.plan, feature)) throw fail('PRO_REQUIRED', feature === 'ai' ? PRO_AI_MESSAGE : 'This is part of Pixel Studio Pro. Upgrade under Account (top right).', 402);
+  }
   function aiStatus(request, response, kind) {
     const session = current(request);
     const base = { local: true, cloud: true, busy: !!session && busyUsers.has(session.user.id) };
     if (kind === 'image') {
       const keys = { openai: config.openaiApiKey, gemini: config.geminiApiKey };
-      const providers = Object.fromEntries(Object.entries(IMAGE_PROVIDERS).map(([id, p]) => [id, { label: p.label, available: !!session && !!keys[id], models: p.models, defaultModel: p.defaultModel }]));
-      return sendJson(response, 200, { ...base, providers, csrfToken: session?.csrf || '', signedIn: !!session, credits: session ? credits(session.user) : null });
+      const pro = !!session && planAllows(session.user.plan, 'ai');
+      const providers = Object.fromEntries(Object.entries(IMAGE_PROVIDERS).map(([id, p]) => [id, { label: p.label, available: pro && !!keys[id], models: p.models, defaultModel: p.defaultModel }]));
+      return sendJson(response, 200, { ...base, providers, csrfToken: session?.csrf || '', signedIn: !!session, proRequired: !!session && !pro, credits: session ? credits(session.user) : null });
     }
     if (!session) return sendJson(response, 200, { ...base, connected: false, authMode: null, models: [], code: 'SIGN_IN_REQUIRED', message: 'Sign in to Pixel Studio Cloud (Account, top right) to use AI with your monthly credits.' });
+    const accountLabel = `Pixel Studio Cloud · ${planFor(session.user.plan).name}`;
+    if (!planAllows(session.user.plan, 'ai')) return sendJson(response, 200, { ...base, connected: false, authMode: null, models: [], accountLabel, credits: credits(session.user), code: 'PRO_REQUIRED', message: PRO_AI_MESSAGE });
     if (!config.openaiApiKey) return sendJson(response, 200, { ...base, connected: false, authMode: null, models: [], accountLabel: `Pixel Studio Cloud · ${planFor(session.user.plan).name}`, credits: credits(session.user), code: 'AI_NOT_CONFIGURED', message: 'AI is not set up on this server yet.' });
     sendJson(response, 200, { ...base, connected: true, authMode: 'cloud', accountLabel: `Pixel Studio Cloud · ${planFor(session.user.plan).name}`, models: chatModels(), csrfToken: session.csrf, credits: credits(session.user) });
   }
@@ -207,6 +218,7 @@ export function createCloudServer({ config, store, mailer, billing, distDirector
 
   async function aiEdit(request, response) {
     const { user } = requireUser(request);
+    requirePro(user, 'ai');
     store.requireCredits(user.id, MIN_CHAT_CREDITS);
     const release = reserve(user.id);
     const { controller, done } = abortOnClose(request, response);
@@ -250,6 +262,7 @@ export function createCloudServer({ config, store, mailer, billing, distDirector
 
   async function imageGenerate(request, response) {
     const { user } = requireUser(request);
+    requirePro(user, 'ai');
     const release = reserve(user.id);
     const { controller, done } = abortOnClose(request, response);
     try {
@@ -299,6 +312,7 @@ export function createCloudServer({ config, store, mailer, billing, distDirector
   async function checkout(request, response) {
     const { user } = requireUser(request);
     const { product } = await readJson(request, 1024);
+    if (String(product).startsWith('credits-')) requirePro(user, 'creditPacks');
     sendJson(response, 200, { url: await billing.checkout(user, String(product || '')) });
   }
   async function webhook(request, response) {
@@ -315,9 +329,15 @@ export function createCloudServer({ config, store, mailer, billing, distDirector
     let decoded;
     try { decoded = decodeURIComponent(pathname); } catch { throw fail('NOT_FOUND', 'File not found.', 404); }
     if (decoded.includes('\\') || decoded.includes('\0') || decoded.split('/').some(part => part.startsWith('.'))) throw fail('NOT_FOUND', 'File not found.', 404);
-    if (decoded === '/' || decoded === '/index.html') {
+    // The marketing page lives at /, the editor at /app (its relative asset URLs still resolve from the root).
+    const page = decoded === '/app' ? indexHtml : decoded === '/' ? landingHtml : null;
+    if (page) {
       response.writeHead(200, { 'Content-Type': TYPES['.html'], 'Cache-Control': 'no-cache' });
-      return response.end(request.method === 'HEAD' ? undefined : indexHtml);
+      return response.end(request.method === 'HEAD' ? undefined : page);
+    }
+    if (['/', '/app/', '/index.html', '/landing.html'].includes(decoded)) {
+      response.writeHead(301, { Location: decoded === '/landing.html' ? '/' : `/app${request.url.includes('?') ? request.url.slice(request.url.indexOf('?')) : ''}` });
+      return response.end();
     }
     const requested = resolve(distRoot, `.${decoded}`);
     if (!requested.startsWith(distRoot + sep)) throw fail('NOT_FOUND', 'File not found.', 404);
@@ -384,6 +404,7 @@ export function createCloudServer({ config, store, mailer, billing, distDirector
       distRoot = await realpath(distDirectory);
       // The editor detects the hosted edition from this tag (CSP forbids inline scripts).
       indexHtml = (await readFile(resolve(distRoot, 'index.html'), 'utf8')).replace('<head>', '<head>\n  <meta name="pixel-studio-cloud" content="1">');
+      landingHtml = await readFile(resolve(distRoot, 'landing.html'), 'utf8').then(html => renderLanding(html, config), () => null);
       await new Promise((ok, reject) => { server.once('error', reject); server.listen(port, host, () => { server.removeListener('error', reject); ok(); }); });
       return `http://${host === '0.0.0.0' ? 'localhost' : host}:${server.address().port}/`;
     },

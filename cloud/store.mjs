@@ -199,7 +199,7 @@ export function openStore(path = ':memory:', { now = () => Date.now() } = {}) {
         const exists = q('SELECT 1 FROM projects WHERE user_id = ? AND id = ?').get(userId, id);
         const count = q('SELECT COUNT(*) AS n FROM projects WHERE user_id = ?').get(userId).n;
         if (!exists && count >= plan.cloudProjects) {
-          throw new CloudError('PROJECT_LIMIT', plan.id === 'free' ? `The Free plan keeps ${plan.cloudProjects} projects in the cloud. Delete one or upgrade to Pro.` : `You have reached ${plan.cloudProjects} cloud projects. Delete one to save another.`, 403);
+          throw new CloudError('PROJECT_LIMIT', plan.id === 'free' ? `The Free plan keeps ${plan.cloudProjects} project${plan.cloudProjects === 1 ? '' : 's'} in the cloud. ${plan.cloudProjects === 1 ? 'Delete it' : 'Delete one'} or upgrade to Pro.` : `You have reached ${plan.cloudProjects} cloud projects. Delete one to save another.`, 403);
         }
         const at = now();
         q(`INSERT INTO projects (user_id, id, name, data, bytes, updated_at) VALUES (?, ?, ?, ?, ?, ?)

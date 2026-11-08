@@ -6,18 +6,30 @@
 /** One credit covers this much upstream AI cost (USD). Pro's 1,000 monthly credits therefore cost at most $2. */
 export const CREDIT_USD = 0.002;
 
+/** Pro-only parts of the hosted edition. Free covers drawing, PNG export and one cloud project; anything that
+ * costs money to run (AI) or that working artists need (sheets, animations) is Pro. */
+export const PRO_FEATURES = Object.freeze({
+  ai: 'AI (assistant, AI edit, image generation)',
+  sheetExport: 'Sprite sheet export',
+  animationExport: 'GIF and APNG export',
+  creditPacks: 'Extra AI credit packs',
+});
+
 export const PLANS = Object.freeze({
   free: Object.freeze({
     id: 'free', name: 'Free', price: { monthly: 0, yearly: 0 },
-    monthlyCredits: 30, cloudProjects: 3, projectBytes: 2 * 1024 * 1024,
-    features: ['The full editor, offline and in your browser', 'Bring your own OpenAI or Gemini key', '30 AI credits every month', '3 projects in the cloud'],
+    monthlyCredits: 0, cloudProjects: 1, projectBytes: 2 * 1024 * 1024, allows: Object.freeze([]),
+    features: ['The full pixel editor in your browser', 'PNG frames, PNG sequences and project files', '1 project in the cloud'],
   }),
   pro: Object.freeze({
     id: 'pro', name: 'Pro', price: { monthly: 8, yearly: 72 },
-    monthlyCredits: 1000, cloudProjects: 200, projectBytes: 8 * 1024 * 1024,
-    features: ['Everything in Free', '1,000 AI credits every month (assistant, AI edit, image generation)', '200 projects in the cloud, on every device', 'Priority support'],
+    monthlyCredits: 1000, cloudProjects: 200, projectBytes: 8 * 1024 * 1024, allows: Object.freeze(Object.keys(PRO_FEATURES)),
+    features: ['Everything in Free', '1,000 AI credits every month (assistant, AI edit, image generation)', 'Sprite sheets for Aseprite, Godot and Unity, GIF and APNG export', '200 projects in the cloud, on every device', 'Extra credit packs when you need more', 'Priority support'],
   }),
 });
+
+/** Whether a plan includes a PRO_FEATURES key. */
+export const planAllows = (planId, feature) => (PLANS[planId] || PLANS.free).allows.includes(feature);
 
 /** One-off credit packs; purchased credits never expire and are used after the monthly allowance. */
 export const CREDIT_PACKS = Object.freeze([Object.freeze({ id: 'credits-1000', credits: 1000, price: 10 })]);

@@ -43,8 +43,9 @@ import { initAnimatePanel, renderAnimatePanel } from './animate-panel.js';
 import { initMotionAsk, motionAskDialog } from './motion-ask.js';
 import { initMotionModes, syncMotionMode, drawMotionOverlay } from './motion-modes.js';
 import { initOutlineDialog, renderOutlineButton, outlineDialog } from './outline-dialog.js';
-import { initAccount } from '../features/cloud/account-dialog.js';
-import { isCloudEdition } from '../features/cloud/client.js';
+import { initAccount, accountDialog as cloudAccountDialog } from '../features/cloud/account-dialog.js';
+import { isCloudEdition, cloudAllows } from '../features/cloud/client.js';
+import { PRO_FEATURES } from '../features/cloud/plans.js';
 import { initRigMode, syncRigMode, drawRigOverlay, toggleRigMode } from './rig-mode.js';
 import { initTimeline, renderFrameCards, frameAction, timelineKey, nextPreviewIndex, loopLabel } from './timeline.js';
 import { initOnion, drawOnion, onionSummary } from './onion.js';
@@ -2776,6 +2777,12 @@ function exportDialog() {
   };
   const imageView = (tab) => () => {
     activate(tab);
+    const feature = {sheet:'sheetExport',anim:'animationExport'}[tab];
+    if (feature && !cloudAllows(feature)) {
+      $('export-options').innerHTML=`<div class="notice"><strong>${escapeHTML(PRO_FEATURES[feature])} is part of Pixel Studio Pro.</strong> Free includes PNG frames, PNG sequences and project files. Pro adds sprite sheets, GIF and APNG export, 1,000 AI credits a month and 200 cloud projects.</div><div class="modal-actions left"><button type="button" class="button primary" id="export-upgrade">See Pro</button></div>`;
+      $('export-upgrade').onclick=()=>cloudAccountDialog();
+      return;
+    }
     renderImageExport($('export-options'),tab,{project:state.project,animationId:state.animationId,frameId:state.frameId,layerId:currentLayer().id,layerName:currentLayer().name,name:state.project.name,download:downloadBlob,toast,icon,escapeHTML});
   };
   $('export-ai-tab').onclick = aiView;

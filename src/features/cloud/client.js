@@ -2,12 +2,16 @@
  * Browser side of Pixel Studio Cloud (the hosted edition). The cloud server adds <meta name="pixel-studio-cloud">
  * to index.html; everywhere else (GitHub Pages, Pixel Studio Local, file previews) these features stay hidden.
  */
+import { planAllows } from './plans.js';
+
 export const isCloudEdition = () => typeof document !== 'undefined' && !!document.querySelector('meta[name="pixel-studio-cloud"]');
 
 let account = null;
 const listeners = new Set();
 
 export const currentAccount = () => account;
+/** Whether a Pro feature is available: always outside the hosted edition, otherwise only on a plan that includes it. */
+export const cloudAllows = feature => !isCloudEdition() || planAllows(account?.plan || 'free', feature);
 export function onAccountChange(listener) { listeners.add(listener); return () => listeners.delete(listener); }
 function publish(next) { account = next; for (const listener of listeners) listener(account); return account; }
 

@@ -14,12 +14,13 @@ const SECRET = 'whsec_test';
 
 test('credits refill monthly, spend the allowance first and price tokens and images', () => {
   const nov = Date.parse('2026-11-08T12:00:00Z'), dec = Date.parse('2026-12-01T00:00:01Z');
-  let user = refreshCredits({ plan: 'free', allowance: 0, allowancePeriod: '', purchased: 5 }, nov);
-  assert.equal(user.allowance, 30);
-  user = spendCredits(user, 33);
+  assert.equal(refreshCredits({ plan: 'free', allowance: 0, allowancePeriod: '', purchased: 0 }, nov).allowance, 0, 'Free has no AI credits');
+  let user = refreshCredits({ plan: 'pro', allowance: 0, allowancePeriod: '', purchased: 5 }, nov);
+  assert.equal(user.allowance, 1000);
+  user = spendCredits(user, 1003);
   assert.deepEqual([user.allowance, user.purchased, creditBalance(user)], [0, 2, 2]);
   assert.equal(refreshCredits(user, nov).allowance, 0, 'same month: no refill');
-  assert.equal(refreshCredits({ ...user, plan: 'pro' }, dec).allowance, 1000);
+  assert.equal(refreshCredits(user, dec).allowance, 1000);
   assert.equal(creditBalance(spendCredits(user, 10)), -8, 'an overdraft comes out of purchased credits');
   assert.equal(chatCredits('gpt-5-mini', 0, 0), 1);
   assert.equal(chatCredits('gpt-5-mini', 20_000, 5_000), 8); // $0.005 + $0.01 = $0.015 → 7.5 → 8
@@ -34,6 +35,7 @@ async function setup(t, { now = () => Date.now() } = {}) {
   const dist = await mkdtemp(join(tmpdir(), 'ps-cloud-'));
   await writeFile(join(dist, 'index.html'), '<!doctype html><html><head><title>x</title></head><body></body></html>');
   await writeFile(join(dist, 'app.js'), 'export {};');
+  await writeFile(join(dist, 'landing.html'), '<!doctype html><html><head><title>Pixel Studio</title></head><body><!--pricing--><!--support--></body></html>');
   const mails = [], upstream = [];
   const config = {
     publicUrl: 'http://placeholder', openaiApiKey: 'sk-server', geminiApiKey: '', lsApiKey: 'ls-key', lsStoreId: '7', lsWebhookSecret: SECRET,
@@ -82,28 +84,42 @@ async function setup(t, { now = () => Date.now() } = {}) {
     assert.match(await page.text(), /<form method="post"/);
     const done = await call('/api/account/verify', { method: 'POST', raw: `token=${encodeURIComponent(link.searchParams.get('token'))}`, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
     assert.equal(done.status, 303);
-    assert.equal(done.headers.get('location'), '/?signin=ok');
+    assert.equal(done.headers.get('location'), '/app?signin=ok');
     const me = await (await call('/api/account/me')).json();
     return { me, token: link.searchParams.get('token') };
   }
   const signWebhook = payload => { const raw = JSON.stringify(payload); return { raw, headers: { 'Content-Type': 'application/json', 'X-Signature': createHmac('sha256', SECRET).update(raw).digest('hex') } }; };
-  return { call, signIn, mails, upstream, store, origin, signWebhook, setReply: reply => { openaiReply = reply; }, clearCookie: () => { cookie = ''; } };
+  async function goPro(email = 'ada@example.com') {
+    const hook = signWebhook({ meta: { event_name: 'subscription_created', custom_data: { user_id: store.userByEmail(email).id } }, data: { type: 'subscriptions', id: `sub-${email}`, attributes: { status: 'active', variant_id: 101, customer_id: 9, updated_at: new Date().toISOString() } } });
+    assert.equal((await call('/api/billing/webhook', { method: 'POST', raw: hook.raw, headers: hook.headers })).status, 200);
+  }
+  return { call, signIn, goPro, mails, upstream, store, origin, signWebhook, setReply: reply => { openaiReply = reply; }, clearCookie: () => { cookie = ''; } };
 }
 
 test('email sign-in: confirm page, single-use token, session cookie, marker tag and sign-out', async t => {
   const s = await setup(t);
-  const html = await (await s.call('/')).text();
+  const html = await (await s.call('/app')).text();
   assert.match(html, /<meta name="pixel-studio-cloud" content="1">/);
+  const landing = await (await s.call('/')).text();
+  assert.doesNotMatch(landing, /pixel-studio-cloud/, 'the marketing page is not the editor');
+  assert.match(landing, /€8<small>\/month<\/small>/, 'pricing comes from the shared plan table');
+  assert.match(landing, /href="\.\/app\?upgrade=pro"/);
+  assert.match(landing, /mailto:help@example\.com/);
+  const legacy = await s.call('/index.html?x=1');
+  assert.equal(legacy.status, 301);
+  assert.equal(legacy.headers.get('location'), '/app?x=1');
   assert.equal((await s.call('/api/account/login', { method: 'POST', body: { email: 'not-an-email' } })).status, 400);
+  const dev = await (await s.call('/api/account/login', { method: 'POST', body: { email: 'dev@example.com' } })).json();
+  assert.equal(dev.devLink, s.mails.at(-1).link, 'without an email provider in development the link is returned');
   assert.equal((await s.call('/api/account/login', { method: 'POST', body: { email: 'a@b.co' }, headers: { Origin: 'https://evil.example' } })).status, 403);
   const { me, token } = await s.signIn();
   assert.equal(me.signedIn, true);
   assert.equal(me.email, 'ada@example.com');
   assert.equal(me.plan, 'free');
-  assert.deepEqual(me.credits, { allowance: 30, purchased: 0, balance: 30, monthly: 30 });
+  assert.deepEqual(me.credits, { allowance: 0, purchased: 0, balance: 0, monthly: 0 });
   s.clearCookie();
   const reuse = await s.call('/api/account/verify', { method: 'POST', raw: `token=${token}`, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
-  assert.equal(reuse.headers.get('location'), '/?signin=expired');
+  assert.equal(reuse.headers.get('location'), '/app?signin=expired');
   await s.signIn('ada@example.com');
   assert.equal((await s.call('/api/account/logout', { method: 'POST' })).status, 200);
   assert.equal((await (await s.call('/api/account/me')).json()).signedIn, false);
@@ -112,7 +128,13 @@ test('email sign-in: confirm page, single-use token, session cookie, marker tag 
 test('hosted AI streams like Pixel Studio Local, needs the CSRF token and charges credits by tokens', async t => {
   const s = await setup(t);
   assert.equal((await (await s.call('/api/local-ai/status')).json()).connected, false);
-  await s.signIn();
+  const { me } = await s.signIn();
+  const free = await (await s.call('/api/local-ai/status')).json();
+  assert.equal(free.code, 'PRO_REQUIRED');
+  const freeEdit = await s.call('/api/local-ai/edit', { method: 'POST', body: { prompt: 'PXACHAT 1\nHi' }, headers: { 'X-Pixel-Studio-Token': me.csrfToken } });
+  assert.equal(freeEdit.status, 402, 'AI is Pro only');
+  assert.equal(s.upstream.length, 0);
+  await s.goPro();
   const status = await (await s.call('/api/local-ai/status')).json();
   assert.equal(status.local, true);
   assert.equal(status.authMode, 'cloud');
@@ -126,23 +148,28 @@ test('hosted AI streams like Pixel Studio Local, needs the CSRF token and charge
   assert.equal(events.filter(e => e.type === 'delta').map(e => e.text).join(''), '{"reply":"Hi!"}');
   const done = events.at(-1);
   assert.equal(done.type, 'done');
-  assert.deepEqual(done.credits, { used: 8, balance: 22 });
+  assert.deepEqual(done.credits, { used: 8, balance: 992 });
   const sent = JSON.parse(s.upstream.at(-1).init.body);
   assert.equal(s.upstream.at(-1).init.headers.Authorization, 'Bearer sk-server');
   assert.match(sent.messages[0].content, /Pixel Studio assistant/);
-  // Spend the rest: 22 → 0 with an expensive reply, then the next request is refused before any upstream call.
-  s.setReply({ text: '{"reply":"x"}', usage: { prompt_tokens: 0, completion_tokens: 22_000 } });
+  // Spend the rest: 992 → 0 with an expensive reply, then the next request is refused before any upstream call.
+  s.setReply({ text: '{"reply":"x"}', usage: { prompt_tokens: 0, completion_tokens: 992_000 } });
   await (await s.call('/api/local-ai/edit', { method: 'POST', body: { prompt }, headers })).text();
   const calls = s.upstream.length;
   const refused = await s.call('/api/local-ai/edit', { method: 'POST', body: { prompt }, headers });
   assert.equal(refused.status, 402);
-  assert.match((await refused.json()).error, /Upgrade to Pro/);
+  assert.equal((await refused.json()).code, 'NO_CREDITS');
   assert.equal(s.upstream.length, calls);
 });
 
 test('image generation charges fixed credits per image', async t => {
   const s = await setup(t);
   await s.signIn();
+  const free = await (await s.call('/api/image/status')).json();
+  assert.equal(free.proRequired, true);
+  assert.equal(free.providers.openai.available, false);
+  assert.equal((await s.call('/api/image/generate', { method: 'POST', body: { provider: 'openai', prompt: 'a cat' }, headers: { 'X-Pixel-Studio-Token': free.csrfToken } })).status, 402);
+  await s.goPro();
   const status = await (await s.call('/api/image/status')).json();
   assert.equal(status.providers.openai.available, true);
   assert.equal(status.providers.gemini.available, false);
@@ -150,15 +177,14 @@ test('image generation charges fixed credits per image', async t => {
   const body = await response.json();
   assert.equal(response.status, 200);
   assert.deepEqual(body.images, [PNG]);
-  assert.deepEqual(body.credits, { used: 21, balance: 9 });
-  const tooMany = await s.call('/api/image/generate', { method: 'POST', body: { provider: 'openai', prompt: 'a cat', quality: 'high' }, headers: { 'X-Pixel-Studio-Token': status.csrfToken } });
-  assert.equal(tooMany.status, 402);
+  assert.deepEqual(body.credits, { used: 21, balance: 979 });
 });
 
 test('Lemon Squeezy: checkout carries the user, signed webhooks switch plans and add credit packs once', async t => {
   const s = await setup(t);
   const { me } = await s.signIn();
   const headers = { 'X-Pixel-Studio-Token': me.csrfToken };
+  assert.equal((await s.call('/api/billing/checkout', { method: 'POST', body: { product: 'credits-1000' }, headers })).status, 402, 'credit packs are for Pro');
   const checkout = await (await s.call('/api/billing/checkout', { method: 'POST', body: { product: 'pro-monthly' }, headers })).json();
   assert.equal(checkout.url, 'https://pixelstudio.lemonsqueezy.com/checkout/abc');
   const sent = JSON.parse(s.upstream.at(-1).init.body);
@@ -183,7 +209,7 @@ test('Lemon Squeezy: checkout carries the user, signed webhooks switch plans and
   await deliver(sub('expired', '2026-11-08T12:00:00Z'));
   account = await (await s.call('/api/account/me')).json();
   assert.equal(account.plan, 'free');
-  assert.equal(account.credits.allowance, 30);
+  assert.equal(account.credits.allowance, 0);
 
   const order = s.signWebhook({ meta: { event_name: 'order_created', custom_data: { user_id: userId } }, data: { type: 'orders', id: '777', attributes: { status: 'paid', customer_id: 9, first_order_item: { variant_id: 103 } } } });
   await deliver(order);
@@ -196,14 +222,14 @@ test('cloud projects are per user and limited by plan', async t => {
   const { me } = await s.signIn();
   const headers = { 'X-Pixel-Studio-Token': me.csrfToken };
   const data = JSON.stringify({ name: 'Cat', animations: [] });
-  for (const id of ['proj-aaa1', 'proj-aaa2', 'proj-aaa3']) assert.equal((await s.call(`/api/cloud/projects/${id}`, { method: 'PUT', body: { name: id, data }, headers })).status, 200);
-  const limited = await s.call('/api/cloud/projects/proj-aaa4', { method: 'PUT', body: { name: 'x', data }, headers });
+  for (const id of ['proj-aaa1']) assert.equal((await s.call(`/api/cloud/projects/${id}`, { method: 'PUT', body: { name: id, data }, headers })).status, 200);
+  const limited = await s.call('/api/cloud/projects/proj-aaa2', { method: 'PUT', body: { name: 'x', data }, headers });
   assert.equal(limited.status, 403);
-  assert.match((await limited.json()).error, /Free plan keeps 3/);
+  assert.match((await limited.json()).error, /Free plan keeps 1 /);
   assert.equal((await s.call('/api/cloud/projects/proj-aaa1', { method: 'PUT', body: { name: 'Renamed', data }, headers })).status, 200, 'overwriting is not a new project');
   const list = await (await s.call('/api/cloud/projects')).json();
-  assert.equal(list.projects.length, 3);
-  assert.equal(list.limit, 3);
+  assert.equal(list.projects.length, 1);
+  assert.equal(list.limit, 1);
   assert.equal((await (await s.call('/api/cloud/projects/proj-aaa1')).json()).name, 'Renamed');
   await s.signIn('other@example.com');
   assert.equal((await s.call('/api/cloud/projects/proj-aaa1')).status, 404);

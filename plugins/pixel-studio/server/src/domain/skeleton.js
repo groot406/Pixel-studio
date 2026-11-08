@@ -8,7 +8,7 @@
  */
 import { validateProject, makeLayeredFrame } from './project.js';
 import { renderParts } from './artwork.js';
-import { instancePivot, instanceSize, transformedSize, instanceBox, instancePixel, pivotUnder, withPivot, poseVector, deformPoint, TRANSFORM_MATRICES } from './geometry.js';
+import { instancePivot, instanceSize, transformedSize, instanceBox, instancePixel, pivotUnder, withPivot, poseVector, deformPoint, TRANSFORM_MATRICES, resizeSeam, axisToPart, axisFromPart } from './geometry.js';
 import { normalizeAngle, angleDelta, roundInt, solveChain, ease } from './motion.js';
 
 const cels = frame => frame.cels;
@@ -42,14 +42,16 @@ function framesOf(animation, { frameIds, frameId }) {
 /** Continuous part-pixel point → transformed box point (resize, then flip/turn). */
 export function partToBox(op, part, pt) {
   const size = instanceSize(op, part), [a, b, c, d] = TRANSFORM_MATRICES[op.transform];
-  const u = pt.x * size.width / part.width, v = pt.y * size.height / part.height, w = size.width, h = size.height;
+  const seam = resizeSeam(op, part), w = size.width, h = size.height;
+  const u = axisFromPart(pt.x, w, part.width, seam.x), v = axisFromPart(pt.y, h, part.height, seam.y);
   return { x: a*u + b*v + (a < 0 ? w : 0) + (b < 0 ? h : 0), y: c*u + d*v + (c < 0 ? w : 0) + (d < 0 ? h : 0) };
 }
 /** Inverse of partToBox. */
 export function boxToPart(op, part, pt) {
   const size = instanceSize(op, part), [a, b, c, d] = TRANSFORM_MATRICES[op.transform], w = size.width, h = size.height;
   const X = pt.x - (a < 0 ? w : 0) - (b < 0 ? h : 0), Y = pt.y - (c < 0 ? w : 0) - (d < 0 ? h : 0);
-  return { x: (a*X + c*Y) * part.width / size.width, y: (b*X + d*Y) * part.height / size.height };
+  const seam = resizeSeam(op, part);
+  return { x: axisToPart(a*X + c*Y, w, part.width, seam.x), y: axisToPart(b*X + d*Y, h, part.height, seam.y) };
 }
 const pivotOffset = (op, part) => { const c = instancePivot(op, part); return { x: c.x - op.x, y: c.y - op.y }; };
 /** Box point → canvas point as rendered: deformed (wave, bulge, twist), skewed, 3D-turned and rotated about the pivot. */

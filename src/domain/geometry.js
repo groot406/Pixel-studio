@@ -89,10 +89,47 @@ export function instanceSize(instance, part) {
 /**
  * Nearest-neighbour sample: which of `source` part pixels shows at displayed pixel `i` of `target`.
  * Sampling at pixel centres, floor((2i+1)·source / (2·target)), is exact integer math and symmetric, so squashing
- * 8 rows to 4 keeps rows 1,3,5,7 and stretching 4 columns to 8 doubles every column. Out-of-range input stays out of range.
+ * 8 rows to 4 keeps rows 1,3,5,7 and stretching 4 columns to 8 doubles every column. With a `seam` (see resizeSeam) the
+ * rows/columns are added or dropped there instead. Out-of-range input stays out of range.
  */
-export function sampleIndex(i, target, source) {
-  return target===source ? i : Math.floor(((2*i+1)*source)/(2*target));
+export function sampleIndex(i, target, source, seam = null) {
+  if (target === source) return i;
+  if (seam === null) return Math.floor(((2*i+1)*source)/(2*target));
+  const k = target - source, a = seamStart(seam, target, source);
+  return i < a ? i : k > 0 && i < a + k ? a : i - k;
+}
+
+/**
+ * With `stretch: 'pivot'`, a resize stretches or squashes at the pivot instead of evenly: displayed rows/columns before the
+ * pivot show the part unchanged, the pivot row/column repeats to grow, and rows/columns from the pivot on are dropped
+ * to shrink, so dragging the pivot down keeps the top of the artwork pixel-exact. Returns the seam (in the part's own
+ * orientation, displayed size) per axis, null for even scaling, or 'centre' without a set pivot (the middle of the art).
+ */
+export function resizeSeam(instance, part) {
+  if (instance.stretch !== 'pivot') return { x: null, y: null };
+  const size = instanceSize(instance, part), even = { x: size.width === part.width, y: size.height === part.height };
+  if (!instance.pivot) return { x: even.x ? null : 'centre', y: even.y ? null : 'centre' };
+  const local = untransformPoint(instance.transform, size.width, size.height, instance.pivot.x, instance.pivot.y);
+  return { x: even.x ? null : local.x, y: even.y ? null : local.y };
+}
+function seamStart(seam, target, source) {
+  return seam === 'centre' ? Math.floor(Math.min(source, target) / 2) : Math.max(0, Math.min(seam, target > source ? source - 1 : target));
+}
+/** Continuous displayed coordinate `u` (0..target) → part coordinate (0..source), evenly or at the seam. */
+export function axisToPart(u, target, source, seam = null) {
+  if (target === source) return u;
+  if (seam === null) return u * source / target;
+  const k = target - source, a = seamStart(seam, target, source);
+  return u < a ? u : k > 0 ? (u < a + k ? a + (u - a) / k : u - k) : u - k;
+}
+/** Inverse of axisToPart: continuous part coordinate → displayed coordinate (a squashed-away band collapses onto the seam). */
+export function axisFromPart(s, target, source, seam = null) {
+  if (target === source) return s;
+  if (seam === null) return s * target / source;
+  const k = target - source, a = seamStart(seam, target, source);
+  if (s < a) return s;
+  if (k > 0) return s < a + 1 ? a + (s - a) * k : s + k;
+  return s < a - k ? a : s + k;
 }
 
 /**
@@ -143,7 +180,7 @@ export function transformedSize(instance, part) {
 }
 
 /** Per-instance pose properties beyond position and transform; all optional, absent means default. */
-export const POSE_KEYS = ['width', 'height', 'angle', 'pivot', 'skew', 'tilt', 'deform', 'sampling'];
+export const POSE_KEYS = ['width', 'height', 'angle', 'pivot', 'skew', 'tilt', 'deform', 'stretch', 'sampling'];
 /** Default perspective (percent) of a 3D turn when `tilt.perspective` is omitted. */
 export const DEFAULT_PERSPECTIVE = 30;
 /** The instance's 3D turn `{x, y, perspective}` (degrees, percent), or null when it has none. */
@@ -291,8 +328,8 @@ export function canvasToPartPoint(instance, part, point) {
     const [u, v] = boxPoint(instance, box, x + .5, y + .5);
     x = Math.floor(u + EPSILON); y = Math.floor(v + EPSILON);
   }
-  const local = untransformPoint(instance.transform, size.width, size.height, x, y);
-  return { x: sampleIndex(local.x, size.width, part.width), y: sampleIndex(local.y, size.height, part.height) };
+  const local = untransformPoint(instance.transform, size.width, size.height, x, y), seam = resizeSeam(instance, part);
+  return { x: sampleIndex(local.x, size.width, part.width, seam.x), y: sampleIndex(local.y, size.height, part.height, seam.y) };
 }
 
 /** Whether RotSprite sampling changes this instance's output: only free (non-quarter) angles, skew, 3D turns and deform resample. */
@@ -309,11 +346,13 @@ function partPoint(instance, part, size, box, px, py) {
   const [u, v] = boxPoint(instance, box, px, py), [a, b, c, d] = matrix(instance.transform);
   // Continuous inverse of the dihedral transform (transpose), measured to box edges rather than pixel indices.
   const lx = a*u + c*v + (a < 0 ? size.width : 0) + (c < 0 ? size.width : 0), ly = b*u + d*v + (b < 0 ? size.height : 0) + (d < 0 ? size.height : 0);
-  return [lx * part.width / size.width, ly * part.height / size.height];
+  const seam = resizeSeam(instance, part);
+  return [axisToPart(lx, size.width, part.width, seam.x), axisToPart(ly, size.height, part.height, seam.y)];
 }
 /** Box point of the continuous part point (sx,sy): resize → transform → deform. */
 function partToBoxPoint(instance, part, size, box, sx, sy) {
-  const [a, b, c, d] = matrix(instance.transform), lx = sx * size.width / part.width, ly = sy * size.height / part.height;
+  const [a, b, c, d] = matrix(instance.transform), seam = resizeSeam(instance, part);
+  const lx = axisFromPart(sx, size.width, part.width, seam.x), ly = axisFromPart(sy, size.height, part.height, seam.y);
   const x = a*lx + b*ly + (a < 0 ? size.width : 0) + (b < 0 ? size.height : 0), y = c*lx + d*ly + (c < 0 ? size.width : 0) + (d < 0 ? size.height : 0);
   return instance.deform ? redeform(instance.deform, box, x, y) : [x, y];
 }
@@ -404,7 +443,7 @@ const imageCache = new WeakMap(), IMAGE_CACHE_AREA = 1 << 19;
  */
 export function instanceImage(instance, part) {
   const key = [instance.transform, instance.width, instance.height, instance.angle, instance.pivot?.x, instance.pivot?.y, JSON.stringify(instance.skew),
-    JSON.stringify(instance.tilt), JSON.stringify(instance.deform), instance.sampling, instance.sampling === 'aa' ? part.palette?.join() : ''].join('|');
+    JSON.stringify(instance.tilt), JSON.stringify(instance.deform), instance.stretch, instance.sampling, instance.sampling === 'aa' ? part.palette?.join() : ''].join('|');
   let byPose = imageCache.get(part.pixels);
   if (!byPose) imageCache.set(part.pixels, byPose = Object.assign(new Map(), { area: 0 }));
   const cached = byPose.get(key);

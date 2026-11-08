@@ -4,7 +4,7 @@ import { decodeAIProject } from '../src/formats/pxa.js';
 import { validateProject, compositeFrame, blankProject } from '../src/domain/project.js';
 import { celObjects } from '../src/domain/objects.js';
 import { copyObject, pasteObject } from '../src/domain/object-clipboard.js';
-import { createObjectFromPixels, splitIntoObjects, partIdFromName } from '../src/domain/object-create.js';
+import { createObjectFromPixels, splitIntoObjects, splitPart, partIdFromName } from '../src/domain/object-create.js';
 import { connectedRegion, findIslands, shadeIndex, pixelPerfectStep, ditherCell } from '../src/domain/toolbox.js';
 import { sparklePxa } from './fixtures/pxa-v2.mjs';
 
@@ -97,6 +97,36 @@ test('masked selections move only their own pixels', async () => {
   assert.deepEqual(r.mask, [1, 4]);
   assert.deepEqual(maskBounds([1, 4], 3), { x: 1, y: 0, width: 1, height: 2 });
   assert.equal(moveMaskedPixels(px, 3, 3, [0, 3], 5, 0).dx, 2, 'moves clamp at the canvas edge');
+});
+
+test('selections combine with Shift add, Alt subtract and Shift+Alt intersect', async () => {
+  const { combineSelection, selectionMode } = await import('../src/domain/selection.js');
+  const left = { rect: { x: 0, y: 0, width: 2, height: 2 } }; // 0,1,3,4 on a 3-wide canvas
+  assert.deepEqual(combineSelection(left, [2, 5], 'add', 3), { rect: { x: 0, y: 0, width: 3, height: 2 } }, 'a full rectangle drops its mask');
+  assert.deepEqual(combineSelection(left, [1, 4], 'subtract', 3), { rect: { x: 0, y: 0, width: 1, height: 2 } });
+  assert.deepEqual(combineSelection(left, [4, 5], 'intersect', 3), { rect: { x: 1, y: 1, width: 1, height: 1 } });
+  assert.deepEqual(combineSelection(left, [4, 2], 'add', 3).mask, [0, 1, 2, 3, 4]);
+  assert.equal(combineSelection(left, [0, 1, 3, 4], 'subtract', 3), null);
+  assert.deepEqual([{}, { shiftKey: true }, { altKey: true }, { shiftKey: true, altKey: true }].map(selectionMode), ['replace', 'add', 'subtract', 'intersect']);
+});
+
+test('splitting pixels off a smart object cuts them from the shared part everywhere without moving anything', () => {
+  const { p, target } = scene(2);
+  const made = createObjectFromPixels(p, target, { mask: [9, 10, 18], name: 'Arm', scope: 'animation' });
+  const frames = made.project.animations[0].frames;
+  const second = frames[1].cels.find(c => c.layerId === made.layerId).source.ops.find(o => o.id === made.key);
+  Object.assign(second, { transform: 'R90', x: 4 });
+  const project = validateProject(made.project), shown = project.animations[0].frames.map(f => compositeFrame(project, f));
+  // Part is 2×2: [2,2 / -,3]; split off the bottom-right pixel (part index 3).
+  const r = splitPart(project, { ...target, layerId: made.layerId }, made.key, [3], { name: 'Hand' });
+  assert.deepEqual(r.project.animations[0].frames.map(f => compositeFrame(r.project, f)), shown);
+  const hand = r.project.parts.find(x => x.id === 'hand'), arm = r.project.parts.find(x => x.id === 'arm');
+  assert.deepEqual([hand.width, hand.height, arm.width, arm.height], [1, 1, 2, 1], 'both parts are trimmed');
+  for (const f of r.project.animations[0].frames) {
+    const ops = f.cels.find(c => c.layerId === made.layerId).source.ops;
+    assert.deepEqual(ops.map(o => o.id), [made.key, r.key], 'the new piece sits right above its original in every frame');
+  }
+  assert.throws(() => splitPart(project, { ...target, layerId: made.layerId }, made.key, [0, 1, 3]), /whole object/);
 });
 
 test('pasting into every frame fills frames where the copied object was absent; duplicate does not', () => {

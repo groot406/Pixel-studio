@@ -11,6 +11,7 @@ let d, bakeDialog;
 export function initOutlineDialog(deps, { bake }) {
   d = deps; bakeDialog = bake;
   d.$('magic-outline').onclick = () => outlineDialog();
+  d.$('live-outline-chip').onclick = () => outlineDialog();
   renderOutlineButton();
 }
 
@@ -21,6 +22,7 @@ export function renderOutlineButton() {
   button.classList.toggle('on', on);
   button.setAttribute('aria-pressed', String(on));
   button.querySelector('span').textContent = on ? 'Live outline: on' : 'Outline…';
+  d.$('live-outline-chip').hidden = !on;
   button.title = on ? 'The outline is redrawn around the artwork in every frame. Click to change or turn off.' : 'Live outline that follows every change, remove baked-in outlines, or bake one onto a layer';
 }
 

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { gunzipSync } from 'node:zlib';
 import {
   validateProject, compositeFrame, getAnimationLayers, moveAnimationLayer,
-  insertProjectLayer, removeProjectLayer, canMergeLayerDown,
+  insertProjectLayer, removeProjectLayer, canMergeLayerDown, mergeLayerDown,
 } from '../src/domain/project.js';
 import { decodeAIProject, encodeAIProject } from '../src/formats/pxa.js';
 import { encodePixelProject, decodePixelProject } from '../src/formats/pxs.js';
@@ -72,6 +72,34 @@ test('adding, duplicating and deleting shared layers preserve all animation stac
   removeProjectLayer(project,'artwork');
   assert.deepEqual(validateProject(project).animations[0].layerOrder,['copy','background']);
   assert.ok(project.animations.every(a=>a.frames.every(f=>f.cels.length===2 && !f.cels.some(c=>c.layerId==='artwork'))));
+});
+
+test('merging a layer down keeps every frame looking the same and keeps the top layer', () => {
+  const project = overlappingProject();
+  moveAnimationLayer(project,project.animations[0],'artwork',-1);
+  insertProjectLayer(project,{id:'copy',name:'Copy',visible:true,locked:false},'artwork');
+  const frames = project.animations.flatMap(a=>a.frames);
+  for (const frame of frames) { const cel = frame.cels.find(c=>c.layerId==='copy'); cel.pixels = cel.pixels.map((_,i)=>i%3===0?1:-1); }
+  const before = frames.map(frame=>compositeFrame(project,frame));
+  assert.equal(mergeLayerDown(project,'copy').id,'artwork');
+  assert.deepEqual(frames.map(frame=>compositeFrame(project,frame)),before);
+  assert.ok(project.layers.some(l=>l.id==='copy' && l.name==='Copy') && !project.layers.some(l=>l.id==='artwork'));
+  assert.throws(()=>mergeLayerDown(project,'background'),/not stacked the same way|no layer below/);
+});
+
+test('merging a pixel layer into a layer with objects keeps the objects above it', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const { decodePXA2 } = await import('../src/formats/pxa-v2.js');
+  const project = decodePXA2(await readFile(new URL('../public/samples/key-v2.pxa', import.meta.url), 'utf8')), top = project.layers[0].id;
+  project.layers.unshift({ id: 'outline', name: 'Magic outline', visible: true, locked: false });
+  const frames = project.animations.flatMap(a => a.frames);
+  for (const frame of frames) frame.cels.push({ layerId: 'outline', pixels: Array(project.width * project.height).fill(-1).map((_, i) => i % 7 === 0 ? 1 : -1) });
+  const before = frames.map(frame => compositeFrame(project, frame));
+  mergeLayerDown(project, top);
+  assert.deepEqual(frames.map(frame => compositeFrame(project, frame)), before);
+  const ops = frames[0].cels.find(c => c.layerId === top).source.ops;
+  assert.deepEqual(ops[0], { type: 'span', x: 0, y: 0, values: [1] }, 'the merged pixels are drawn first, under the objects');
+  assert.ok(ops.some(op => op.type === 'use'));
 });
 
 test('JSON, PXA 1, PXA 2 and PXS retain independent animation orders and rendered pixels', async () => {

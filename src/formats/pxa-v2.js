@@ -13,7 +13,7 @@ SPAN x y pixels
 RECT x y width height color
 ELLIPSE x y width height color
 LINE x y end-x end-y color
-Rectangles/ellipses are filled, grid-aligned, without antialiasing. Draw commands overwrite in order and must fit their canvas. Shapes use decimal palette indices; -1 erases.
+Rectangles/ellipses are filled, grid-aligned, without antialiasing. Draw commands overwrite in order and must fit their canvas, except a SPAN in a CEL (not RASTER, PART or OVERRIDE), which may extend past the edge (x/y -2048..2048) to keep a moved pixel object's hidden pixels; only the on-canvas part shows. Shapes use decimal palette indices; -1 erases.
 SPAN symbols: ${PXA2_ALPHABET}; dot erases. A{6} repeats six times. No spaces; positive counts. x/y are zero-based.
 Within a cel use drawing commands or USE instance-id part-id x y [transform] to place a part (an object).
 Object transforms (combine freely; they never change the part itself, so edits to the part still reach every copy):
@@ -21,6 +21,7 @@ Object transforms (combine freely; they never change the part itself, so edits t
 - Resize, squash and stretch: RESIZE instance-id width height (1–2048 each) draws the part at that size by nearest-neighbour sampling, measured before the flip/turn. Unequal scaling squashes or stretches (a 16×16 part at RESIZE id 20 12 is squashed). RESIZE to the part's own size resets it.
 - Free rotation: ROTATE instance-id degrees (whole degrees, -360..360, stored as -179..180; positive = clockwise; 0 resets) turns the resized, flipped result about its pivot (default: the box centre) by nearest-neighbour sampling. Use TURN for exact 90°/180°/270° turns.
 - Pivot: PIVOT instance-id x y (integers -256..512) sets the point that ROTATE, SKEW and TILT turn about: the centre of pixel x y of the flipped/turned, unrotated box, measured from its top-left (the USE x y). PIVOT instance-id CENTER resets to the exact box centre. Example: PIVOT arm 0 3 swings an 8×6 arm about its left edge.
+- Stretch at pivot: STRETCH instance-id PIVOT|EVEN. EVEN (default) scales a RESIZE evenly. PIVOT adds or drops rows/columns at the pivot instead (the middle without a PIVOT): rows/columns before the pivot pixel stay exact, the pivot row/column repeats to grow, and those from the pivot on are dropped first to shrink. Example: PIVOT hero 4 14 + STRETCH hero PIVOT + RESIZE hero 8 20 lengthens the legs and keeps the head pixel-exact.
 - Skew (shear): SKEW instance-id sx sy (whole degrees, -60..60 each; SKEW id 0 0 resets) slants about the pivot: first x moves by tan(sx)·(y − pivot y), then y moves by tan(sy)·(x − pivot x). SKEW id -15 0 leans the top to the right (positive leans it left); good for running lean, wind and fake perspective.
 - 3D turn (pseudo-3D rotation about the other axes): TILT instance-id x y [PERSPECTIVE p] (whole degrees, -180..180 each; TILT id 0 0 resets). y turns the object about a vertical axis through the pivot like a door, coin or a character turning round: its width shrinks by cos(y), at 90 it is edge-on (invisible) and past 90 the back shows (the artwork mirrored); positive y moves the right side away. x tips it about a horizontal axis (head over heels, a card flipping vertically): height shrinks by cos(x), positive x moves the top away. PERSPECTIVE p (0..100, default 30) makes the far edge shorter and the near edge taller; 0 is flat. TILT id 0 180 is a horizontal mirror and TILT id 180 0 a vertical one. A coin spin: TILT coin 0 45, then 0 90, 0 135, ... in successive frames.
 - Deform: DEFORM instance-id NONE | WAVE X|Y amplitude wavelength phase | BULGE strength | TWIST degrees, in box space about the box centre. WAVE X shifts each row y sideways by round(amplitude·sin(360°·y/wavelength + phase)); WAVE Y shifts each column vertically the same way (amplitude 1..32, wavelength 2..256, phase 0..359 degrees; the box grows by the amplitude). BULGE strength (-100..100; positive bulges/magnifies the centre, negative pinches) and TWIST degrees (-360..360; full turn at the centre fading to none at the edge) act inside the ellipse that fits the box. NONE, BULGE 0 and TWIST 0 reset. Animate a flag or water by stepping the WAVE phase each frame: FRAME wave_1 100 FROM wave_0, CEL fx, DEFORM flag WAVE X 2 8 45, then phase 90, 135, ...
@@ -139,13 +140,14 @@ function deformToken([kind, ...args]) {
 }
 const deformText = d => !d ? 'NONE' : d.kind === 'wave' ? `WAVE ${d.axis.toUpperCase()} ${d.amplitude} ${d.wavelength} ${d.phase}` : d.kind === 'bulge' ? `BULGE ${d.strength}` : `TWIST ${d.angle}`;
 const tiltText = t => !t ? '0 0' : `${t.x} ${t.y}${t.perspective !== undefined ? ` PERSPECTIVE ${t.perspective}` : ''}`;
-/** PIVOT/SKEW/TILT/DEFORM/SAMPLE lines that move instance `b`'s effects (absent when omitted) to those of `a`. */
+/** PIVOT/SKEW/TILT/DEFORM/STRETCH/SAMPLE lines that move instance `b`'s effects (absent when omitted) to those of `a`. */
 function effectLines(a, b = {}) {
   const q = JSON.stringify, lines = [];
   if (q(a.pivot) !== q(b.pivot)) lines.push(`PIVOT ${a.id} ${a.pivot ? `${a.pivot.x} ${a.pivot.y}` : 'CENTER'}`);
   if (q(a.skew) !== q(b.skew)) lines.push(`SKEW ${a.id} ${a.skew?.x || 0} ${a.skew?.y || 0}`);
   if (q(a.tilt) !== q(b.tilt)) lines.push(`TILT ${a.id} ${tiltText(a.tilt)}`);
   if (q(a.deform) !== q(b.deform)) lines.push(`DEFORM ${a.id} ${deformText(a.deform)}`);
+  if (a.stretch !== b.stretch) lines.push(`STRETCH ${a.id} ${(a.stretch || 'even').toUpperCase()}`);
   if (a.sampling !== b.sampling) lines.push(`SAMPLE ${a.id} ${(a.sampling || 'nearest').toUpperCase()}`);
   return lines;
 }
@@ -169,7 +171,7 @@ export function applyCelCommand(source, tokens) {
     op.name=quoted(tokens[2]); op.visible=tokens[3]==='1'; op.locked=tokens[4]==='1';
     return;
   }
-  if (!['AT', 'TURN', 'SWAP', 'DROP', 'RESIZE', 'ROTATE', 'PIVOT', 'SKEW', 'TILT', 'DEFORM', 'SAMPLE'].includes(command)) throw new Error(`Unknown command ${command}.`);
+  if (!['AT', 'TURN', 'SWAP', 'DROP', 'RESIZE', 'ROTATE', 'PIVOT', 'SKEW', 'TILT', 'DEFORM', 'STRETCH', 'SAMPLE'].includes(command)) throw new Error(`Unknown command ${command}.`);
   if (command === 'PIVOT') { if (tokens.length !== 3 || tokens[2] !== 'CENTER') argumentsCount(tokens, 3); }
   else if (command === 'DEFORM') { const count = { NONE: 0, WAVE: 4, BULGE: 1, TWIST: 1 }[tokens[2]]; if (count === undefined || tokens.length !== 3 + count) throw new Error('DEFORM expects NONE, WAVE X|Y amplitude wavelength phase, BULGE strength or TWIST degrees.'); }
   else if (command === 'TILT') { if (tokens.length !== 6 || tokens[4] !== 'PERSPECTIVE') argumentsCount(tokens, 3); }
@@ -184,6 +186,10 @@ export function applyCelCommand(source, tokens) {
     if (tilt.x || tilt.y) op.tilt = tilt; else delete op.tilt;
   }
   if (command === 'DEFORM') { op.deform = deformToken(tokens.slice(2)); if (!op.deform) delete op.deform; }
+  if (command === 'STRETCH') {
+    if (!['EVEN', 'PIVOT'].includes(tokens[2])) throw new Error('STRETCH expects EVEN or PIVOT.');
+    if (tokens[2] === 'PIVOT') op.stretch = 'pivot'; else delete op.stretch;
+  }
   if (command === 'SAMPLE') {
     if (!['NEAREST', 'ROTSPRITE', 'AA'].includes(tokens[2])) throw new Error('SAMPLE expects NEAREST, ROTSPRITE or AA.');
     op.sampling = tokens[2].toLowerCase();

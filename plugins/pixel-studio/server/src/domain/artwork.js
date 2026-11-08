@@ -28,7 +28,7 @@ function spend(budget, work = 0) {
 }
 
 const absent = value => value === undefined || value === null;
-/** Normalised optional pivot/skew/tilt/deform/sampling of a `use` op; defaults (centre, no skew, no 3D turn, no deform, nearest, 30% perspective) are omitted. */
+/** Normalised optional pivot/skew/tilt/deform/stretch/sampling of a `use` op; defaults (centre, no skew, no 3D turn, no deform, even stretch, nearest, 30% perspective) are omitted. */
 export function instanceEffects(op) {
   const out = {};
   if (!absent(op.pivot)) {
@@ -60,6 +60,10 @@ export function instanceEffects(op) {
       const angle = integer(d.angle, -360, 360, 'Twist angle');
       if (angle) out.deform = { kind: 'twist', angle };
     } else throw new Error('Deform must be wave, bulge or twist.');
+  }
+  if (!absent(op.stretch)) {
+    if (!['even', 'pivot'].includes(op.stretch)) throw new Error('Stretch must be even or pivot.');
+    if (op.stretch === 'pivot') out.stretch = 'pivot';
   }
   if (!absent(op.sampling)) {
     if (!SAMPLING_MODES.includes(op.sampling)) throw new Error('Sampling must be nearest, rotsprite or aa.');
@@ -112,6 +116,13 @@ export function validateOperations(ops, width, height, paletteLength, parts, bud
       }
       return { type: 'use', id, partId, x: integer(op.x, -MAX_SIZE, MAX_SIZE, 'x'), y: integer(op.y, -MAX_SIZE, MAX_SIZE, 'y'), transform: op.transform, ...metadata };
     }
+    if (op.type === 'span' && allowInstances) {
+      // Cel spans, like placed objects, may lie past the canvas edge so moved pixel objects keep their hidden pixels.
+      const x = integer(op.x, -MAX_SIZE, MAX_SIZE, 'x'), y = integer(op.y, -MAX_SIZE, MAX_SIZE, 'y');
+      if (!Array.isArray(op.values) || !op.values.length || op.values.length > Math.min(MAX_SIZE, MAX_SIZE + 1 - x)) throw new Error('SPAN exceeds its row.');
+      spend(budget, op.values.length);
+      return { type: 'span', x, y, values: op.values.map(c => integer(c, -1, paletteLength - 1, 'Pixel color')) };
+    }
     const x = integer(op.x, 0, width - 1, 'x'), y = integer(op.y, 0, height - 1, 'y');
     if (op.type === 'span') {
       if (!Array.isArray(op.values) || !op.values.length || op.values.length > width - x) throw new Error('SPAN exceeds its row.');
@@ -158,7 +169,8 @@ export function renderOperations(ops, width, height, partImages = new Map()) {
   const pixels = Array(width * height).fill(-1);
   for (const op of ops) {
     if (op.type === 'span') {
-      op.values.forEach((color, i) => { pixels[op.y * width + op.x + i] = color; });
+      if (op.y < 0 || op.y >= height) continue;
+      for (let x = Math.max(0, op.x); x < Math.min(width, op.x + op.values.length); x++) pixels[op.y * width + x] = op.values[x - op.x];
     } else if (op.type === 'use') {
       if (op.visible === false) continue;
       const part = partImages.get(op.partId);

@@ -1,8 +1,9 @@
 import { createInPlaceEdit, setInPlaceScope, inPlaceRestriction, inPlaceDirty, inPlacePoint, beginInPlaceStroke, moveInPlaceStroke, finishInPlaceStroke, restoreInPlace, previewInPlaceEdit, prepareInPlaceEdit, PART_EDIT_TOOLS, inPlaceCanvasRect, inPlacePlacement, inPlaceMode, beginInPlaceSelection, moveInPlaceSelection, finishInPlaceSelection, selectAllInPlace, deselectInPlace, nudgeInPlaceSelection, clearInPlaceSelection, copyInPlaceSelection, pasteInPlace } from '../features/objects/in-place-edit.js';
 import { mapPaletteColors, copyObjects, pasteObject, objectPixelBounds } from '../domain/object-clipboard.js';
-import { commitRasterEdits, writeCelPixels, cloneArtwork } from '../domain/artwork.js';
+import { commitRasterEdits, writeCelPixels, cloneArtwork, renderParts } from '../domain/artwork.js';
 import { celObjects, isEmptyNode, reorderObject, reorderObjectContainer, updateObject, translateObject, forkObject, deleteObject, addObjectContainer, moveObjectToGroup, removeObjectContainer, objectBounds, hitTestObject, dropObject, resizeObject, frameObjects, orderObjects, translateObjects, translatePixelObject, deleteObjects, turnObjects, rotateObjects, tiltObjects } from '../domain/objects.js';
-import { transformedSize } from '../domain/geometry.js';
+import { transformedSize, canvasToPartPoint, instancePixel } from '../domain/geometry.js';
+import { createZoomPreview } from './zoom-preview.js';
 import { detectGrid, edgeProfiles } from '../domain/pixelize.js';
 import { placeRgba, cleanImage, quantizeImage } from '../domain/image-pipeline.js';
 import { indicesToRgba } from '../domain/palette-map.js';
@@ -24,14 +25,14 @@ import { hasLockedInstances } from '../domain/artwork.js';
 import { openPartLibrary, renderPartsStrip, PART_DRAG_TYPE } from './part-library.js';
 import { placePartInFrames, frameRanges } from '../domain/parts.js';
 import { PXA2_GUIDE } from '../formats/pxa-v2.js';
-import { MAX_SIZE, MAX_TOTAL_PIXELS, MAX_COLORS, MAX_LAYERS, uid, getAnimationLayers, insertProjectLayer, makeLayeredFrame, getLayerPixels, compositeFrame, stripEmptyFrames, blankProject, validateProject, linePoints, rectanglePoints, ellipsePoints, floodFill, paletteFromRgba, mapRgbaToPalette, resizePixels, nearestColor } from '../domain/project.js';
+import { MAX_SIZE, MAX_TOTAL_PIXELS, MAX_COLORS, MAX_LAYERS, uid, getAnimationLayers, mergeLayerDown, insertProjectLayer, makeLayeredFrame, getLayerPixels, compositeFrame, stripEmptyFrames, blankProject, validateProject, linePoints, rectanglePoints, ellipsePoints, floodFill, paletteFromRgba, mapRgbaToPalette, resizePixels, nearestColor } from '../domain/project.js';
 import { inspectSheet, sliceSpritesheet, validateSheetMetadata } from '../formats/spritesheet.js';
 import { renderImageExport } from './export-dialog.js';
 import { encodePixelProject, decodePixelProject } from '../formats/pxs.js';
 import { encodeAIProject, decodeAIProject, AI_FORMAT_GUIDE } from '../formats/pxa.js';
-import { selectionBounds, clampSelectionOffset, moveSelectedPixels, outlinePixels, moveMaskedPixels, maskBounds } from '../domain/selection.js';
+import { selectionBounds, clampSelectionOffset, moveSelectedPixels, outlinePixels, moveMaskedPixels, maskBounds, combineSelection, selectionMode } from '../domain/selection.js';
 import { brushPoints, snapLineEnd, transformPixels, copyPixels, pastePixels, replaceColor, connectedRegion, shadeIndex, ditherCell, pixelPerfectStep, repeatPixelChanges, changedIndices } from '../domain/toolbox.js';
-import { createObjectFromPixels, splitIntoObjects, pixelIslands } from '../domain/object-create.js';
+import { createObjectFromPixels, splitIntoObjects, splitPart, pixelIslands } from '../domain/object-create.js';
 import { openProjectStore } from '../storage/workspace.js';
 import { openPromptBuilder } from '../features/ai/prompt-dialog.js';
 import { openAIEdit } from '../features/ai/edit-dialog.js';
@@ -41,7 +42,7 @@ import { initObjectPose, renderObjectPose, renderPivotMarker } from './object-po
 import { initAnimatePanel, renderAnimatePanel } from './animate-panel.js';
 import { initMotionAsk, motionAskDialog } from './motion-ask.js';
 import { initMotionModes, syncMotionMode, drawMotionOverlay } from './motion-modes.js';
-import { initOutlineDialog, renderOutlineButton } from './outline-dialog.js';
+import { initOutlineDialog, renderOutlineButton, outlineDialog } from './outline-dialog.js';
 import { initRigMode, syncRigMode, drawRigOverlay, toggleRigMode } from './rig-mode.js';
 import { initTimeline, renderFrameCards, frameAction, timelineKey, nextPreviewIndex, loopLabel } from './timeline.js';
 import { initOnion, drawOnion, onionSummary } from './onion.js';
@@ -69,7 +70,7 @@ const clone = (value) => JSON.parse(JSON.stringify(value));
 const STORAGE_KEY = 'pixel-studio.project.v1';
 const TOOL_NAMES = {pencil:'Pencil',eraser:'Eraser',line:'Line',fill:'Flood fill',replace:'Replace color',eyedropper:'Eyedropper',rectangle:'Rectangle',ellipse:'Ellipse',object:'Select / move objects',select:'Select / move pixels',wand:'Magic wand',resize:'Transform',dither:'Dither brush',shade:'Shade',gradient:'Gradient',curve:'Curve'};
 const TOOL_HINTS = {
-  pencil:'Draw on the active pixel object. ⌘/Ctrl- or Alt-click picks a color.',
+  pencil:'Draw on the active pixel object; drawing on an object part opens it for editing. ⌘/Ctrl- or Alt-click picks a color.',
   eraser:'Erase on the active pixel object. Right-click also erases.',
   line:'Drag a straight line. Hold Shift for 45° steps.',
   fill:'Fill a connected area on the active pixel object.',
@@ -79,8 +80,8 @@ const TOOL_HINTS = {
   rectangle:'Drag a rectangle. Hold Shift for a perfect square.',
   ellipse:'Drag an ellipse. Hold Shift for a perfect circle.',
   object:'Click to select a part; Shift/Ctrl-click or Ctrl/⌘+A selects several. Drag to move; double-click to edit its artwork in place. Arrow keys nudge.',
-  select:'Drag to select. Drag inside to move; arrow keys nudge. Make object turns the selection into a movable object.',
-  wand:'Click a shape to select it. Shift-click adds more. Then press Make object (Ctrl/⌘ G).',
+  select:'Drag to select. Shift adds, Alt subtracts, Shift+Alt intersects. Drag inside to move; arrow keys nudge. Make object turns the selection into a movable object.',
+  wand:'Click a shape to select it. Shift adds, Alt subtracts, Shift+Alt intersects. Then press Make object (Ctrl/⌘ G).',
   dither:'Paints a checkerboard pattern with the current color. Great for gradients and texture.',
   shade:'Click or drag to step pixels along their palette ramp (darker by default). Right-click goes the other way.',
   curve:'Drag from start to end, then bend the curve. Enter applies.',
@@ -134,6 +135,7 @@ function normalizeSelection() {
   state.frameId = currentFrame().id;
   state.layerId = currentLayer().id;
   if (state.selection && (state.selection.frameId!==state.frameId || state.selection.layerId!==state.layerId || state.selection.canvasWidth!==state.project.width || state.selection.canvasHeight!==state.project.height)) state.selection=null;
+  followPixelKeys();
   const selected = state.objectSelection;
   if (selected && (selected.layerId!==state.layerId || (selected.key!=='@group' && !celObjects(currentFrame().cels.find(c=>c.layerId===selected.layerId)).some(n=>n.key===selected.key)))) state.objectSelection=null;
   if (state.objectMulti) {
@@ -143,6 +145,17 @@ function normalizeSelection() {
   state.color = Math.min(state.color, state.project.palette.length - 1);
   state.previewIndex %= currentAnimation().frames.length;
   state.scale = Math.max(1,Math.min(maxZoom(),state.scale));
+}
+/** A plain pixel layer's object is `pixels`; moved partly off-canvas it is kept as spans (`pixels-0`). Keep the selection on it. */
+function followPixelKeys() {
+  const follow=item=>{
+    if(!item || !['pixels','pixels-0'].includes(item.key))return item;
+    const cel=currentFrame().cels.find(c=>c.layerId===item.layerId);
+    const key=cel && (cel.source?'pixels-0':'pixels');
+    return key && key!==item.key && !(cel.source && celObjects(cel).length>1)?{...item,key}:item;
+  };
+  state.objectSelection=follow(state.objectSelection);
+  if(state.objectMulti)state.objectMulti={...state.objectMulti,anchor:follow(state.objectMulti.anchor),items:state.objectMulti.items.map(follow)};
 }
 function snapshot() {
   return {project:cloneProject(state.project),animationId:state.animationId,frameId:state.frameId,layerId:state.layerId,objectSelection:clone(state.objectSelection)};
@@ -395,11 +408,20 @@ function renderPanelState() {
     $(id).title=`${state.panels[name]?'Show':'Hide'} ${name==='tools'?'toolbox':'animation and object panels'}`;
   }
 }
-function toast(message) {
+/** Short status message. `actions` ([{label, run}]) add buttons and keep it up longer. */
+function toast(message, actions = []) {
   clearTimeout(toastTimer);
-  $('toast').textContent = message;
-  $('toast').hidden = false;
-  toastTimer = setTimeout(() => { $('toast').hidden = true; }, 3800);
+  const box = $('toast');
+  box.textContent = message;
+  box.classList.toggle('with-actions', actions.length > 0);
+  for (const { label, run } of actions) {
+    const button = document.createElement('button');
+    button.type = 'button'; button.className = 'toast-action'; button.textContent = label;
+    button.onclick = () => { box.hidden = true; run(); };
+    box.append(button);
+  }
+  box.hidden = false;
+  toastTimer = setTimeout(() => { box.hidden = true; }, actions.length ? 9000 : 3800);
 }
 const SAVE_DELAY=500;
 /** Autosave: debounced after each change, deferred while a stroke is in progress, then run when the browser is idle. */
@@ -1033,6 +1055,7 @@ function renderInPlaceControls() {
   renderEditScope();
   $('in-place-apply').textContent=session.scope==='shared'?`Apply to ${session.references.length} instance${session.references.length===1?'':'s'}`:'Apply to this frame';
   $('in-place-apply').disabled=Boolean(restriction || !dirty || state.drawing);
+  $('in-place-split').disabled=Boolean(restriction || !session.selection || state.drawing);
   const error=restriction || edit.error;
   $('in-place-error').hidden=!error;
   if($('in-place-error').textContent!==(error || ''))$('in-place-error').textContent=error || '';
@@ -1061,6 +1084,7 @@ function endCanvasPartEdit(apply) {
 function canvasPartKey(event,key) {
   const session=state.inPlaceEdit.session, command=event.ctrlKey || event.metaKey;
   if(command && key==='a'){event.preventDefault();selectAllPixels();return;}
+  if(command && event.shiftKey && key==='j'){event.preventDefault();splitInPlaceSelection();return;}
   if(command && key==='c' && session.selection){event.preventDefault();copySelectionPixels();return;}
   if(command && key==='x' && session.selection){event.preventDefault();copySelectionPixels(true);return;}
   if(command && key==='v' && state.clipboard){event.preventDefault();pasteClipboardPixels();return;}
@@ -1197,6 +1221,15 @@ function objectAction(action,item) {
     return;
   }
   if(action==='split'){splitObjectsDialog(item);return;}
+  if(action==='split-off'){beginSplitOff(item);return;}
+  if(action==='merge-down') {
+    try {
+      const next=structuredClone(state.project), below=mergeLayerDown(next,item.layerId);
+      mutate(()=>{state.project=next;state.layerId=item.layerId;state.objectSelection=null;state.objectMulti=null;});
+      toast(`“${below.name}” merged into “${next.layers.find(l=>l.id===item.layerId).name}” in every frame. Undo is available.`);
+    } catch(error){toast(error.message);}
+    return;
+  }
   const target=objectTarget(item.layerId), layer=state.project.layers.find(l=>l.id===item.layerId);
   const node=celObjects(currentFrame().cels.find(c=>c.layerId===item.layerId)).find(n=>n.key===item.key);
   const wasEmpty=Boolean(node && isEmptyNode(currentFrame().cels.find(c=>c.layerId===item.layerId),node));
@@ -1251,6 +1284,74 @@ function makeObjectDialog() {
       toast(`“${name}” is now an object${result.frames>1?` in ${result.frames} frames`:''}. Drag to move it; double-click to edit.`);
     } catch(error){toast(error.message);}
   };
+}
+/** Cut the selected pixels out of their object into a new object at the same spot (⌘⇧J). Smart objects lose them in every copy. */
+function splitSelectionOff(item=null) {
+  finishDrawing();
+  if(state.inPlaceEdit){splitInPlaceSelection();return;}
+  const selection=state.selection;
+  if(!selection){toast('Select the pixels to split off first: drag with Select (S) or click with the Magic wand (W).');return;}
+  const {width}=state.project, frame=currentFrame(), cel=frame.cels.find(c=>c.layerId===selection.layerId), nodes=celObjects(cel);
+  const indices=selection.mask || selectionIndicesOf(selection.rect);
+  item??=state.objectSelection?.layerId===selection.layerId?state.objectSelection:null;
+  let node=item && nodes.find(n=>n.key===item.key && (n.instance || n.type==='pixels'));
+  if(!node) {
+    const keys=new Set();
+    for(const i of indices){const hit=hitTestObject(state.project,currentAnimation(),frame,i%width,Math.floor(i/width));if(hit?.layerId===selection.layerId)keys.add(hit.key);}
+    if(keys.size>1){toast('The selection covers several objects. Click the one to split with the Object tool (V), then select again.');return;}
+    node=nodes.find(n=>n.key===[...keys][0]);
+  }
+  if(!node){toast('There is no artwork under the selection.');return;}
+  const target=objectTarget(selection.layerId);
+  try {
+    let result;
+    if(node.instance) {
+      const op=node.instance, image=renderParts(state.project.parts).get(op.partId), parts=new Set();
+      for(const i of indices) {
+        const point={x:i%width,y:Math.floor(i/width)};
+        if(instancePixel(op,image,point)<0)continue;
+        const local=canvasToPartPoint(op,image,point);
+        if(local.x>=0 && local.y>=0 && local.x<image.width && local.y<image.height)parts.add(local.y*image.width+local.x);
+      }
+      result=splitPart(state.project,target,op.id,[...parts],{name:uniqueLayerName(`${op.name || op.partId} piece`)});
+    } else {
+      const own=new Set(pixelIslands(state.project,target,node.key).flatMap(island=>island.indices));
+      const mask=indices.filter(i=>own.has(i));
+      if(!mask.length)throw new Error('There is no artwork under the selection.');
+      result=createObjectFromPixels(state.project,target,{mask,name:uniqueLayerName('Object')});
+    }
+    mutate(()=>{
+      state.project=result.project;state.layerId=result.layerId;state.objectSelection={layerId:result.layerId,key:result.key};state.objectMulti=null;
+      state.selection=null;state.transformScope='frame';state.tool='object';
+    });
+    toast(node.instance?'Split off into its own object. Every copy of the original is split too.':'Split off into its own object.');
+  } catch(error){toast(error.message);}
+}
+/** In canvas edit: apply the draft, then split the selected part pixels off. */
+function splitInPlaceSelection() {
+  const edit=state.inPlaceEdit, {session}=edit, rect=session.selection;
+  if(!rect){toast('Select the pixels to split off first (S), then press ⌘⇧J or Split off.');return;}
+  try {
+    if(state.documentId!==edit.documentId || JSON.stringify(state.project)!==JSON.stringify(session.sourceProject))throw new Error('The project changed. Cancel this draft and reopen the object.');
+    const project=prepareInPlaceEdit(session,{force:true}), {target}=session, indices=[];
+    for(let y=rect.y;y<rect.y+rect.height;y++) for(let x=rect.x;x<rect.x+rect.width;x++) indices.push(y*session.width+x);
+    const op=project.animations.find(a=>a.id===target.animationId).frames.find(f=>f.id===target.frameId).cels.find(c=>c.layerId===target.layerId).source.ops.find(o=>o.type==='use' && o.id===target.instanceId);
+    const result=splitPart(project,target,target.instanceId,indices,{name:uniqueLayerName(`${op.name || op.partId} piece`)});
+    endCanvasPartEdit(false);
+    mutate(()=>{state.project=result.project;state.layerId=result.layerId;state.objectSelection={layerId:result.layerId,key:result.key};state.objectMulti=null;state.selection=null;state.tool='object';});
+    toast('Split off into its own object. Undo restores the whole edit.');
+  } catch(error){edit.error=error.message;renderInPlaceControls();}
+}
+/** Object menu: split now when pixels are selected; otherwise start selecting them. */
+function beginSplitOff(item) {
+  if(state.selection?.layerId===item.layerId){splitSelectionOff(item);return;}
+  const node=celObjects(currentFrame().cels.find(c=>c.layerId===item.layerId)).find(n=>n.key===item.key);
+  if(node?.instance) {
+    beginCanvasPartEdit(item,node.instance.partId);
+    if(!state.inPlaceEdit)return;
+    state.tool='select';renderTools();renderCanvas();
+  } else {state.layerId=item.layerId;state.tool='select';state.objectSelection={layerId:item.layerId,key:item.key};renderAll();}
+  toast('Select the pixels to split off (Shift adds, Alt subtracts), then press ⌘⇧J.');
 }
 /** Convert a whole pixel object into a smart object (part instance) in the current scope. */
 function convertToObject(item) {
@@ -1428,7 +1529,7 @@ function renderSelection() {
     renderTransformControls();return;
   }
   const selection=state.selection;
-  $('selection-info').textContent=selection ? (selection.mask?`${selection.mask.length} pixel${selection.mask.length===1?'':'s'} · ${currentLayer().name}`:`${selection.rect.width} × ${selection.rect.height} pixels · ${currentLayer().name}`) : state.tool==='wand'?'Click a shape to select it. Shift-click adds more.':'Drag a rectangle to select pixels on this layer.';
+  $('selection-info').textContent=selection ? (selection.mask?`${selection.mask.length} pixel${selection.mask.length===1?'':'s'} · ${currentLayer().name}`:`${selection.rect.width} × ${selection.rect.height} pixels · ${currentLayer().name}`) : state.tool==='wand'?'Click a shape to select it. Shift adds, Alt subtracts.':'Drag a rectangle to select pixels on this layer.';
   $('make-object').disabled=!selection || !canEditPixels();
   $('clear-selection').disabled=!selection || !canEditPixels();
   $('deselect-selection').disabled=!selection;
@@ -1556,11 +1657,17 @@ function selectionContains(point) {
 }
 function beginSelection(event,point,cel) {
   const previousSelection=state.selection?clone(state.selection):null;
-  const moving=selectionContains(point);
-  state.drawing={pointerId:event.pointerId,tool:'select',kind:moving?'move':'marquee',origin:point,last:point,before:snapshot(),cel,base:[...cel.pixels],rect:moving?{...state.selection.rect}:null,mask:moving?state.selection.mask:null,previousSelection};
-  if (!moving) state.selection={rect:selectionBounds(point.x,point.y,point.x,point.y,state.project.width,state.project.height),frameId:state.frameId,layerId:state.layerId,canvasWidth:state.project.width,canvasHeight:state.project.height};
+  // Shift adds, Alt subtracts, Shift+Alt intersects; a modified drag always draws a marquee, even inside the selection.
+  const mode=selectionMode(event), moving=mode==='replace' && selectionContains(point);
+  state.drawing={pointerId:event.pointerId,tool:'select',kind:moving?'move':'marquee',mode,origin:point,last:point,before:snapshot(),cel,base:[...cel.pixels],rect:moving?{...state.selection.rect}:null,mask:moving?state.selection.mask:null,previousSelection};
+  if (!moving) updateMarquee(state.drawing,point);
   state.transformScope='selection';
   renderSelection(); renderCanvas();
+}
+function updateMarquee(drawing,point) {
+  const {width,height}=state.project, rect=selectionBounds(drawing.origin.x,drawing.origin.y,point.x,point.y,width,height);
+  const result=drawing.mode==='replace'?{rect}:combineSelection(drawing.previousSelection,selectionIndicesOf(rect),drawing.mode,width);
+  state.selection=result?{...result,frameId:state.frameId,layerId:state.layerId,canvasWidth:width,canvasHeight:height}:null;
 }
 function updateSelection(point) {
   const drawing=state.drawing;
@@ -1570,9 +1677,7 @@ function updateSelection(point) {
   } else if (drawing.kind==='move') {
     const result=moveSelectedPixels(drawing.base,state.project.width,state.project.height,drawing.rect,point.x-drawing.origin.x,point.y-drawing.origin.y);
     drawing.cel.pixels=result.pixels; state.selection.rect=result.selection;
-  } else {
-    state.selection.rect=selectionBounds(drawing.origin.x,drawing.origin.y,point.x,point.y,state.project.width,state.project.height);
-  }
+  } else updateMarquee(drawing,point);
   renderSelection();
 }
 function nudgeSelection(dx,dy) {
@@ -1706,17 +1811,22 @@ function drawFreehand(drawing,from,to) {
     if(removed){const index=wrappedIndex(removed);drawing.cel.pixels[index]=drawing.base[index];drawing.footprint.delete(index);}
   }
 }
-/** Magic wand: select the clicked shape or color region; Shift adds to the current selection. */
-function wandSelect(point,cel,add) {
+/** Magic wand: select the clicked shape or color region; Shift adds, Alt subtracts, Shift+Alt intersects. */
+function wandSelect(point,cel,mode) {
   const width=state.project.width, region=connectedRegion(cel.pixels,width,state.project.height,point.x,point.y,state.wandMode);
-  const previous=add && state.selection?.layerId===state.layerId && state.selection.frameId===state.frameId ? (state.selection.mask || rectIndices(state.selection.rect)) : [];
-  if(!region){if(!add){state.selection=null;}renderSelection();renderCanvas();if(!add)toast('Click artwork to select a shape. That pixel is transparent.');return;}
-  const mask=[...new Set([...previous,...region.indices])].sort((a,b)=>a-b);
-  state.selection={rect:maskBounds(mask,width),mask,frameId:state.frameId,layerId:state.layerId,canvasWidth:width,canvasHeight:state.project.height};
-  state.transformScope='selection';
+  const previous=state.selection?.layerId===state.layerId && state.selection.frameId===state.frameId ? state.selection : null;
+  if(!region){
+    if(mode==='replace'){state.selection=null;toast('Click artwork to select a shape. That pixel is transparent.');}
+    else if(mode==='intersect')state.selection=null;
+    renderSelection();renderTransformControls();renderCanvas();return;
+  }
+  const result=combineSelection(previous,region.indices,mode,width);
+  if(result && mode==='replace')result.mask??=region.indices;
+  state.selection=result?{...result,frameId:state.frameId,layerId:state.layerId,canvasWidth:width,canvasHeight:state.project.height}:null;
+  state.transformScope=result?'selection':'frame';
   renderSelection();renderTransformControls();renderCanvas();
 }
-function rectIndices(rect) {
+function selectionIndicesOf(rect) {
   const indices=[];
   for(let y=rect.y;y<rect.y+rect.height;y++) for(let x=rect.x;x<rect.x+rect.width;x++) indices.push(y*state.project.width+x);
   return indices;
@@ -1747,11 +1857,39 @@ function deselectObjectOutside(event) {
   if(event.button!==0 || event.target===$('pixel-canvas') || state.drawing || state.inPlaceEdit || !['object','resize'].includes(state.tool) || !state.objectSelection)return;
   state.objectSelection=null;renderAll();
 }
+/** Painting on this object would otherwise move it (same rule as in pointerDown). */
+function objectTakesPaint(hit) {
+  const selected=selectedObject(), node=celObjects(currentFrame().cels.find(c=>c.layerId===selected.layerId)).find(n=>n.key===selected.key);
+  return (!state.objectSelection && hit.layerId===currentLayer().id) || Boolean(node?.instance);
+}
+/** Enter in-place edit of `hit` keeping the current drawing tool, so the stroke that started it paints the object. */
+function editObjectWithTool(hit) {
+  const tool=state.tool;
+  selectObject(hit);state.tool=tool;editSharedObject(hit);
+  if(!state.inPlaceEdit)return false;
+  state.tool=tool;renderTools();
+  const shared=state.inPlaceEdit.session.scope==='shared';
+  toast(`Editing this object’s pixels${shared?' (every copy)':''}. Apply edits or ⌘/Ctrl+Enter saves, Esc cancels.`);
+  return true;
+}
+let liveOutlineHinted=false;
+const liveOutlineActions=()=>state.inPlaceEdit?[]:[{label:'Outline settings',run:()=>outlineDialog()},{label:'Turn off',run:()=>{mutate(()=>{delete state.project.outline;});renderAll();toast('Live outline off. Undo turns it back on.');}}];
+/** Pixels drawn only by the live outline can't be painted or erased; say so instead of failing silently. */
+function liveOutlineHint(point,tool) {
+  if(tool==='pencil'){if(!liveOutlineHinted){liveOutlineHinted=true;toast('Live outline is on: everything you draw gets an outline automatically.',liveOutlineActions());}return;}
+  const i=point.y*state.project.width+point.x;
+  let outlineOnly=canvasPixels()[i]!==-1 && compositeFrame(state.project,currentFrame(),{outline:false})[i]===-1;
+  if(outlineOnly && state.inPlaceEdit) {
+    const session=state.inPlaceEdit.session, local=inPlacePoint(session,point);
+    if(local.x>=0 && local.y>=0 && local.x<session.width && local.y<session.height && session.pixels[local.y*session.width+local.x]!==-1)outlineOnly=false;
+  }
+  if(outlineOnly){liveOutlineHinted=true;toast('This pixel is drawn by the live outline, so it can’t be erased. Change or turn off the outline, or bake it into a layer to edit it by hand.',liveOutlineActions());}
+}
 function pointerDown(event) {
   if (event.button !== 0 && event.button !== 2) return;
   if (state.drawing) return;
-  // ⌘/Ctrl-click (or Alt) picks a colour with the drawing tools; the object tools keep Ctrl/⌘-click for multi-select.
-  const pick = event.button === 0 && (event.altKey || ((event.metaKey || event.ctrlKey) && (PAINT_TOOLS.includes(state.tool) || state.tool === 'gradient')));
+  // ⌘/Ctrl-click (or Alt) picks a colour with the drawing tools; the object tools keep Ctrl/⌘-click for multi-select and the selection tools use Alt to subtract.
+  const pick = event.button === 0 && ((event.altKey && !SELECT_TOOLS.includes(state.tool)) || ((event.metaKey || event.ctrlKey) && (PAINT_TOOLS.includes(state.tool) || state.tool === 'gradient')));
   if (state.tool === 'curve' && !(pick && (event.metaKey || event.ctrlKey)) && curvePointerDown(event)) return;
   const point = canvasPoint(event);
   if (!inside(point)) { if(event.button===0 && ['object','resize'].includes(state.tool) && !state.inPlaceEdit && state.objectSelection){state.objectSelection=null;renderAll();} return; }
@@ -1767,6 +1905,16 @@ function pointerDown(event) {
     if ($('pixel-canvas').hasPointerCapture(event.pointerId)) $('pixel-canvas').releasePointerCapture(event.pointerId);
     return;
   }
+  // A drawing tool on an object edits the object's pixels instead of moving it.
+  let enteredEdit=false;
+  if(!state.inPlaceEdit && event.button===0 && PART_EDIT_TOOLS.includes(tool) && !['select','eyedropper','eraser'].includes(tool)) {
+    const hit=hitTestObject(state.project,currentAnimation(),currentFrame(),point.x,point.y);
+    if(hit?.type==='instance' && objectTakesPaint(hit)) {
+      enteredEdit=editObjectWithTool(hit);
+      if(!enteredEdit){if($('pixel-canvas').hasPointerCapture(event.pointerId))$('pixel-canvas').releasePointerCapture(event.pointerId);return;}
+    }
+  }
+  if(state.project.outline && !enteredEdit && ['pencil','eraser'].includes(tool))liveOutlineHint(point,tool);
   if(state.inPlaceEdit) {
     try {
       const from=event.shiftKey?shiftLineStart(tool):null;
@@ -1791,7 +1939,7 @@ function pointerDown(event) {
   }
   const cel = currentFrame().cels.find(cel => cel.layerId === layer.id);
   if (tool==='select') { beginSelection(event,point,cel); return; }
-  if (tool==='wand') { if($('pixel-canvas').hasPointerCapture(event.pointerId))$('pixel-canvas').releasePointerCapture(event.pointerId); wandSelect(point,cel,event.shiftKey); return; }
+  if (tool==='wand') { if($('pixel-canvas').hasPointerCapture(event.pointerId))$('pixel-canvas').releasePointerCapture(event.pointerId); wandSelect(point,cel,selectionMode(event)); return; }
   if (tool==='gradient') {
     try{state.drawing=beginGradient({pointerId:event.pointerId,tool,origin:point,last:point,before:snapshot(),cel,base:[...cel.pixels],allow:paintLimit(tool,cel.pixels)});}
     catch(error){toast(error.message);if($('pixel-canvas').hasPointerCapture(event.pointerId))$('pixel-canvas').releasePointerCapture(event.pointerId);}
@@ -1807,7 +1955,7 @@ function pointerDown(event) {
   limitStroke(state.drawing);
   renderCanvas(); renderPreview();
 }
-const cursorKeys = {alt:false,command:false};
+const cursorKeys = {alt:false,command:false,shift:false};
 let hoverCell = '', hoverObject = false;
 /**
  * The canvas cursor shows what a click does: the active tool's icon, the picker while Alt (any tool) or ⌘/Ctrl
@@ -1816,18 +1964,18 @@ let hoverCell = '', hoverObject = false;
 function updateCanvasCursor(event) {
   const canvas = $('pixel-canvas');
   if (!canvas || $('workbench')?.classList.contains('motion-active')) return;
-  if (event) { cursorKeys.alt = event.altKey; cursorKeys.command = event.metaKey || event.ctrlKey; }
+  if (event) { cursorKeys.alt = event.altKey; cursorKeys.command = event.metaKey || event.ctrlKey; cursorKeys.shift = event.shiftKey; }
   const tool = state.tool, drawingTool = PAINT_TOOLS.includes(tool) || tool === 'gradient', layer = currentLayer();
   if (event?.type === 'pointermove' && tool === 'object' && !state.drawing && !state.inPlaceEdit) {
     const cell = state.cursor ? `${state.cursor.x},${state.cursor.y}` : '';
     if (cell !== hoverCell) { hoverCell = cell; hoverObject = Boolean(state.cursor && hitTestObject(state.project,currentAnimation(),currentFrame(),state.cursor.x,state.cursor.y)); }
   }
   const selection = state.inPlaceEdit ? state.inPlaceEdit.session.selection : state.selection;
-  const cursor = !state.drawing && (cursorKeys.alt || (cursorKeys.command && drawingTool)) || tool === 'eyedropper' ? toolCursor('eyedropper', 'copy')
+  const cursor = !state.drawing && ((cursorKeys.alt && !SELECT_TOOLS.includes(tool)) || (cursorKeys.command && drawingTool)) || tool === 'eyedropper' ? toolCursor('eyedropper', 'copy')
     : tool === 'object' ? (hoverObject && !state.inPlaceEdit ? 'move' : 'default')
     : tool === 'resize' ? 'default'
     : !layer.visible || layer.locked ? 'not-allowed'
-    : tool === 'select' && selection ? 'grab'
+    : tool === 'select' && selection && !cursorKeys.alt && !(cursorKeys.shift && !state.inPlaceEdit) ? 'grab'
     : toolCursor(tool);
   if (canvas.style.cursor !== cursor) canvas.style.cursor = cursor;
 }
@@ -1859,7 +2007,7 @@ function pointerMove(event) {
     } else if(drawing.tool==='tilt') {
       moveTilt(drawing,event);
     } else if(drawing.tool==='object') {
-      try{state.project=drawing.items?translateObjects(drawing.before.project,drawing.target,drawing.items,point.x-drawing.origin.x,point.y-drawing.origin.y,editScope(state)).project:(drawing.pixels?translatePixelObject:translateObject)(drawing.before.project,drawing.target,drawing.key,point.x-drawing.origin.x,point.y-drawing.origin.y,editScope(state));}
+      try{state.project=drawing.items?translateObjects(drawing.before.project,drawing.target,drawing.items,point.x-drawing.origin.x,point.y-drawing.origin.y,editScope(state)).project:(drawing.pixels?translatePixelObject:translateObject)(drawing.before.project,drawing.target,drawing.key,point.x-drawing.origin.x,point.y-drawing.origin.y,editScope(state));followPixelKeys();}
       catch(error){$('cursor-position').textContent=error.message;}
     } else if (drawing.tool==='select') {
       updateSelection(point);
@@ -2073,7 +2221,7 @@ function openDialog(title, content, eyebrow = 'PIXEL STUDIO') {
   watchModalOverflow();
   if (finishDrawing()) renderAll();
   $('modal').dispatchEvent(new Event('pixel-studio:dialog-replace'));
-  $('modal').classList.remove('versions-modal','wide','start-modal','part-library-modal','prompt-builder-modal','ai-edit-modal','shared-part-modal','palette-studio-modal','export-modal','help-modal');
+  $('modal').classList.remove('image-import-modal','versions-modal','wide','start-modal','part-library-modal','prompt-builder-modal','ai-edit-modal','shared-part-modal','palette-studio-modal','export-modal','help-modal');
   $('modal-title').textContent = title;
   $('modal-eyebrow').textContent = eyebrow;
   $('modal-content').innerHTML = content;
@@ -2322,6 +2470,24 @@ function imageRgba(image) {
   context.drawImage(image, 0, 0);
   return context.getImageData(0, 0, canvas.width, canvas.height).data;
 }
+/** Plain-language explanations shown under the image import settings. */
+const PNG_HINTS = {
+  destination: {
+    project: 'Starts a new project sized to the result, with a palette made from the image colors.',
+    frame: 'Adds the image as a new frame after this one, on the selected layer, using your current palette.',
+    layer: 'Adds the image as a new layer in this frame, using your current palette.',
+  },
+  sizing: {
+    detect: 'For AI-made or upscaled pixel art, where each “pixel” is really a block of image pixels. The block grid is found and every block becomes one real pixel.',
+    average: 'For photos and paintings without a pixel grid. The image is shrunk by averaging colors, so its longest side becomes the size you choose.',
+    fit: 'Scales the whole image to fit the canvas by picking the nearest pixel, without blending. Best for images already close to the canvas size.',
+    actual: 'Uses every image pixel as it is, centered on the canvas. Anything larger than the canvas is cut off.',
+  },
+  colors: {
+    palette: 'Maps every color onto the palette you already have, picking the closest-looking color.',
+    count: 'The most colors the new palette may hold. Fewer colors look cleaner and more like hand-made pixel art; more keep subtle shading.',
+  },
+};
 async function importPng(file) {
   try {
     const image = await decodeImage(file);
@@ -2334,7 +2500,12 @@ async function importPng(file) {
     const defaultSizing = detected.scale > 1 ? 'detect' : small ? 'actual' : 'average';
     const sizeOption = (value, label) => `<option value="${value}"${defaultSizing === value ? ' selected' : ''}>${label}</option>`;
     const colorChoices = [8,16,32,MAX_COLORS];
-    openDialog('Make it real pixel art', `<p class="modal-body-text">${escapeHTML(file.name || 'Pasted image')} · ${sourceWidth} × ${sourceHeight} pixels</p><div class="png-import-preview"><canvas id="png-import-canvas"></canvas><span id="png-detect-note" class="png-detect-note"></span></div><label class="field"><span class="field-label">Import into</span><select id="png-destination"><option value="project">New project · use the image colors</option><option value="frame">New frame · on the selected layer</option><option value="layer">New layer · in the current frame</option></select></label><label class="field"><span class="field-label">Image sizing</span><select id="png-sizing">${sizeOption('detect','Clean up AI or upscaled pixel art · detect the pixel grid')}${sizeOption('average','Pixelate a photo or painting · average down')}${sizeOption('fit','Fit inside the canvas · sharp nearest-neighbor scaling')}${sizeOption('actual','Keep original pixels · center and crop if needed')}</select></label><div id="png-cleanup" class="form-grid png-cleanup"><label class="field" id="png-scale-field"><span class="field-label">Pixel size (image pixels)</span><input id="png-scale" type="number" min="1" max="64" step="0.01" value="${detected.scale > 1 ? +detected.scale.toFixed(2) : 8}"></label><label class="field" id="png-target-field"><span class="field-label">Longest side (pixels)</span><input id="png-target" type="number" min="4" max="${MAX_SIZE}" step="1" value="${Math.min(64, MAX_SIZE)}"></label><label class="field" id="png-colors-field"><span class="field-label">Colors</span><select id="png-colors"><option value="palette">Use current palette</option>${colorChoices.map(n=>`<option value="${n}"${n===16?' selected':''}>${n} colors</option>`).join('')}</select></label><label class="check-row"><input id="png-remove-bg" type="checkbox"${hasAlpha ? '' : ' checked'}> Remove background</label><label class="check-row"><input id="png-trim" type="checkbox" checked> Trim empty space</label></div><label class="check-row"><input id="png-dither" type="checkbox"> Dither when mapping colors</label><div id="png-dimensions">${dimensionFields('png',Math.min(sourceWidth,256),Math.min(sourceHeight,256))}</div>${skipEmptyControl('png-skip-empty')}<p class="helper-text" id="png-help"></p><p id="png-import-error" class="sheet-error" role="alert" hidden></p><div class="modal-actions"><button id="cancel-png" class="button">Cancel</button><button id="confirm-png" class="button primary">Import image</button></div>`, 'IMAGE IMPORT');
+    openDialog('Make it real pixel art', `<div class="png-import-layout"><div class="png-import-view"><div class="zoom-preview" id="png-viewer"><canvas tabindex="0" aria-label="Import preview. Scroll or pinch to zoom, drag to move around, double-click to zoom in."></canvas><span id="png-detect-note" class="png-detect-note"></span><div class="zoom-preview-tools" role="toolbar" aria-label="Preview zoom"><button type="button" class="icon-button" data-zoom="out" aria-label="Zoom out" title="Zoom out (−)">${icon('minus')}</button><span class="zoom-preview-value" data-zoom-label>100%</span><button type="button" class="icon-button" data-zoom="in" aria-label="Zoom in" title="Zoom in (+)">${icon('plus')}</button><button type="button" class="icon-button" data-zoom="fit" aria-label="Fit preview" title="Fit (0)">${icon('fit')}</button><span class="zoom-preview-sep"></span><button type="button" class="icon-button" data-zoom="grid" aria-pressed="false" aria-label="Pixel grid" title="Show the pixel grid when zoomed in">${icon('grid')}</button><button type="button" class="button small" data-zoom="original" aria-pressed="false" title="Compare with the source image">${icon('eye')} Original</button></div></div><p class="helper-text">Scroll or pinch to zoom, drag to move around, double-click to zoom in. <strong>Original</strong> switches to the source image at the same spot to compare.</p></div><div class="png-import-settings"><p class="modal-body-text">${escapeHTML(file.name || 'Pasted image')} · ${sourceWidth} × ${sourceHeight} pixels</p><label class="field"><span class="field-label">Import into</span><select id="png-destination"><option value="project">New project · use the image colors</option><option value="frame">New frame · on the selected layer</option><option value="layer">New layer · in the current frame</option></select><small class="field-hint" id="png-destination-hint"></small></label><label class="field"><span class="field-label">Image sizing</span><select id="png-sizing">${sizeOption('detect','Clean up AI or upscaled pixel art · detect the pixel grid')}${sizeOption('average','Pixelate a photo or painting · average down')}${sizeOption('fit','Fit inside the canvas · sharp nearest-neighbor scaling')}${sizeOption('actual','Keep original pixels · center and crop if needed')}</select><small class="field-hint" id="png-sizing-hint"></small></label><div id="png-cleanup" class="png-cleanup"><label class="field" id="png-scale-field"><span class="field-label">Pixel size (image pixels)</span><input id="png-scale" type="number" min="1" max="64" step="0.01" value="${detected.scale > 1 ? +detected.scale.toFixed(2) : 8}"><small class="field-hint">How many image pixels form one art pixel. It is detected for you; if the result looks smeared or has doubled rows, zoom in and nudge it (say 7.9 or 8.1).</small></label><label class="field" id="png-target-field"><span class="field-label">Longest side (pixels)</span><input id="png-target" type="number" min="4" max="${MAX_SIZE}" step="1" value="${Math.min(64, MAX_SIZE)}"><small class="field-hint">Width or height of the result, whichever is larger. Smaller numbers give chunkier, simpler art.</small></label><label class="check-row"><input id="png-remove-bg" type="checkbox"${hasAlpha ? '' : ' checked'}> Remove background</label><small class="field-hint">Makes the color around the edges transparent, filling inward from the border. Areas of that color enclosed by the art stay.</small><label class="check-row"><input id="png-trim" type="checkbox" checked> Trim empty space</label><small class="field-hint">Crops away transparent margins so the art fills the result.</small></div><label class="field" id="png-colors-field"><span class="field-label">Colors</span><select id="png-colors"><option value="palette">Use current palette</option>${colorChoices.map(n=>`<option value="${n}"${n===16?' selected':''}>${n} colors</option>`).join('')}</select><small class="field-hint" id="png-colors-hint"></small></label><label class="check-row"><input id="png-dither" type="checkbox"> Dither when mapping colors</label><small class="field-hint">Mixes two palette colors in a checker pattern to suggest in-between shades. Helps gradients with few colors; adds noise to flat art.</small><div id="png-dimensions"><p class="field-hint png-dimensions-hint">Canvas size of the new project. It follows the result until you change it; extra space stays transparent.</p>${dimensionFields('png',Math.min(sourceWidth,256),Math.min(sourceHeight,256))}</div>${skipEmptyControl('png-skip-empty')}<p class="helper-text" id="png-help"></p><p id="png-import-error" class="sheet-error" role="alert" hidden></p></div></div><div class="modal-actions"><button id="cancel-png" class="button">Cancel</button><button id="confirm-png" class="button primary">Import image</button></div>`, 'IMAGE IMPORT');
+    $('modal').classList.add('image-import-modal');
+    const viewer = createZoomPreview($('png-viewer')), resultCanvas = document.createElement('canvas');
+    viewer.setOriginal(image, sourceWidth, sourceHeight);
+    const stopViewer = () => { viewer.disconnect(); $('modal').removeEventListener('close', stopViewer); $('modal').removeEventListener('pixel-studio:dialog-replace', stopViewer); };
+    $('modal').addEventListener('close', stopViewer); $('modal').addEventListener('pixel-studio:dialog-replace', stopViewer);
     bindSkipEmpty('png-skip-empty');
     let rgba, quantized, canvasSize, cleaned = null, cleanKey = '', autoSize = true;
     const cleanup = () => {
@@ -2381,13 +2552,16 @@ async function importPng(file) {
       // New layers and frames, or "Use current palette", map perceptually (OKLab) onto the project palette.
       const usePalette = destination !== 'project' || $('png-colors').value === 'palette';
       quantized = quantizeImage(rgba, canvasWidth, canvasHeight, {colors: usePalette ? 'palette' : Math.min(MAX_COLORS, Number($('png-colors').value) || MAX_COLORS), palette: state.project.palette, dither: $('png-dither').checked});
-      const canvas = $('png-import-canvas');
-      canvas.width = canvasWidth; canvas.height = canvasHeight;
-      canvas.getContext('2d').putImageData(new ImageData(indicesToRgba(quantized.pixels, quantized.palette), canvasWidth, canvasHeight), 0, 0);
+      resultCanvas.width = canvasWidth; resultCanvas.height = canvasHeight;
+      resultCanvas.getContext('2d').putImageData(new ImageData(indicesToRgba(quantized.pixels, quantized.palette), canvasWidth, canvasHeight), 0, 0);
+      viewer.setImage(resultCanvas, canvasWidth, canvasHeight);
       const note = $('png-detect-note');
       note.textContent = mode === 'detect'
         ? (result?.grid?.scale > 1 ? `Grid: ${+result.grid.scale.toFixed(2)} px per pixel · ${result.width} × ${result.height}${detected.scale > 1 && result.grid === detected ? ` · ${Math.round(Math.min(1, detected.confidence * 1.4) * 100)}% sure` : ''}` : 'No pixel grid found · try Pixelate, or type a pixel size')
         : mode === 'average' ? `${result.width} × ${result.height} pixels` : '';
+      $('png-destination-hint').textContent = PNG_HINTS.destination[destination];
+      $('png-sizing-hint').textContent = PNG_HINTS.sizing[mode];
+      $('png-colors-hint').textContent = PNG_HINTS.colors[$('png-colors').value === 'palette' ? 'palette' : 'count'];
       $('png-help').textContent = isClean
         ? 'Each grid cell becomes one pixel; blurred edges and JPEG noise are ignored. The background is flood-filled from the borders, so enclosed holes stay.'
         : 'A new layer or frame uses your current canvas and fixed palette. Transparency is preserved; partially transparent pixels become solid or clear.';
@@ -2711,6 +2885,7 @@ function bindEvents() {
   $('undo').onclick = () => state.inPlaceEdit?restoreCanvasPartEdit():restore(state.undo,state.redo);
   $('redo').onclick = () => state.inPlaceEdit?restoreCanvasPartEdit(true):restore(state.redo,state.undo);
   $('in-place-cancel').onclick=()=>endCanvasPartEdit(false);
+  $('in-place-split').onclick=()=>splitInPlaceSelection();
   $('in-place-apply').onclick=()=>endCanvasPartEdit(true);
   for(const button of $('edit-scope').querySelectorAll('[data-scope]'))button.onclick=()=>setEditScope(button.dataset.scope);
   $('edit-scope').addEventListener('keydown',event=>{
@@ -2839,6 +3014,7 @@ function bindEvents() {
     if ((event.ctrlKey || event.metaKey) && key === 's') { event.preventDefault(); exportData(); return; }
     if ((event.ctrlKey || event.metaKey) && key === 'a' && ['object','resize'].includes(state.tool)) {event.preventDefault();selectAllObjects();return;}
     if ((event.ctrlKey || event.metaKey) && key === 'a') {event.preventDefault();selectAllPixels();return;}
+    if ((event.ctrlKey || event.metaKey) && event.shiftKey && key === 'j') {event.preventDefault();splitSelectionOff();return;}
     if ((event.ctrlKey || event.metaKey) && key === 'g') {event.preventDefault();makeObjectDialog();return;}
     if ((event.ctrlKey || event.metaKey) && key === 'c' && state.selection) {event.preventDefault();copySelectionPixels();return;}
     if ((event.ctrlKey || event.metaKey) && key === 'x' && state.selection) {event.preventDefault();copySelectionPixels(true);return;}
@@ -2899,7 +3075,7 @@ function bindEvents() {
   initSpacePan($('canvas-stage'));
   initWheelZoom($('canvas-stage'),{getScale:()=>state.scale,setZoom,maxZoom});
   for (const type of ['keydown','keyup']) window.addEventListener(type, event => { if (['Alt','Meta','Control'].includes(event.key)) updateCanvasCursor(event); }, true);
-  window.addEventListener('blur', () => { cursorKeys.alt = cursorKeys.command = false; updateCanvasCursor(); });
+  window.addEventListener('blur', () => { cursorKeys.alt = cursorKeys.command = cursorKeys.shift = false; updateCanvasCursor(); });
   new ResizeObserver(revealActiveTab).observe($('project-tabs'));
 }
 

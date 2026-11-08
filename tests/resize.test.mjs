@@ -34,6 +34,26 @@ test('centre sampling squashes and stretches with exact integer maths', () => {
   assert.ok(sampleIndex(4, 4, 8) >= 8);
 });
 
+test('stretch at pivot adds and drops rows at the pivot, keeps the rest pixel-exact and round-trips', () => {
+  const { p, target } = scene(), op = () => p.animations[0].frames[0].cels[0].source.ops[0];
+  op().pivot = { x: 1, y: 2 };
+  const sized = box => rows(resizeObject(validateProject(p), target, 'b', box, 'frame'), 0, box).map(r => r[0]);
+  assert.deepEqual(sized({ x: 2, y: 2, width: 4, height: 2 }), [2, 4], 'without the toggle a pivot does not change even scaling');
+  op().stretch = 'pivot';
+  const saved = decodeAIProject(encodeAIProject(resizeObject(validateProject(p), target, 'b', { x: 2, y: 2, width: 4, height: 3 }, 'frame')));
+  assert.equal(saved.animations[0].frames[0].cels[0].source.ops[0].stretch, 'pivot');
+  assert.match(encodeAIProject(saved), /STRETCH b PIVOT/);
+  assert.deepEqual(sized({ x: 2, y: 2, width: 4, height: 7 }), [1, 2, 3, 3, 3, 3, 4], 'the pivot row repeats');
+  assert.deepEqual(sized({ x: 2, y: 2, width: 4, height: 3 }), [1, 2, 4], 'the pivot row is dropped first');
+  op().pivot = { x: 1, y: 3 };
+  assert.deepEqual(sized({ x: 2, y: 2, width: 4, height: 2 }), [1, 2], 'a pivot below the new box keeps the top');
+  op().transform = 'FY'; op().pivot = { x: 1, y: 0 };
+  assert.deepEqual(sized({ x: 2, y: 2, width: 4, height: 6 }), [4, 4, 4, 3, 2, 1], 'flips keep the seam on the pivot');
+  delete op().pivot; op().transform = 'N';
+  assert.deepEqual(sized({ x: 2, y: 2, width: 4, height: 6 }), [1, 2, 3, 3, 3, 4], 'without a set pivot the middle row stretches');
+  assert.deepEqual([0, 1, 2, 3, 4, 5].map(i => sampleIndex(i, 6, 4, 1)), [0, 1, 1, 1, 2, 3]);
+});
+
 test('keep-area resizing pushes the artwork sideways and keeps the opposite edge', () => {
   const box = { x: 4, y: 4, width: 8, height: 8 };
   assert.equal(keepAreaSide(64, 4), 16);

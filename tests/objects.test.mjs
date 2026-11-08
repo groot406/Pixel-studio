@@ -323,3 +323,28 @@ END`), t={animationId:p.animations[0].id,frameId:p.animations[0].frames[0].id,la
   const locked=structuredClone(r);locked.layers.find(l=>l.id==='effects').locked=true;
   assert.throws(()=>translatePixelObject(locked,target,key,1,0),/Unlock/);
 });
+
+test('pixel objects moved past the canvas edge keep their hidden pixels, through save and load, until moved back',()=>{
+  const p=decodeAIProject(`PXA 2
+SIZE 8 4
+NAME "Pixels"
+PAL #000000 #ff0000
+LAYER L "Shield" 1 0
+ANIM A "Idle" 8
+FRAME f0 100 CLEAR
+CEL L RASTER
+SPAN 4 1 11
+END`), t={animationId:p.animations[0].id,frameId:p.animations[0].frames[0].id,layerId:p.layers[0].id};
+  const cel=q=>q.animations[0].frames[0].cels[0], row=q=>cel(q).pixels.slice(8,16).map(v=>v<0?'.':'1').join('');
+  const out=translatePixelObject(p,t,'pixels',3,0,'frame');
+  assert.equal(row(out),'.......1');
+  assert.deepEqual(celObjects(cel(out)).map(n=>n.key),['pixels-0']);
+  const loaded=decodeAIProject(encodeAIProject(out));
+  assert.deepEqual(cel(loaded).source.ops,[{type:'span',x:7,y:1,values:[1,1]}]);
+  const back=translatePixelObject(loaded,t,'pixels-0',-5,0,'frame');
+  assert.equal(row(back),'..11....');
+  assert.equal(cel(back).source,undefined,'a layer that fits the canvas again is plain raster');
+  const gone=translatePixelObject(p,t,'pixels',0,-9,'frame');
+  assert.ok(cel(gone).pixels.every(v=>v<0));
+  assert.equal(row(translatePixelObject(gone,t,'pixels-0',-1,9,'frame')),'...11...');
+});

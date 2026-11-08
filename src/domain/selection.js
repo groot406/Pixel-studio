@@ -111,6 +111,37 @@ export function maskBounds(mask, canvasW) {
   return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
 }
 
+/** Canvas pixel indices covered by a `{ rect, mask? }` selection. */
+export function selectionIndices(selection, canvasW) {
+  if (!selection) return [];
+  if (selection.mask) return selection.mask;
+  const { x, y, width, height } = selection.rect, indices = [];
+  for (let row = y; row < y + height; row += 1) for (let col = x; col < x + width; col += 1) indices.push(row * canvasW + col);
+  return indices;
+}
+
+/**
+ * Combine a selection with new pixel indices: 'replace', 'add', 'subtract' or 'intersect'.
+ * Returns `{ rect, mask? }` (mask omitted when the result is a plain rectangle) or null when nothing is left.
+ */
+export function combineSelection(previous, indices, mode, canvasW) {
+  const before = mode === 'replace' ? [] : selectionIndices(previous, canvasW);
+  let result;
+  if (mode === 'subtract' || mode === 'intersect') {
+    const next = new Set(indices);
+    result = before.filter(index => next.has(index) === (mode === 'intersect'));
+  } else result = [...new Set([...before, ...indices])];
+  if (!result.length) return null;
+  result.sort((a, b) => a - b);
+  const rect = maskBounds(result, canvasW);
+  return rect.width * rect.height === result.length ? { rect } : { rect, mask: result };
+}
+
+/** Selection mode for a pointer press: Shift adds, Alt subtracts, Shift+Alt intersects. */
+export function selectionMode(event) {
+  return event.shiftKey && event.altKey ? 'intersect' : event.shiftKey ? 'add' : event.altKey ? 'subtract' : 'replace';
+}
+
 /** Move only the masked pixels; the gap they leave becomes transparent. */
 export function moveMaskedPixels(pixels, canvasW, canvasH, mask, dx, dy) {
   readPixels(pixels, canvasW, canvasH);

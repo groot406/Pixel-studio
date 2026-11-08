@@ -1,5 +1,5 @@
 /**
- * Object pose controls in the Transform panel: pivot (reset, or drag the crosshair on the canvas), skew, 3D turn, deform and
+ * Object pose controls in the Transform panel: pivot (reset, or drag the crosshair on the canvas), stretch at pivot, skew, 3D turn, deform and
  * sampling (Nearest, RotSprite or Smooth AA) of the selected placed object(s). Values are stored on the instances (objects.setObjectEffects)
  * in the Edit scope; sliders preview live and commit one undo step on release.
  */
@@ -30,6 +30,7 @@ export function initObjectPose(deps) {
   $('pose-deform').onchange = () => { const kind = $('pose-deform').value; apply({ deform: kind === 'none' ? null : deformFrom(kind, DEFORM_DEFAULTS[kind]) }); };
   $('pose-deform-params').addEventListener('input', event => { if (event.target.matches('[data-param]')) { syncParam(event.target, false); preview({ deform: readDeform() }); } });
   $('pose-deform-params').addEventListener('change', event => { if (event.target.matches('[data-param]')) { syncParam(event.target, true); commit({ deform: readDeform() }); } });
+  $('pose-stretch').onchange = () => apply({ stretch: $('pose-stretch').checked ? 'pivot' : null });
   $('pose-sampling').onchange = () => { const v = $('pose-sampling').value; apply({ sampling: v === 'nearest' ? null : v }); };
   $('pose-pivot-reset').onclick = () => setPivot(null);
   const marker = $('pivot-marker');
@@ -123,6 +124,7 @@ export function renderObjectPose() {
   const flat = !op.tilt;
   $('pose-tilt-value').textContent = flat ? 'Flat' : [op.tilt.y && `turned ${op.tilt.y}°`, op.tilt.x && `tipped ${op.tilt.x}°`].filter(Boolean).join(', ');
   $('pose-tilt-reset').disabled = flat;
+  $('pose-stretch').checked = op.stretch === 'pivot';
   $('pose-sampling').value = op.sampling || 'nearest';
   const frames = d.currentAnimation().frames.length;
   $('pose-scope').textContent = `${count > 1 ? 'Applies to each selected object' : 'Applies'} in ${editScopeText(state, d.currentAnimation())} (Edit switch above the canvas).`;

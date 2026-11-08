@@ -2,6 +2,7 @@
 import { validateProject, insertProjectLayer, removeProjectLayer, uid, MAX_LAYERS, MAX_TOTAL_PIXELS } from './project.js';
 import { sourceForCel, pixelSpans, renderOperations, hasLockedInstances } from './artwork.js';
 import { celObjects } from './objects.js';
+import { paintSharedPart, trimPart } from './parts.js';
 import { findIslands } from './toolbox.js';
 import { assertEditScope, scopeFrames } from './frame-scope.js';
 
@@ -104,6 +105,46 @@ export function createObjectFromPixels(project, target, { rect, mask, name = 'Ob
   }
   if (layer.group === false && layer.id !== destination.id && p.layers.length > 1 && p.animations.every(a => a.frames.every(f => emptyCel(f.cels.find(c => c.layerId === layer.id))))) removeProjectLayer(p, layer.id);
   return { project: validateProject(p), layerId: destination.id, key: id, parts: variants.size, frames: placements.length };
+}
+
+/**
+ * Cut part-space pixel `indices` out of a smart object's shared part into a new part named `name`. Every instance
+ * of the part (in all frames and scenes) gets a matching instance of the new part right above it with the same
+ * pose, so nothing moves on screen; both parts are trimmed when that is pixel-exact. Returns the new instance key.
+ */
+export function splitPart(project, target, instanceId, indices, { name = 'Object' } = {}) {
+  let p = validateProject(project);
+  const cel = p.animations.find(a => a.id === target.animationId)?.frames.find(f => f.id === target.frameId)?.cels.find(c => c.layerId === target.layerId);
+  const op = cel?.source?.ops.find(o => o.type === 'use' && o.id === instanceId);
+  if (!op) throw new Error('Choose an object to split.');
+  const part = p.parts.find(x => x.id === op.partId), pixels = renderOperations(part.ops, part.width, part.height);
+  const chosen = new Set((indices || []).filter(i => Number.isInteger(i) && pixels[i] >= 0));
+  if (!chosen.size) throw new Error('Select some of this object’s pixels to split off.');
+  if (pixels.every((v, i) => v < 0 || chosen.has(i))) throw new Error('That is the whole object. Select only the pixels to split off.');
+  const label = String(name).trim().slice(0, 80) || 'Object', partId = uniquePartId(p, partIdFromName(label));
+  p = paintSharedPart(p, part.id, pixels.map((v, i) => chosen.has(i) ? -1 : v));
+  p.parts.push({ id: partId, width: part.width, height: part.height, ops: pixelSpans(pixels.map((v, i) => chosen.has(i) ? v : -1), part.width) });
+  // One instance id per original object, free in every cel that shows it, so the new piece is one object across frames.
+  const cels = new Map();
+  for (const a of p.animations) for (const f of a.frames) for (const c of f.cels) for (const o of c.source?.ops || []) {
+    if (o.type !== 'use' || o.partId !== part.id) continue;
+    const key = `${c.layerId}\n${o.id}`;
+    if (!cels.has(key)) cels.set(key, []);
+    cels.get(key).push(c);
+  }
+  let key = null;
+  for (const [ref, list] of cels) {
+    const [layerId, originalId] = ref.split('\n');
+    let id = partIdFromName(label), n = 2;
+    while (list.some(c => c.source.ops.some(o => o.type === 'use' && o.id === id))) id = `${partIdFromName(label).slice(0, 85)}-${n++}`;
+    for (const c of list) {
+      const index = c.source.ops.findIndex(o => o.type === 'use' && o.id === originalId);
+      c.source.ops.splice(index + 1, 0, { ...c.source.ops[index], id, partId, name: label });
+    }
+    if (layerId === target.layerId && originalId === instanceId) key = id;
+  }
+  p = trimPart(trimPart(p, part.id), partId);
+  return { project: p, layerId: target.layerId, key };
 }
 
 /** Separate visible shapes (8-connected islands) of a pixel object in this frame, largest first. */

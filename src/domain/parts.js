@@ -130,6 +130,27 @@ export function growPart(project,partId,{left=0,top=0,right=0,bottom=0}) {
 }
 
 /**
+ * Crop a part to its opaque pixels, keeping every instance's artwork where it is on the canvas. Parts with a
+ * rotated, resized, skewed or deformed instance are left at full size, since cropping could shift those by a pixel.
+ */
+export function trimPart(project,partId) {
+  const p=validateProject(project), part=p.parts?.find(part=>part.id===partId);
+  if(!part) throw new Error('Choose a part.');
+  const ops=[];
+  for(const a of p.animations) for(const f of a.frames) for(const c of f.cels) for(const op of c.source?.ops || []) if(op.type==='use' && op.partId===partId) ops.push(op);
+  if(ops.some(op=>op.angle || op.skew || op.tilt || op.deform || op.width!==undefined || op.height!==undefined)) return p;
+  const pixels=renderOperations(part.ops,part.width,part.height);
+  let minX=Infinity,minY=Infinity,maxX=-1,maxY=-1;
+  pixels.forEach((v,i)=>{if(v<0)return;const x=i%part.width,y=(i-x)/part.width;minX=Math.min(minX,x);maxX=Math.max(maxX,x);minY=Math.min(minY,y);maxY=Math.max(maxY,y);});
+  if(maxX<0 || (minX===0 && minY===0 && maxX===part.width-1 && maxY===part.height-1)) return p;
+  const before={width:part.width,height:part.height}, after={width:maxX-minX+1,height:maxY-minY+1}, crop=[];
+  for(let y=minY;y<=maxY;y++) for(let x=minX;x<=maxX;x++) crop.push(pixels[y*part.width+x]);
+  Object.assign(part,after,{ops:pixelSpans(crop,after.width)});
+  for(const op of ops) Object.assign(op,grownInstance(op,before,after,-minX,-minY));
+  return validateProject(p);
+}
+
+/**
  * A `use` op after its part grew from `before` to `after` by `left`/`top` padding, placed so existing artwork
  * stays where it was on the canvas, including resized and rotated instances.
  */

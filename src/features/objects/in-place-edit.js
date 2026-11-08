@@ -37,7 +37,7 @@ function loadDraft(session) {
     for(let y=0;y<box.height;y++) for(let x=0;x<box.width;x++) {
       pixels[y*box.width+x]=instancePixel(session.placed,image,{x:box.x+x,y:box.y+y});
     }
-    const {angle,width,height,pivot,skew,tilt,deform,sampling,...rest}=session.placed;
+    const {angle,width,height,pivot,skew,tilt,deform,stretch,sampling,...rest}=session.placed;
     pose={...rest,x:box.x,y:box.y,transform:'N'};draft={width:box.width,height:box.height,pixels};
   }
   Object.assign(session,{instance:pose,width:draft.width,height:draft.height,originalWidth:draft.width,originalHeight:draft.height,
@@ -53,7 +53,7 @@ function posed(instance) { return Boolean(instance.angle || instance.skew || ins
  */
 function editingPose(instance,part) {
   if(!posed(instance))return instance;
-  const {angle,width,height,pivot,skew,tilt,deform,sampling,...pose}=instance, placed=transformedSize(instance,part), own=transformedSize(pose,part);
+  const {angle,width,height,pivot,skew,tilt,deform,stretch,sampling,...pose}=instance, placed=transformedSize(instance,part), own=transformedSize(pose,part);
   pose.x=Math.round(instance.x+placed.width/2-own.width/2);pose.y=Math.round(instance.y+placed.height/2-own.height/2);
   return pose;
 }
@@ -294,10 +294,11 @@ export function previewInPlaceEdit(session,placed=false) {
   return pixels;
 }
 
-export function prepareInPlaceEdit(session) {
+/** The project with the draft applied. `force` writes it even when unchanged, so the part matches the draft's pixel grid. */
+export function prepareInPlaceEdit(session,{force=false}={}) {
   const restriction=inPlaceRestriction(session);
   if(restriction)throw new Error(restriction);
-  if(!inPlaceDirty(session))return validateProject(session.sourceProject);
+  if(!force && !inPlaceDirty(session))return validateProject(session.sourceProject);
   if(session.baked)return bakeInPlace(session);
   const growth=inPlaceGrowth(session);
   if(session.scope==='shared' || session.references.length===1)return paintSharedPart(growPart(session.sourceProject,session.partId,growth),session.partId,session.pixels);
@@ -313,7 +314,7 @@ function bakeInPlace(session) {
   const op=project.animations.find(a=>a.id===target.animationId).frames.find(f=>f.id===target.frameId).cels.find(c=>c.layerId===target.layerId).source.ops.find(op=>op.type==='use' && op.id===id);
   const part=project.parts.find(part=>part.id===op.partId), pose=inPlaceInstance(session);
   Object.assign(part,{width:session.width,height:session.height,ops:pixelSpans(session.pixels,session.width)});
-  for(const key of ['angle','width','height','pivot','skew','tilt','deform','sampling'])delete op[key];
+  for(const key of ['angle','width','height','pivot','skew','tilt','deform','stretch','sampling'])delete op[key];
   Object.assign(op,{x:pose.x,y:pose.y,transform:'N'});
   return validateProject(project);
 }

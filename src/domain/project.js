@@ -1,5 +1,5 @@
 /** Exact, indexed pixel operations. Transparent pixels use index -1. */
-import { artworkId, artworkBudget, validateParts, validateSource, renderParts, renderSource, cloneArtwork } from './artwork.js';
+import { artworkId, artworkBudget, validateParts, validateSource, renderParts, renderSource, cloneArtwork, pixelSpans } from './artwork.js';
 import { readOutline, compositeWithOutline } from './live-outline.js';
 import { SIZE, MAX_SIZE, MAX_TOTAL_PIXELS, MAX_COLORS, MAX_LAYERS, pixelCount } from './limits.js';
 export { SIZE, MAX_SIZE, MAX_TOTAL_PIXELS, MAX_COLORS, MAX_LAYERS } from './limits.js';
@@ -391,6 +391,42 @@ export function canMergeLayerDown(project, topId, belowId) {
       const layers = getAnimationLayers(project, animation, frame), index = layers.findIndex(layer => layer.id === topId);
       return index > 0 && layers[index - 1].id === belowId;
     })));
+}
+
+/** The layer drawn right below `layerId` in the first frame, or null. */
+export function layerBelow(project, layerId) {
+  const animation = project.animations[0], layers = getAnimationLayers(project, animation, animation?.frames[0]);
+  const index = layers.findIndex(layer => layer.id === layerId);
+  return index > 0 ? layers[index - 1] : null;
+}
+
+/**
+ * Merge the layer below `topId` into it, in every frame (mutates). The merged layer keeps the top layer's name and
+ * place; the lower layer's pixels show through where the top one is transparent. The lower layer may not hold objects,
+ * since they would be flattened; objects on the top layer stay objects.
+ */
+export function mergeLayerDown(project, topId) {
+  const top = project.layers.find(layer => layer.id === topId), below = layerBelow(project, topId);
+  if (!top) throw new Error('Layer not found.');
+  if (!below) throw new Error('There is no layer below this one.');
+  if (top.locked || below.locked) throw new Error('Unlock both layers before merging.');
+  if (!top.visible || !below.visible) throw new Error('Show both layers before merging.');
+  if (!canMergeLayerDown(project, topId, below.id)) throw new Error('These layers are not stacked the same way in every frame. Reorder them first.');
+  const frames = project.animations.flatMap(animation => animation.frames);
+  if (frames.some(frame => frame.cels.find(cel => cel.layerId === below.id)?.source?.ops.some(op => op.type === 'use'))) throw new Error(`“${below.name}” holds objects. Move them to “${top.name}” or flatten them first.`);
+  let images;
+  for (const frame of frames) {
+    const upper = frame.cels.find(cel => cel.layerId === topId), lower = frame.cels.find(cel => cel.layerId === below.id);
+    if (!upper || !lower) continue;
+    if (upper.source) {
+      // The lower pixels become spans under everything on the top layer, so its objects stay above them.
+      upper.source = { ops: [...pixelSpans(lower.pixels, project.width), ...cloneArtwork(upper.source.ops)], overrides: cloneArtwork(upper.source.overrides) };
+      upper.pixels = renderSource(upper.source, project.width, project.height, images ??= renderParts(project.parts || [], project.palette));
+    } else upper.pixels = lower.pixels.map((pixel, i) => upper.pixels[i] === -1 ? pixel : upper.pixels[i]);
+  }
+  removeProjectLayer(project, below.id);
+  if (project.outline?.skip) { project.outline.skip = project.outline.skip.filter(id => id !== below.id); if (!project.outline.skip.length) delete project.outline.skip; }
+  return below;
 }
 
 /** Hidden pixels count as content so cleanup cannot silently discard hidden artwork. */

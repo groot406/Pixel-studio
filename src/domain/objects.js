@@ -1,7 +1,7 @@
 /** Object editing over the established cel format. Groups retain isolated erase/override semantics. */
 import { validateProject, getAnimationLayers, insertProjectLayer, removeProjectLayer, uid, MAX_LAYERS, MAX_TOTAL_PIXELS } from './project.js';
-import { PIVOT_MIN, PIVOT_MAX } from './limits.js';
-import { cloneArtwork, sourceForCel, renderParts, hasLockedInstances, renderOperations, pixelSpans, translatePixels } from './artwork.js';
+import { PIVOT_MIN, PIVOT_MAX, MAX_SIZE } from './limits.js';
+import { cloneArtwork, sourceForCel, renderParts, hasLockedInstances, renderOperations, pixelSpans } from './artwork.js';
 import { linePoints, ellipsePoints, instancePixel, instanceSize, instanceBox, transformedSize, swapsAxes, composeTransform, transformPoint } from './geometry.js';
 import { nextPartId } from './parts.js';
 import { boneDescendants, relPose, layoutFrame } from './skeleton.js';
@@ -124,7 +124,7 @@ export function placeObject(project,target,key,anchorKey,position,scope='animati
 }
 
 /** Optional per-instance effects; `null` in a change resets one to its default (centre pivot, no skew/3D turn/deform, nearest). */
-export const EFFECT_KEYS=['pivot','skew','tilt','deform','sampling'];
+export const EFFECT_KEYS=['pivot','skew','tilt','deform','stretch','sampling'];
 function applyEffects(op,changes) {
   for(const key of EFFECT_KEYS) if(key in changes) { if(changes[key]===null || changes[key]===undefined) delete op[key]; else op[key]=cloneArtwork(changes[key]); }
 }
@@ -179,9 +179,33 @@ export function translateObject(project,target,key,dx,dy,scope='animation') {
   return validateProject(p);
 }
 
+/** Spans of drawing operations shifted by dx, dy. Erasing pixels count as drawn, so they keep clearing what lies beneath. */
+function shiftedSpans(ops,width,height,dx,dy) {
+  const rows=new Map(), put=(x,y,v)=>{
+    if(x<-MAX_SIZE || y<-MAX_SIZE || x>MAX_SIZE || y>MAX_SIZE)return;
+    if(!rows.has(y))rows.set(y,new Map());
+    rows.get(y).set(x,v);
+  };
+  for(const op of ops) {
+    if(op.type==='span'){op.values.forEach((v,i)=>put(op.x+i+dx,op.y+dy,v));continue;}
+    renderOperations([{...op,color:0}],width,height).forEach((v,i)=>{if(v===0)put(i%width+dx,Math.floor(i/width)+dy,op.color);});
+  }
+  const spans=[];
+  for(const y of [...rows.keys()].sort((a,b)=>a-b)) {
+    const row=rows.get(y), xs=[...row.keys()].sort((a,b)=>a-b);
+    for(const x of xs) {
+      const last=spans.at(-1);
+      if(last && last.y===y && last.x+last.values.length===x && last.values.length<MAX_SIZE)last.values.push(row.get(x));
+      else spans.push({type:'span',x,y,values:[row.get(x)]});
+    }
+  }
+  return spans;
+}
+
 /**
  * Move a pixel object (plain raster, or a run of drawing operations between placed objects) in every frame of the
- * scope that has it. Pixels pushed past the canvas edge are clipped; erasing operations move with the drawing.
+ * scope that has it. Pixels pushed past the canvas edge are kept as off-canvas spans, so moving back restores them;
+ * a plain raster stays raster while everything fits. Erasing operations move with the drawing.
  */
 export function translatePixelObject(project,target,key,dx,dy,scope='animation') {
   if(!Number.isInteger(dx) || !Number.isInteger(dy))throw new Error('Object movement uses whole pixels.');
@@ -193,13 +217,16 @@ export function translatePixelObject(project,target,key,dx,dy,scope='animation')
     const cel=frame.cels.find(c=>c.layerId===layer.id), node=cel && celObjects(cel).find(n=>n.key===key);
     if(!node || node.type!=='pixels')continue;
     moved++;
-    if(!cel.source){cel.pixels=translatePixels(cel.pixels,width,height,dx,dy);continue;}
-    const ops=cel.source.ops.slice(node.start,node.end);
+    const ops=cel.source?cel.source.ops.slice(node.start,node.end):pixelSpans(cel.pixels,width);
     if(!ops.length)continue;
-    const values=translatePixels(renderOperations(ops,width,height),width,height,dx,dy);
-    // Erasing operations also count as drawn, so they keep clearing what lies beneath them.
-    const touched=translatePixels(renderOperations(ops.map(op=>op.type==='span'?{...op,values:op.values.map(()=>0)}:{...op,color:0}),width,height),width,height,dx,dy);
-    cel.source.ops.splice(node.start,ops.length,...pixelSpans(values,width,i=>touched[i]>=0));
+    const spans=shiftedSpans(ops,width,height,dx,dy);
+    if(cel.source)cel.source.ops.splice(node.start,ops.length,...spans);
+    else {cel.source={ops:spans,overrides:[]};p.version=3;p.parts||=[];}
+    // Only spans that all fit on the canvas render exactly like plain pixels, so keep such cels as plain raster.
+    if(!cel.source.overrides.length && cel.source.ops.every(op=>op.type==='span' && op.x>=0 && op.y>=0 && op.y<height && op.x+op.values.length<=width)) {
+      cel.pixels=renderOperations(cel.source.ops,width,height);
+      delete cel.source;
+    }
   }
   if(!moved)throw new Error('This pixel object is not in the current frame.');
   return validateProject(p);
@@ -295,8 +322,8 @@ export function turnObjects(project,target,items,turn,scope='animation') {
 }
 
 /**
- * Set or reset (`null`) pivot, skew, deform and sampling of each selected object in every frame of the scope, for
- * example `{skew:{x:-15,y:0}, deform:{kind:'wave',axis:'x',amplitude:2,wavelength:8,phase:0}, sampling:'rotsprite'}`.
+ * Set or reset (`null`) pivot, skew, deform, stretch and sampling of each selected object in every frame of the scope, for
+ * example `{skew:{x:-15,y:0}, deform:{kind:'wave',axis:'x',amplitude:2,wavelength:8,phase:0}, stretch:'pivot', sampling:'rotsprite'}`.
  */
 export function setObjectEffects(project,target,items,changes,scope='animation') {
   for(const name of Object.keys(changes)) if(!EFFECT_KEYS.includes(name)) throw new Error('Unsupported object effect.');

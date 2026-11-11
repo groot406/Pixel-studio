@@ -3,6 +3,7 @@ import { compareProjects } from './comparison.js';
 import { compositeFrame } from '../../domain/project.js';
 import { createAIRequest, prepareAIResult } from './requests.js';
 import { readLocalEditResponse } from './local-client.js';
+import { isCloudEdition } from '../cloud/client.js';
 
 const drafts = new Map();
 const copy = value => JSON.parse(JSON.stringify(value));
@@ -51,7 +52,7 @@ export function openAIEdit({ project, animationId, frameId, layerId, selection =
   const key = documentId || 'current';
   const saved = drafts.get(key);
   const sameSource = saved?.request && JSON.stringify(saved.request.sourceProject) === JSON.stringify(sourceProject);
-  const local = isLoopback();
+  const cloud = isCloudEdition(), local = isLoopback() || cloud;
   const initialMode = ['edit', 'compose', 'inpaint', 'recolor'].includes(saved?.mode) && (saved.mode !== 'inpaint' || canInpaint) ? saved.mode : 'edit';
   const initialScope = initialMode === 'recolor' ? 'project' : ['frame', 'animation', 'project'].includes(saved?.scope) && !(initialMode === 'inpaint' && saved.scope === 'project') ? saved.scope : 'animation';
   const sameTarget = initialScope === 'project' || (saved?.animationId === currentAnimation.id && (initialScope !== 'frame' || saved?.frameId === currentFrame.id));
@@ -90,7 +91,7 @@ export function openAIEdit({ project, animationId, frameId, layerId, selection =
         <label class="field ai-edit-instruction-field" for="ai-edit-instruction"><span class="field-label">What would you like to change?</span><textarea id="ai-edit-instruction" rows="3" maxlength="6000" required placeholder="Make the sword swing clearer, with a little more movement in the coat…"></textarea></label>
 
         <div class="ai-edit-methods" role="tablist" aria-label="AI editing method">
-          <button id="ai-edit-local-tab" type="button" role="tab" aria-controls="ai-edit-local-panel" aria-selected="true">${icon('spark')} Local Codex</button>
+          <button id="ai-edit-local-tab" type="button" role="tab" aria-controls="ai-edit-local-panel" aria-selected="true">${icon('spark')} ${cloud ? 'Pixel Studio AI' : 'Local Codex'}</button>
           <button id="ai-edit-paste-tab" type="button" role="tab" aria-controls="ai-edit-paste-panel" aria-selected="false" tabindex="-1">${icon('paste')} Paste AI result</button>
         </div>
         <section id="ai-edit-local-panel" class="ai-edit-method-panel" role="tabpanel" aria-labelledby="ai-edit-local-tab">
@@ -100,11 +101,6 @@ export function openAIEdit({ project, animationId, frameId, layerId, selection =
             <button id="ai-edit-refresh" class="button small" type="button"${local ? '' : ' hidden'}>${icon('rotate-right')} Refresh</button>
             <a id="ai-edit-download" class="button" href="./downloads/pixel-studio-local.zip" download="pixel-studio-local.zip"${local ? ' hidden' : ''}>${icon('import')} Download local edition</a>
           </div>
-          <details id="ai-edit-setup" class="ai-edit-setup">
-            <summary>Local setup</summary>
-            <ol><li>Install Node.js 20 or newer and the Codex CLI.</li><li>Run <code>codex login</code> and sign in with your ChatGPT account.</li><li>Open the extracted Pixel Studio folder and run <code>npm start</code>. On a Mac, you can also open <strong>Start-Pixel-Studio.command</strong>.</li></ol>
-            <p>Use the localhost address printed by the launcher. Codex uses your account’s allowance and connects to OpenAI online.</p>
-          </details>
         </section>
         <section id="ai-edit-paste-panel" class="ai-edit-method-panel" role="tabpanel" aria-labelledby="ai-edit-paste-tab" hidden>
           <p class="ai-edit-help">Copy this edit prompt into ChatGPT, then paste its complete response below, including the final completion comment. The response must match this request and its output format.</p>
@@ -250,18 +246,25 @@ export function openAIEdit({ project, animationId, frameId, layerId, selection =
   }
 
   function renderConnection() {
-    const connected = connection.connected && connection.authMode === 'chatgpt';
+    const connected = connection.connected && (connection.authMode === 'chatgpt' || (cloud && connection.authMode === 'cloud'));
     connection.connected = connected;
     $('ai-edit-connection').dataset.state = checking ? 'checking' : connected ? 'ready' : local ? 'attention' : 'local-only';
+    if (cloud) {
+      $('ai-edit-connection-title').textContent = checking ? 'Checking Pixel Studio Cloud…' : connected ? 'Pixel Studio Cloud AI' : 'Sign in to use AI';
+      $('ai-edit-connection-description').textContent = checking ? 'Checking your account.' : connected
+        ? `${connection.accountLabel} · ${connection.busy ? 'Another request is running. Refresh when it finishes.' : `${connection.credits?.balance ?? 0} credits left; an edit uses about 5–40.`}`
+        : connection.message || 'Sign in (Account, top right) to edit with AI.';
+    } else {
     $('ai-edit-connection-title').textContent = !local ? 'Use your own Codex account' : checking ? 'Checking local Codex…' : connected ? 'Local Codex connected' : 'Connect your local Codex';
     $('ai-edit-connection-description').textContent = !local
       ? 'Download the local edition to generate and edit with your ChatGPT plan.'
       : checking ? 'Checking the local service and your ChatGPT sign-in.'
         : connected ? `${connection.accountLabel || 'Your ChatGPT account'} · ${connection.busy ? 'Another request is running. Refresh when it finishes.' : 'Uses your plan’s available allowance.'}`
           : connection.message || 'Start the local edition with npm start, then open the localhost address it prints.';
+    }
     const select = $('ai-edit-model');
     const chosen = select.value || saved?.model || '';
-    select.replaceChildren(new Option('Codex default', ''));
+    select.replaceChildren(new Option(cloud ? 'Default (GPT-5 mini)' : 'Codex default', ''));
     for (const model of connection.models || []) {
       if (typeof model.id === 'string') select.add(new Option(model.name || model.id, model.id));
     }

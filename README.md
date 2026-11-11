@@ -51,6 +51,10 @@ Native saves and PXA 2 retain object names, instance settings, groups and shared
 
 The editor is published at [groot406.github.io/Pixel-studio](https://groot406.github.io/Pixel-studio/) by GitHub Actions. Changes pushed to `main` are built and deployed automatically. The hosted editor supports drawing, importing/exporting, and browser-local projects; AI generation through the local Codex bridge requires the downloadable local edition below.
 
+### Pixel Studio Cloud (SaaS edition)
+
+`npm run cloud` (Node 22.13+) serves a marketing page at `/` and the editor at `/app`, with accounts, a Free plan (1 cloud project, no AI) and a Pro plan, metered AI credits (server-side OpenAI/Gemini keys), cloud projects, your own OpenAI/Gemini keys on Pro (no credits used), an account page with usage stats and Stripe billing. It shows a **Sign in** button in the header and has no npm dependencies; a `Dockerfile` is included. Configuration, pricing, deployment and the launch checklist are in [docs/saas.md](docs/saas.md).
+
 ## Run
 
 Requires Node.js 20 or newer. There are no npm dependencies to install.

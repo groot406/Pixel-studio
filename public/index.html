@@ -23,6 +23,7 @@
   <link rel="stylesheet" href="./src/editor/assistant.css">
   <link rel="stylesheet" href="./src/editor/workspace-views.css">
   <link rel="stylesheet" href="./src/editor/tab-menu.css">
+  <link rel="stylesheet" href="./src/features/cloud/account.css">
   <link rel="stylesheet" href="./src/editor/mobile-layout.css">
 </head>
 <body>
@@ -119,7 +120,7 @@
   <header class="app-header">
     <a class="brand" href="./" aria-label="Pixel Studio home"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span>pixel<span class="brand-light">studio</span><small>MAKE SOMETHING LITTLE.</small></span></a>
     <div class="project-info"><label class="sr-only" for="project-name">Project name</label><input id="project-name" value="Panda adventurer" maxlength="80" spellcheck="false"><button type="button" id="save-status" class="save-status" data-state="saved"><i></i> Saved on this device</button></div>
-    <div class="header-actions"><button id="help-button" class="icon-button" title="Help, tours and shortcuts" aria-label="Help, tours and shortcuts"><svg><use href="#i-help"/></svg></button><button id="plugins-button" class="icon-button" title="Plugins &amp; skills (⌘/Ctrl K: command palette)" aria-label="Plugins and skills"><svg><use href="#i-plugin"/></svg></button><button id="new-project" class="button subtle" aria-label="New project"><svg><use href="#i-plus"/></svg><span>New</span></button><button id="import-button" class="button" aria-label="Import"><svg><use href="#i-import"/></svg><span>Import</span></button><button id="export-button" class="button primary" aria-label="Export"><svg><use href="#i-export"/></svg><span>Export</span></button><button id="assistant-button" class="button assistant-entry" aria-pressed="false" title="Assistant: ask about or change this project (⌘/Ctrl J)" aria-label="Assistant"><svg aria-hidden="true"><use href="#i-spark"/></svg><span>Assistant</span></button><button id="prompt-builder-button" class="button prompt-builder-entry" title="Build an AI prompt" aria-label="Build an AI prompt"><svg aria-hidden="true"><use href="#i-spark"/></svg><span>AI prompt</span></button><button id="ai-edit-button" class="button ai-edit-entry" title="Edit artwork with AI" aria-label="Edit artwork with AI"><svg aria-hidden="true"><use href="#i-pencil"/></svg><span>AI edit</span></button></div>
+    <div class="header-actions"><button id="cloud-account-button" class="button subtle cloud-account-button" hidden aria-haspopup="dialog"><svg aria-hidden="true"><use href="#i-spark"/></svg><span>Sign in</span></button><button id="help-button" class="icon-button" title="Help, tours and shortcuts" aria-label="Help, tours and shortcuts"><svg><use href="#i-help"/></svg></button><button id="plugins-button" class="icon-button" title="Plugins &amp; skills (⌘/Ctrl K: command palette)" aria-label="Plugins and skills"><svg><use href="#i-plugin"/></svg></button><button id="new-project" class="button subtle" aria-label="New project"><svg><use href="#i-plus"/></svg><span>New</span></button><button id="import-button" class="button" aria-label="Import"><svg><use href="#i-import"/></svg><span>Import</span></button><button id="export-button" class="button primary" aria-label="Export"><svg><use href="#i-export"/></svg><span>Export</span></button><button id="assistant-button" class="button assistant-entry" aria-pressed="false" title="Assistant: ask about or change this project (⌘/Ctrl J)" aria-label="Assistant"><svg aria-hidden="true"><use href="#i-spark"/></svg><span>Assistant</span></button><button id="prompt-builder-button" class="button prompt-builder-entry" title="Build an AI prompt" aria-label="Build an AI prompt"><svg aria-hidden="true"><use href="#i-spark"/></svg><span>AI prompt</span></button><button id="ai-edit-button" class="button ai-edit-entry" title="Edit artwork with AI" aria-label="Edit artwork with AI"><svg aria-hidden="true"><use href="#i-pencil"/></svg><span>AI edit</span></button></div>
   </header>
 
   <nav class="project-tabs-bar" aria-label="Workspace">
@@ -361,7 +362,7 @@
     </aside>
   </main>
 
-  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <div id="toast" class="toast" role="status" aria-live="polite" popover="manual" hidden></div>
   <dialog id="modal" class="modal"><div class="modal-heading"><div><span id="modal-eyebrow" class="modal-eyebrow">PIXEL STUDIO</span><h2 id="modal-title"></h2></div><button id="close-modal" class="icon-button" aria-label="Close dialog"><svg><use href="#i-close"/></svg></button></div><div id="modal-content" class="modal-content"></div></dialog>
   <input id="data-file-input" type="file" accept=".pxa,.pxs,.pixel,.json,text/plain,application/octet-stream,application/json" hidden>
   <input id="png-file-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif" hidden>

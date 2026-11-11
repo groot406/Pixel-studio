@@ -44,6 +44,9 @@ import { initAnimatePanel, renderAnimatePanel } from './animate-panel.js';
 import { initMotionAsk, motionAskDialog } from './motion-ask.js';
 import { initMotionModes, syncMotionMode, drawMotionOverlay } from './motion-modes.js';
 import { initOutlineDialog, renderOutlineButton, outlineDialog } from './outline-dialog.js';
+import { initAccount, accountDialog as cloudAccountDialog } from '../features/cloud/account-dialog.js';
+import { isCloudEdition, cloudAllows } from '../features/cloud/client.js';
+import { PRO_FEATURES } from '../features/cloud/plans.js';
 import { initRigMode, syncRigMode, drawRigOverlay, toggleRigMode } from './rig-mode.js';
 import { initTimeline, renderFrameCards, frameAction, timelineKey, nextPreviewIndex, loopLabel } from './timeline.js';
 import { initOnion, drawOnion, onionSummary } from './onion.js';
@@ -420,11 +423,21 @@ function toast(message, actions = []) {
   for (const { label, run } of actions) {
     const button = document.createElement('button');
     button.type = 'button'; button.className = 'toast-action'; button.textContent = label;
-    button.onclick = () => { box.hidden = true; run(); };
+    button.onclick = () => { hideToast(box); run(); };
     box.append(button);
   }
   box.hidden = false;
-  toastTimer = setTimeout(() => { box.hidden = true; }, actions.length ? 9000 : 3800);
+  // Modal dialogs and their blurred backdrop sit in the browser's top layer. The toast is a popover, so it joins
+  // the top layer too; showing it again moves it above whatever dialog is open now.
+  if (box.popover && box.showPopover) {
+    if (box.matches(':popover-open')) box.hidePopover();
+    box.showPopover();
+  }
+  toastTimer = setTimeout(() => hideToast(box), actions.length ? 9000 : 3800);
+}
+function hideToast(box) {
+  box.hidden = true;
+  if (box.popover && box.hidePopover && box.matches(':popover-open')) box.hidePopover();
 }
 const SAVE_DELAY=500;
 /** Autosave: debounced after each change, deferred while a stroke is in progress, then run when the browser is idle. */
@@ -2309,7 +2322,7 @@ function openDialog(title, content, eyebrow = 'PIXEL STUDIO') {
   watchModalOverflow();
   if (finishDrawing()) renderAll();
   $('modal').dispatchEvent(new Event('pixel-studio:dialog-replace'));
-  $('modal').classList.remove('image-import-modal','versions-modal','wide','start-modal','part-library-modal','prompt-builder-modal','ai-edit-modal','shared-part-modal','palette-studio-modal','export-modal','help-modal');
+  $('modal').classList.remove('image-import-modal','versions-modal','wide','start-modal','part-library-modal','prompt-builder-modal','ai-edit-modal','shared-part-modal','palette-studio-modal','export-modal','help-modal','account-page-modal','welcome-modal');
   $('modal-title').textContent = title;
   $('modal-eyebrow').textContent = eyebrow;
   $('modal-content').innerHTML = content;
@@ -2862,6 +2875,12 @@ function exportDialog() {
   };
   const imageView = (tab) => () => {
     activate(tab);
+    const feature = {sheet:'sheetExport',anim:'animationExport'}[tab];
+    if (feature && !cloudAllows(feature)) {
+      $('export-options').innerHTML=`<div class="notice"><strong>${escapeHTML(PRO_FEATURES[feature])} is part of Pixel Studio Pro.</strong> Free includes PNG frames, PNG sequences and project files. Pro adds sprite sheets, GIF and APNG export, 1,000 AI credits a month and 200 cloud projects.</div><div class="modal-actions left"><button type="button" class="button primary" id="export-upgrade">See Pro</button></div>`;
+      $('export-upgrade').onclick=()=>cloudAccountDialog();
+      return;
+    }
     renderImageExport($('export-options'),tab,{project:state.project,animationId:state.animationId,frameId:state.frameId,layerId:currentLayer().id,layerName:currentLayer().name,name:state.project.name,download:downloadBlob,toast,icon,escapeHTML});
   };
   $('export-ai-tab').onclick = aiView;
@@ -2878,7 +2897,7 @@ function samplesDialog() {
   render();
 }
 function accountDialog() {
-  if (['127.0.0.1','localhost','[::1]'].includes(location.hostname)) { aiEditDialog(); return; }
+  if (isCloudEdition() || ['127.0.0.1','localhost','[::1]'].includes(location.hostname)) { aiEditDialog(); return; }
   openDialog('AI in Pixel Studio', `<p class="modal-body-text">Use your own Codex ChatGPT account in the local edition. Describe an edit, review the result, then apply it with Undo available.</p><div class="notice"><strong>Local Codex edition</strong><p>Download and unzip Pixel Studio, then run <code>npm start</code> in its folder or open <strong>Start-Pixel-Studio.command</strong> on your Mac. Requires Node.js 20+ and the Codex CLI signed in with ChatGPT.</p><a class="button primary" href="./downloads/pixel-studio-local.zip" download>Download local edition</a></div><p class="modal-body-text">To move your current artwork to localhost, export a .pxa or .pxs file here and import it there. Each address keeps its own saved projects.</p><div class="modal-actions"><button id="account-ai-edit" class="button primary">Review an AI edit</button><button id="account-ai-export" class="button">Build a creation prompt</button></div><details class="prompt-style-details"><summary>Website sign-in</summary><p class="modal-body-text">Sign in to this website with your ChatGPT account. Using your plan for automatic generation on the hosted website requires a separate approved connection.</p><a class="button chatgpt-signin" href="/signin-with-chatgpt?return_to=%2F" target="_top" data-oai-siwc-button>Continue with ChatGPT</a><p><a class="text-button" href="/signout-with-chatgpt?return_to=%2F" target="_top">Sign out of Pixel Studio</a></p><a href="https://developers.openai.com/siwc/quickstart" target="_blank" rel="noopener noreferrer">About ChatGPT plan connections ↗</a></details>`, 'AI CONNECTION');
   $('account-ai-edit').onclick=aiEditDialog;
   $('account-ai-export').onclick=()=>promptBuilderDialog();
@@ -2897,7 +2916,7 @@ function bindEvents() {
   bindFileDrop();
   const mathsDeps={state,$,icon,escapeHTML,mutate,snapshot,remember,versionBefore,renderAll,renderCanvas,renderPreview,renderTools,toast,openDialog,paintSprite,finishDrawing,drawPoints,
     currentAnimation,currentFrame,currentLayer,selectedObject,selectedItems,transformItems,resizableObject,objectTarget,canEditPixels,canvasPixels,canvasPosition,normalizeSelection,selectObject,selectFrameAt,addFrame,undo:()=>restore(state.undo,state.redo)};
-  initToolExtras(mathsDeps);initObjectPose(mathsDeps);initMotionModes(mathsDeps);initRigMode(mathsDeps);initAnimatePanel(mathsDeps);initMotionAsk(mathsDeps);initTimeline(mathsDeps);initOnion(mathsDeps);initEffectsPanel(mathsDeps);initPaletteTools(mathsDeps);initPaletteStudio(mathsDeps);initOutlineDialog(mathsDeps,{bake:magicOutlineDialog});
+  initToolExtras(mathsDeps);initObjectPose(mathsDeps);initMotionModes(mathsDeps);initRigMode(mathsDeps);initAnimatePanel(mathsDeps);initMotionAsk(mathsDeps);initTimeline(mathsDeps);initOnion(mathsDeps);initEffectsPanel(mathsDeps);initPaletteTools(mathsDeps);initPaletteStudio(mathsDeps);initOutlineDialog(mathsDeps,{bake:magicOutlineDialog});initAccount({...mathsDeps,openProject:replaceProject,openAiEdit:aiEditDialog});
   initAiImage({...mathsDeps,replaceProject,insertLayer,canAddFrame,canAddLayer,decodeImage,imageRgba});
   const pluginDeps={...mathsDeps,openPluginManager:tab=>openPluginManager(tab),openPromptBuilder:promptBuilderDialog};
   initPluginManager(pluginDeps);initPlugins(pluginDeps);initCommandPalette(pluginDeps);

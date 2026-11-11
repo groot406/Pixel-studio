@@ -315,7 +315,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--green); }
 .option-row p { margin: 4px 0 0; color: #a5b298; font-size: 10px; line-height: 1.6; }
 .modal-content .check-row { font-size: 11px; color: #849875; gap: 8px; margin-top: 14px; }
 .modal-content .check-row input { width: 14px; height: 14px; }
-.toast { position: fixed; z-index: 1000; bottom: 24px; left: 50%; transform: translateX(-50%); width: max-content; max-width: calc(100% - 32px); padding: 12px 18px; border: 1px solid #ffffff1a; border-radius: 8px; background: #2e4938; color: #f1f6e7; box-shadow: 0 8px 30px #263b2e22; font-size: 11px; line-height: 1.6; text-align: center; pointer-events: none; }
+.toast { position: fixed; z-index: 1000; inset: auto; margin: 0; overflow: visible; bottom: 24px; left: 50%; transform: translateX(-50%); width: max-content; max-width: calc(100% - 32px); padding: 12px 18px; border: 1px solid #ffffff1a; border-radius: 8px; background: #2e4938; color: #f1f6e7; box-shadow: 0 8px 30px #263b2e22; font-size: 11px; line-height: 1.6; text-align: center; pointer-events: none; }
 .toast.with-actions { pointer-events: auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px 10px; }
 .toast-action { padding: 3px 10px; border: 1px solid #ffffff40; border-radius: 6px; background: #ffffff14; color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
 .toast-action:hover { background: #ffffff2e; }
@@ -1426,3 +1426,39 @@ dialog :is(p, li, code, pre, kbd, .notice, .field-label, .helper-text, .modal-bo
 /* Hold Space: temporary hand tool for moving the view. */
 .canvas-stage.space-pan, .canvas-stage.space-pan * { cursor: grab !important; }
 .canvas-stage.space-panning, .canvas-stage.space-panning * { cursor: grabbing !important; }
+
+/* Pixel Studio Cloud: account button and dialog (hosted edition only) */
+.cloud-account-button[hidden] { display: none; }
+.cloud-account-button[data-plan="pro"] { color: var(--green); font-weight: 700; }
+.cloud-account-button[data-low="true"] { color: #a34137; }
+.cloud-signin { display: flex; align-items: flex-end; gap: 9px; flex-wrap: wrap; margin-top: 14px; }
+.cloud-signin .field { flex: 1 1 220px; margin: 0; }
+#cloud-signin-status { min-height: 1.5em; font-size: 12px; color: #627458; }
+.plan-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 14px; }
+.plan-card { padding: 14px 16px; border: 1px solid #e0e8d4; border-radius: 10px; background: #fbfdf8; }
+.plan-card.featured { border-color: var(--green); box-shadow: 0 0 0 1px var(--green) inset; }
+.plan-card h3 { margin: 0 0 4px; font-size: 14px; }
+.plan-price { margin: 0 0 8px; font-size: 22px; font-weight: 800; color: var(--green); }
+.plan-price small { font-size: 12px; font-weight: 500; }
+.plan-price span { display: block; font-size: 11px; font-weight: 500; color: #7d8b73; }
+.plan-card ul { margin: 0 0 10px; padding-left: 18px; font-size: 12px; line-height: 1.7; }
+.plan-current { margin: 0; font-size: 11px; font-weight: 700; color: #7d8b73; }
+.plan-buy { display: flex; gap: 6px; flex-wrap: wrap; }
+.account-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.account-head small { display: block; margin-top: 3px; color: #7d8b73; font-size: 11px; }
+.account-head-actions { display: flex; gap: 6px; }
+.plan-badge { margin-left: 8px; padding: 2px 8px; border-radius: 99px; background: #eef2e8; color: #627458; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+.plan-badge[data-plan="pro"] { background: var(--green); color: #fff; }
+.account-section { margin-top: 20px; }
+.account-section > h3, .account-section > summary { margin: 0 0 8px; font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: #4f5f45; cursor: default; }
+.account-section > summary { cursor: pointer; }
+.account-section .field-hint { margin: 6px 0; font-size: 12px; line-height: 1.6; color: #627458; }
+.modal-actions.left { justify-content: flex-start; flex-wrap: wrap; margin-top: 10px; }
+.credit-meter { height: 8px; border-radius: 99px; background: #eef2e8; overflow: hidden; }
+.credit-meter i { display: block; height: 100%; background: var(--green); border-radius: inherit; }
+.cloud-projects ul { list-style: none; margin: 8px 0 0; padding: 0; border: 1px solid #e0e8d4; border-radius: 8px; }
+.cloud-projects li { display: flex; align-items: center; gap: 8px; padding: 8px 10px; }
+.cloud-projects li + li { border-top: 1px solid #eef2e8; }
+.cloud-projects li.current { background: #f6faf0; }
+.cloud-projects li > span { flex: 1; min-width: 0; }
+.cloud-projects li small { display: block; color: #7d8b73; font-size: 11px; }

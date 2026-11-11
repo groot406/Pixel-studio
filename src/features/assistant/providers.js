@@ -15,16 +15,16 @@ export async function localStatus(signal) {
     if (!response.ok || !response.headers.get('content-type')?.includes('json')) return null;
     const result = await response.json();
     if (result?.local !== true) return null;
-    return { connected: result.connected === true && typeof result.csrfToken === 'string', csrfToken: result.csrfToken, models: Array.isArray(result.models) ? result.models : [], message: result.message || '' };
+    return { connected: result.connected === true && typeof result.csrfToken === 'string', csrfToken: result.csrfToken, models: Array.isArray(result.models) ? result.models : [], message: result.message || '', cloud: result.cloud === true, accountLabel: typeof result.accountLabel === 'string' ? result.accountLabel : '' };
   } catch (error) {
     if (error?.name === 'AbortError') throw error;
     return null;
   }
 }
 
-export function codexProvider({ csrfToken, model, supportsImages = true }) {
+export function codexProvider({ csrfToken, model, supportsImages = true, label = 'Codex' }) {
   return {
-    label: 'Codex',
+    label,
     supportsImages,
     async ask(prompt, images, signal, onStatus = () => {}) {
       const response = await fetch('/api/local-ai/edit', {

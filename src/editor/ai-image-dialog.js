@@ -14,6 +14,8 @@ import { indicesToRgba, mapRgbaPerceptual } from '../domain/palette-map.js';
 import { blankProject, makeLayeredFrame, compositeFrame, uid, paletteFromRgba, mapRgbaToPalette, MAX_SIZE, MAX_COLORS } from '../domain/project.js';
 import { createObjectFromPixels } from '../domain/object-create.js';
 import { encodePng } from '../formats/png.js';
+import { isCloudEdition } from '../features/cloud/client.js';
+import { imageCredits } from '../features/cloud/plans.js';
 
 let d;
 const KEY_STORE = 'pixel-studio.image-keys';
@@ -139,7 +141,8 @@ export function openAiImageDialog() {
   // ----- provider and prompt -----
   function providerOptions() {
     const list = [];
-    if (s.local) for (const [id, p] of Object.entries(IMAGE_PROVIDERS)) list.push([`local:${id}`, `${p.label} · via Pixel Studio Local${s.local.providers?.[id]?.available ? '' : ' (no key)'}`]);
+    if (s.local?.cloud) { for (const [id, p] of Object.entries(IMAGE_PROVIDERS)) if (s.local.providers?.[id]?.available || !s.local.signedIn || s.local.proRequired) list.push([`local:${id}`, `${p.label} · Pixel Studio Cloud credits`]); }
+    else if (s.local) for (const [id, p] of Object.entries(IMAGE_PROVIDERS)) list.push([`local:${id}`, `${p.label} · via Pixel Studio Local${s.local.providers?.[id]?.available ? '' : ' (no key)'}`]);
     else if (s.local === false) for (const [id, p] of Object.entries(IMAGE_PROVIDERS)) list.push([`key:${id}`, `${p.label} · your API key`]);
     list.push(['chat', 'Any chatbot · copy the prompt, paste the image']);
     return list;
@@ -170,10 +173,13 @@ export function openAiImageDialog() {
     $('aii-n').disabled = kind === 'chat';
     let text = '';
     if (kind === 'chat') text = 'Copy the prompt into ChatGPT, Gemini, Copilot or any image-capable chatbot, then paste (⌘V) or drop the image it makes here. Free with your existing chat plan.';
+    else if (kind === 'local' && s.local.cloud && !s.local.signedIn) text = 'Sign in (Account, top right) to generate images with your AI credits.';
+    else if (kind === 'local' && s.local.cloud && s.local.proRequired) text = 'Image generation is part of Pixel Studio Pro. Upgrade under Account (top right).';
+    else if (kind === 'local' && s.local.cloud) { const cost = imageCredits(id, { n: prefs.n, quality: id === 'openai' ? prefs.quality : 'medium' }); text = `Uses ${cost} credit${cost === 1 ? '' : 's'} (${s.local.credits?.balance ?? 0} left).`; }
     else if (kind === 'local' && !s.local.providers?.[id]?.available) text = `No ${meta.label} key found. Start Pixel Studio Local with ${id === 'openai' ? 'OPENAI_API_KEY' : 'GEMINI_API_KEY'} set, or add "${id}" to ~/.pixelstudio/keys.json, then reopen this dialog.`;
     else if (kind === 'local') text = `${meta.label} key found on this computer. It stays there; Pixel Studio Local sends the request for you.`;
     else if (kind === 'key') text = `Get a key at ${meta.keyUrl}. Each image is billed to your ${meta.label} account.`;
-    if (s.local === null) text = 'Checking for Pixel Studio Local…';
+    if (s.local === null) text = isCloudEdition() ? 'Checking your account…' : 'Checking for Pixel Studio Local…';
     status(s.busy ? s.statusText : text);
     updateButtons();
   }
@@ -294,6 +300,7 @@ export function openAiImageDialog() {
         const body = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(body.error || 'The image could not be generated.');
         images = body.images;
+        if (body.credits) { s.local.credits = { ...s.local.credits, balance: body.credits.balance }; window.dispatchEvent(new CustomEvent('pixel-studio:credits', { detail: body.credits })); }
       } else {
         try { images = await requestImages({ provider: id, model, prompt: text, n: prefs.n, reference, background, quality, key }, { signal: s.controller.signal }); }
         catch (e) { throw new Error(e instanceof ImageApiError ? IMAGE_ERROR_MESSAGES[e.kind] : e.message); }
@@ -393,6 +400,7 @@ export function openAiImageDialog() {
     $(id).addEventListener(id === 'aii-subject' ? 'input' : 'change', () => {
       read(); renderPrompt();
       if (['aii-size', 'aii-frames', 'aii-background'].includes(id) && s.variations.length) renderVariations();
+      if (['aii-n', 'aii-quality'].includes(id) && s.local?.cloud && !s.busy) renderProvider();
     });
   }
   $('aii-provider').onchange = () => { prefs.provider = $('aii-provider').value; renderProvider(); renderPrompt(); };
@@ -445,10 +453,10 @@ export function openAiImageDialog() {
   // Pixel Studio Local proxies requests (its CSP blocks direct calls); everywhere else the browser calls the provider.
   (async () => {
     let local = false;
-    if (isLoopback()) {
+    if (isLoopback() || isCloudEdition()) {
       try {
         const response = await fetch('/api/image/status', { cache: 'no-store', credentials: 'same-origin' }), body = await response.json();
-        if (response.ok && body.local === true && typeof body.csrfToken === 'string') local = { providers: body.providers || {}, csrfToken: body.csrfToken };
+        if (response.ok && body.local === true && typeof body.csrfToken === 'string') local = { providers: body.providers || {}, csrfToken: body.csrfToken, cloud: body.cloud === true, signedIn: body.signedIn === true, proRequired: body.proRequired === true, credits: body.credits };
       } catch { /* static server */ }
     }
     if (s.disposed) return;

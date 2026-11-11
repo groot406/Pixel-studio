@@ -103,7 +103,7 @@ async function connect(force = false) {
   connection = { kind: 'checking' };
   renderHeader();
   const local = await localStatus();
-  if (local) connection = local.connected ? { kind: 'codex', ...local } : { kind: 'codex-offline', message: local.message || 'Sign in to Codex (codex login) and refresh.' };
+  if (local) connection = local.connected ? { kind: 'codex', ...local } : { kind: 'codex-offline', ...local, message: local.message || 'Sign in to Codex (codex login) and refresh.' };
   else connection = keyFor('openai') ? { kind: 'openai' } : { kind: 'needs-key' };
   renderHeader();
   return connection;
@@ -112,7 +112,7 @@ async function connect(force = false) {
 function provider() {
   if (connection?.kind === 'codex') {
     const model = connection.models.find(m => m.id === prefs.model) || connection.models[0];
-    return codexProvider({ csrfToken: connection.csrfToken, model: model?.id, supportsImages: model?.supportsImages !== false });
+    return codexProvider({ csrfToken: connection.csrfToken, model: model?.id, supportsImages: model?.supportsImages !== false, label: connection.cloud ? 'Pixel Studio Cloud' : 'Codex' });
   }
   if (connection?.kind === 'openai' || keyFor('openai')) return openaiProvider({ key: keyFor('openai'), model: prefs.openaiModel || OPENAI_DEFAULT_MODEL });
   throw new Error(connection?.kind === 'codex-offline' ? connection.message : 'Connect a model first: open the settings (gear) and add an OpenAI API key, or run Pixel Studio Local with Codex.');
@@ -155,7 +155,7 @@ function renderMessages({ scroll = true } = {}) {
 function renderHeader() {
   if (!panel) return;
   const status = panel.querySelector('.assistant-status'), c = connection || {};
-  status.textContent = c.kind === 'codex' ? 'Codex · ChatGPT' : c.kind === 'openai' ? `OpenAI · ${prefs.openaiModel}` : c.kind === 'checking' ? 'Connecting…' : c.kind === 'codex-offline' ? 'Codex not signed in' : 'Not connected';
+  status.textContent = c.kind === 'codex' ? (c.cloud ? c.accountLabel || 'Pixel Studio Cloud' : 'Codex · ChatGPT') : c.kind === 'codex-offline' && c.cloud ? (c.accountLabel ? 'AI unavailable' : 'Not signed in') : c.kind === 'openai' ? `OpenAI · ${prefs.openaiModel}` : c.kind === 'checking' ? 'Connecting…' : c.kind === 'codex-offline' ? 'Codex not signed in' : 'Not connected';
   status.dataset.state = ['codex', 'openai'].includes(c.kind) ? 'on' : 'off';
   const settings = panel.querySelector('.assistant-settings');
   if (!settings.hidden) renderSettings();
@@ -164,7 +164,7 @@ function renderHeader() {
 
 function renderSettings() {
   const box = panel.querySelector('.assistant-settings'), c = connection || {};
-  const codex = c.kind === 'codex' ? `<label class="field"><span class="field-label">Codex model</span><select id="assistant-model">${c.models.map(m => `<option value="${esc(m.id)}"${m.id === prefs.model ? ' selected' : ''}>${esc(m.name)}</option>`).join('')}</select></label>` : '';
+  const codex = c.kind === 'codex' ? `<label class="field"><span class="field-label">${c.cloud ? 'Model' : 'Codex model'}</span><select id="assistant-model">${c.models.map(m => `<option value="${esc(m.id)}"${m.id === prefs.model ? ' selected' : ''}>${esc(m.name)}</option>`).join('')}</select></label>` : '';
   const offline = c.kind === 'codex-offline' ? `<p class="assistant-note">${esc(c.message)} <button type="button" class="link-button" id="assistant-retry">Check again</button></p>` : '';
   const openai = c.kind === 'codex' || c.kind === 'codex-offline' ? '' : `
     <p class="assistant-note">The assistant uses your OpenAI API key from this browser (or run <code>npm start</code> for Pixel Studio Local with your Codex / ChatGPT sign-in, no key needed).</p>

@@ -167,3 +167,8 @@ body.is-dragging-part .canvas-stage { outline: 2px dashed #9dbb8a; outline-offse
   .part-lib { grid-template-columns: 1fr; }
   .part-lib-detail { padding-left: 0; border-left: 0; }
 }
+.object-selection-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
+.object-selection-tools > span { color: var(--green); font-size: 11px; }
+.object-selection-hint { margin: 0 0 10px; color: #52664d; font-size: 11px; line-height: 1.5; }
+.object-combine-tools { display: flex; flex-wrap: wrap; gap: 6px; }
+.object-combine-hint { margin: 6px 0 12px; color: #52664d; font-size: 11px; line-height: 1.5; }

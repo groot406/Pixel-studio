@@ -1,4 +1,21 @@
 /* Timeline: view toggle, key-pose ruler, timing bars, multi-select, drag, frame menu, onion popover. */
+.timeline-transport { display: flex; flex: 0 0 auto; align-items: center; gap: 2px; }
+.timeline-heading { flex-shrink: 0; }
+.timeline-transport .button { min-width: 70px; justify-content: center; }
+.timeline-transport .button[aria-pressed="true"] { background: var(--green-soft); color: var(--green); border-color: var(--green); }
+.canvas-playing :is(.object-highlight, #resize-handles) { display: none; }
+
+@media (max-width: 1100px) {
+  .workbench:not(.timeline-collapsed) .timeline-heading { flex-wrap: wrap; }
+  .workbench:not(.timeline-collapsed) .timeline-actions { flex: 1 0 100%; justify-content: flex-end; }
+  .workbench:not(.timeline-collapsed) .timeline-transport { margin-left: auto; }
+}
+@media (max-width: 760px) {
+  .timeline-transport .icon-button { width: 40px; height: 40px; padding: 11px; }
+  .timeline-transport .button { min-height: 40px; min-width: 40px; }
+  .workbench.timeline-collapsed .timeline-transport .button span { display: none; }
+  .workbench.timeline-collapsed .timeline-title { gap: 2px; }
+}
 .timeline-view { display: inline-flex; padding: 2px; gap: 1px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); }
 .timeline-actions .timeline-view .icon-button { width: 25px; height: 23px; padding: 4px; border-radius: 5px; }
 .timeline-view .icon-button.active { background: var(--green-soft); color: var(--green); box-shadow: inset 0 0 0 1px #c9d8bb; }

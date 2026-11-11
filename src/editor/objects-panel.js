@@ -1,5 +1,6 @@
-import { frameObjects, isEmptyNode } from '../domain/objects.js';
+import { frameObjects, isEmptyNode, celObjects } from '../domain/objects.js';
 import { renderOperations, renderParts } from '../domain/artwork.js';
+import { compositionSelection } from '../domain/layer-composition.js';
 
 const escape=value=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const icon=name=>`<svg aria-hidden="true"><use href="#i-${name}"/></svg>`;
@@ -33,8 +34,15 @@ function rowPixels(project,ops,images) {
   }
   return pixels;
 }
-export function renderObjectsPanel({project,animation,frame,selected,selection=[],scope,collapsed,canPaste,onSelect,onAction,onScope,onDrop,paint}) {
+export function renderObjectsPanel({project,animation,frame,selected,selection=[],scopeText,editingPart,collapsed,canPaste,onSelect,onAction,onDrop,paint}) {
   closeMenu();
+  let combineLayers=[], combineError='', combinePlan=null;
+  try { combinePlan=compositionSelection(project,frame,selection.length?selection:selected?[selected]:[]);combineLayers=combinePlan.layerIds.map(id=>project.layers.find(layer=>layer.id===id)); }
+  catch(error){combineError=error.message;}
+  const selectedLocked=combinePlan?.items.some(item=>celObjects(frame.cels.find(c=>c.layerId===item.layerId)).some(node=>node.key===item.key && node.instance?.locked));
+  const combineEditable=!editingPart && !selectedLocked && combineLayers.length>0 && combineLayers.every(layer=>!layer.locked && layer.visible);
+  const canGroup=combineEditable && (!combinePlan.whole || combineLayers.length>1 || combineLayers[0].group===false);
+  const canMerge=combineEditable && (!combinePlan.whole || combineLayers.length>1 || Boolean(frame.cels.find(c=>c.layerId===combineLayers[0].id).source));
   const useCount=uses(project);
   const list=document.getElementById('object-list'), rows=[];
   // Empty placeholder rows inside groups are noise; a lone empty ungrouped row stays (it is the paint target).
@@ -108,6 +116,9 @@ export function renderObjectsPanel({project,animation,frame,selected,selection=[
       ['paste','Paste','paste',canPaste],
       ['duplicate',`Duplicate ${n} objects`,'copy',true],
       null,
+      ['group-layers',`Group ${n} selected objects…`,'folder',canGroup],
+      ['merge-layers',`Merge ${n} selected objects…`,'layers',canMerge],
+      null,
       ...turns.map(t=>[...t,true]),
       null,
       ['delete',`Delete ${n} objects`,'trash',true],
@@ -129,6 +140,9 @@ export function renderObjectsPanel({project,animation,frame,selected,selection=[
       pixels && ['convert','Convert to object','object-new',editable],
       pixels && ['split','Split into objects…','split',editable],
       (item.outer || item.group) && ['merge-down','Merge with layer below','layers',editable && stacks.findIndex(s=>s.layer.id===item.layerId)>0],
+      ['group-layers','Group selection…','folder',canGroup],
+      ['merge-layers','Merge selection…','layers',canMerge],
+      item.group && ['ungroup','Ungroup','split',editable],
       null,
       ['visibility',item.node?.instance?.visible===false || !project.layers.find(l=>l.id===item.layerId).visible?'Show':'Hide','eye',true],
       ['lock',item.locked?'Unlock':'Lock',item.locked?'unlock':'lock',true],
@@ -142,7 +156,7 @@ export function renderObjectsPanel({project,animation,frame,selected,selection=[
     menu.querySelectorAll('[data-menu]').forEach(button=>button.onclick=()=>{closeMenu();onAction(button.dataset.menu,item);});
     menu.addEventListener('keydown',e=>{
       const items=[...menu.querySelectorAll('button:not([disabled])')], i=items.indexOf(document.activeElement);
-      if(e.key==='Escape'){e.preventDefault();closeMenu();list.querySelector('.object-row.selected .object-select')?.focus();}
+      if(e.key==='Escape'){e.preventDefault();e.stopPropagation();closeMenu();list.querySelector('.object-row.selected .object-select')?.focus();}
       else if(e.key==='ArrowDown' || e.key==='ArrowUp'){e.preventDefault();items[(i+(e.key==='ArrowDown'?1:-1)+items.length)%items.length]?.focus();}
     });
     menu.querySelector('button:not([disabled])')?.focus();
@@ -154,12 +168,22 @@ export function renderObjectsPanel({project,animation,frame,selected,selection=[
   const locked=Boolean(layer?.locked || item?.node?.instance?.locked);
   document.getElementById('object-count').textContent=stacks.reduce((n,s)=>n+s.children.length,0);
   const many=selection.length>1, editable=Boolean(item && !locked && !many);
+  document.getElementById('object-group-selected').disabled=!canGroup;
+  document.getElementById('object-merge-selected').disabled=!canMerge;
+  const unavailable=combineError || (editingPart?'Apply or cancel the part edit first.':selectedLocked || combineLayers.some(layer=>layer.locked || !layer.visible)?'Show and unlock the selected objects and layers first.':'');
+  document.getElementById('object-group-selected').title=unavailable || (canGroup?'Group only the selected objects or layers; keep objects editable':'These objects are already in one group.');
+  document.getElementById('object-merge-selected').title=unavailable || (canMerge?'Merge only the selected objects or layers into one pixel layer':'Select another object or layer to merge with this pixel layer.');
+  document.getElementById('object-select-all').disabled=editingPart;
+  document.getElementById('object-selection-count').textContent=selection.length ? `${selection.length} selected` : '';
+  document.getElementById('object-selection-hint').textContent=many
+    ? `Drag on the canvas or use arrow keys to move all ${selection.length} objects in ${scopeText}. Shift-click rows to add or remove objects.`
+    : 'Shift-click rows to select several objects. Choose All frames above the canvas to move them across the animation.';
   document.getElementById('edit-shared-object').disabled=!item?.node?.instance || many;
   document.getElementById('object-isolated-edit').disabled=!item?.node?.instance || many;
   document.getElementById('object-independent').disabled=!item?.node?.instance || locked || many;
   document.getElementById('object-delete').disabled=!item || (!many && locked);
   document.getElementById('object-rename').disabled=!editable || (!item?.group && !item?.node?.instance && (stack?.grouped || siblings.length>1));
-  document.getElementById('object-ungroup').disabled=!stack?.grouped || locked || many;
+  document.getElementById('object-ungroup').disabled=!combineEditable || !combinePlan.whole || combineLayers.length!==1 || combineLayers[0].group===false;
   document.getElementById('object-move-group').disabled=!item?.node?.instance || locked || many;
   const outerIndex=stacks.findIndex(s=>s.layer.id===layer?.id);
   const outer=item?.group || (siblings.length===1 && !stack?.grouped);
@@ -173,7 +197,7 @@ export function renderObjectsPanel({project,animation,frame,selected,selection=[
   document.getElementById('object-copy').disabled=!item;
   document.getElementById('object-paste').disabled=!canPaste;
   document.getElementById('object-duplicate').disabled=!item;
-  for(const [id,action] of [['object-copy','copy'],['object-paste','paste'],['object-duplicate','duplicate'],['object-up','up'],['object-down','down'],['edit-shared-object','edit'],['object-isolated-edit','isolated'],['object-independent','independent'],['object-delete','delete'],['object-rename','rename'],['object-ungroup','ungroup'],['object-move-group','move-group']]) {
+  for(const [id,action] of [['object-group-selected','group-layers'],['object-merge-selected','merge-layers'],['object-copy','copy'],['object-paste','paste'],['object-duplicate','duplicate'],['object-up','up'],['object-down','down'],['edit-shared-object','edit'],['object-isolated-edit','isolated'],['object-independent','independent'],['object-delete','delete'],['object-rename','rename'],['object-ungroup','ungroup'],['object-move-group','move-group']]) {
     document.getElementById(id).onclick=event=>{if(item)onAction(action==='paste' && event.shiftKey?'paste-independent':action,item);};
   }
 }

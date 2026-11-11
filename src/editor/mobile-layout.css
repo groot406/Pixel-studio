@@ -41,7 +41,7 @@ html { touch-action: manipulation; }
   .workbench, .workbench.tools-collapsed, .workbench.details-collapsed { display: flex; flex-direction: column; height: calc(100dvh - var(--mobile-top) - var(--dock-h)); min-height: 0; }
   .editor-column { order: 0; flex: 1 1 auto; height: auto; min-height: 0; grid-template-rows: minmax(0, 1fr) auto; }
   .workbench .timeline { max-height: 40dvh; }
-  .workbench:not(.timeline-collapsed) .timeline { height: min(196px, 32dvh); }
+  .workbench:not(.timeline-collapsed) .timeline { height: min(240px, 36dvh); }
   .panel-splitter { display: none !important; }
   .workbench.timeline-collapsed .timeline { padding: 6px 8px; }
   .workbench.timeline-collapsed .timeline-heading { gap: 6px; }

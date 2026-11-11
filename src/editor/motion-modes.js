@@ -227,7 +227,7 @@ const MODES = {
       if (m.to) { const g = moveGeometry(); m.dx = g.end.x - g.op.x; m.dy = g.end.y - g.op.y; m.to = null; renderBar(); }
       m.dx += delta[0] * (shift ? 8 : 1); m.dy += delta[1] * (shift ? 8 : 1); schedule();
     },
-    done: () => `Move added: ${plural(m.ghosts.length + (m.to ? 0 : 1), 'frame')}. Press Space in the preview to play it.`,
+    done: () => `Move added: ${plural(m.ghosts.length + (m.to ? 0 : 1), 'frame')}. Press Play in Frames to watch it on the canvas.`,
   },
 
   bounce: {

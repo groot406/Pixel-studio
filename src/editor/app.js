@@ -2,6 +2,7 @@ import { createInPlaceEdit, setInPlaceScope, inPlaceRestriction, inPlaceDirty, i
 import { mapPaletteColors, copyObjects, pasteObject, objectPixelBounds } from '../domain/object-clipboard.js';
 import { commitRasterEdits, writeCelPixels, cloneArtwork, renderParts } from '../domain/artwork.js';
 import { celObjects, isEmptyNode, reorderObject, reorderObjectContainer, updateObject, translateObject, forkObject, deleteObject, addObjectContainer, moveObjectToGroup, removeObjectContainer, objectBounds, hitTestObject, dropObject, resizeObject, frameObjects, orderObjects, translateObjects, translatePixelObject, deleteObjects, turnObjects, rotateObjects, tiltObjects } from '../domain/objects.js';
+import { compositionSelection, groupSelection, mergeSelection } from '../domain/layer-composition.js';
 import { transformedSize, canvasToPartPoint, instancePixel } from '../domain/geometry.js';
 import { createZoomPreview } from './zoom-preview.js';
 import { detectGrid, edgeProfiles } from '../domain/pixelize.js';
@@ -96,7 +97,7 @@ const SELECT_TOOLS = ['select','wand'];
 const state = {
   project: blankProject(), animationId: null, frameId: null, layerId: null,
   tool: 'pencil', color: 0, scale: 12, fit: true, grid: true, onion: false,
-  filled: false, lockAlpha: false, playing: true, previewIndex: 0, previewTime: 0, previewBackground: 0,
+  filled: false, lockAlpha: false, playing: true, canvasPlaying: false, previewIndex: 0, previewTime: 0, previewBackground: 0,
   inPlaceEdit:null, previewOverride:null, objectSelection:null, objectScope:'animation', collapsedGroups:new Set(), objectDrag:null,
   cursor: null, drawing: null, selection: null, lastPaint: null, shiftHeld: false, swap: false, swapFirst: null,
   brushSize: 1, brushShape: 'square', symmetry: 'none', pixelPerfect: false, antialias: false, wandMode: 'shape', resizeMode: 'free', transformScope: 'frame', clipboard: null, objectClipboard: null, objectMulti: null, lastClipboard: 'pixels',
@@ -173,6 +174,7 @@ function remember(before) {
 }
 function mutate(action) {
   if(state.inPlaceEdit)throw new Error('Apply or cancel the canvas object edit before changing the project.');
+  pauseCanvasPlayback(false);
   finishDrawing();
   const before = snapshot();
   try { action(); remember(before); }
@@ -225,6 +227,7 @@ function syncDocument() {
 function activateDocument(id) {
   const document=state.documents.get(id);
   if (!document) return;
+  pauseCanvasPlayback(false);
   state.documentId=id;
   for (const key of ['project','animationId','frameId','layerId','objectSelection','undo','redo','selection','scale','fit','color','previewIndex']) state[key]=document[key];
   state.cursor=null; state.drawing=null; state.swap=false; state.swapFirst=null; state.previewTime=0;
@@ -519,6 +522,10 @@ function renderCanvas() {
     context.drawImage(layer, 0, 0, canvasWidth, canvasHeight);
   };
   const animation = currentAnimation();
+  if (state.canvasPlaying) {
+    drawPixels(compositeFrame(state.project, animation.frames[state.previewIndex % animation.frames.length]));
+    return;
+  }
   drawOnion(context, canvasWidth, canvasHeight);
   drawPixels(canvasPixels());
   if(state.inPlaceEdit) {
@@ -840,6 +847,7 @@ function editColor(value) {
 function selectFrameAt(index) {
   const frames = currentAnimation().frames;
   if (!frames.length) return;
+  pauseCanvasPlayback(false);
   finishDrawing();
   const i = (index + frames.length) % frames.length;
   state.frameId = frames[i].id; state.previewIndex = i; state.previewTime = 0;
@@ -854,7 +862,7 @@ function renderMiniFrames(animation, selectedIndex) {
     button.onclick = () => selectFrameAt(index);
   });
   $('frame-mini-position').textContent = `${selectedIndex + 1} / ${animation.frames.length}`;
-  $('mini-prev-frame').disabled = $('mini-next-frame').disabled = animation.frames.length < 2;
+  $('timeline-prev-frame').disabled = $('timeline-next-frame').disabled = animation.frames.length < 2 || Boolean(state.inPlaceEdit);
   strip.querySelector('.selected')?.scrollIntoView({block:'nearest',inline:'nearest'});
 }
 function renderTimeline() {
@@ -876,6 +884,7 @@ function renderTimeline() {
 }
 function selectAnimation(id) {
   if (state.inPlaceEdit || id === state.animationId || !state.project.animations.some(a => a.id === id)) return;
+  pauseCanvasPlayback(false);
   finishDrawing();
   state.animationId = id;
   state.frameId = currentAnimation().frames[0].id;
@@ -953,9 +962,14 @@ function toggleObjectItem(item) {
 }
 /** Ctrl/⌘+A with the object tools: every object in this frame. */
 function selectAllObjects() {
+  if (state.inPlaceEdit) return;
+  pauseCanvasPlayback(false);
+  finishDrawing();
   const items=frameObjects(state.project,currentAnimation(),currentFrame()).flatMap(({layer,children})=>children.filter(n=>n.type!=='overrides').map(n=>({layerId:layer.id,key:n.key})));
   if(!items.length)return;
-  finishDrawing();state.selection=null;setObjectSelection(items);renderAll();
+  state.selection=null;setObjectSelection(items);
+  if (state.tool !== 'resize') state.tool='object';
+  renderAll();
   toast(`${items.length} object${items.length===1?'':'s'} selected.`);
 }
 const TEXT_INPUTS = new Set(['text','search','number','email','url','password','tel','']);
@@ -978,8 +992,8 @@ function selectObject(item) {
   normalizeSelection();renderAll();scheduleSave();
 }
 function renderLayers() {
-  renderObjectsPanel({project:state.project,animation:currentAnimation(),frame:currentFrame(),selected:selectedObject(),selection:selectedItems(),scope:state.objectScope,collapsed:state.collapsedGroups,
-    canPaste:Boolean(state.objectClipboard),onSelect:(item,additive)=>additive?toggleObjectItem(item):selectObject(item),onAction:objectAction,onDrop:dropObjectRow,paint:paintSprite});
+  renderObjectsPanel({project:state.project,animation:currentAnimation(),frame:currentFrame(),selected:selectedObject(),selection:selectedItems(),collapsed:state.collapsedGroups,
+    scopeText:editScopeText(state,currentAnimation()),editingPart:Boolean(state.inPlaceEdit),canPaste:Boolean(state.objectClipboard),onSelect:(item,additive)=>additive?toggleObjectItem(item):selectObject(item),onAction:objectAction,onDrop:dropObjectRow,paint:paintSprite});
   const selected=selectedObject(), node=celObjects(currentFrame().cels.find(c=>c.layerId===selected.layerId)).find(n=>n.key===selected.key);
   $('active-layer-name').textContent=node?.instance?node.name:currentLayer().name;
   $('active-layer-name').title=node?.instance?'Selected smart object':'Selected pixel object or group';
@@ -1207,6 +1221,7 @@ function copyToAnimationDialog(item) {
 }
 function objectAction(action,item) {
   finishDrawing();
+  if(action==='group-layers' || action==='merge-layers'){combineLayersDialog(action,itemsFor(item));return;}
   if(action==='copy' || action==='cut'){copyObjectItem(item,action==='cut');return;}
   if(action==='paste' || action==='paste-independent'){pasteObjectItem({independent:action==='paste-independent'});return;}
   if(action==='duplicate'){duplicateObjectItem(item);return;}
@@ -1248,7 +1263,7 @@ function objectAction(action,item) {
         const direction=action==='up'?1:-1, children=celObjects(currentFrame().cels.find(c=>c.layerId===layer.id));
         if(item.group || (layer.group===false && children.length===1))state.project=reorderObjectContainer(state.project,target,direction,editScope(state));
         else state.project=reorderObject(state.project,target,item.key,direction,editScope(state));
-      } else if(action==='ungroup')layer.group=false;
+      } else if(action==='ungroup'){layer.group=false;state.objectSelection=null;state.objectMulti=null;}
       else if(action==='delete') {
         state.project=item.group?removeObjectContainer(state.project,layer.id):deleteObject(state.project,target,item.key,editScope(state));
         if(!item.group && wasEmpty && state.project.layers.some(l=>l.id===layer.id))
@@ -1257,6 +1272,30 @@ function objectAction(action,item) {
       else if(action==='independent')state.project=forkObject(state.project,target,item.key,editScope(state));
     });
   } catch(error) {toast(error.message);}
+}
+function combineLayersDialog(action, items) {
+  try {
+    const plan=compositionSelection(state.project,currentFrame(),items), grouping=action==='group-layers';
+    const count=plan.items.length, frames=totalFrames(), animations=state.project.animations.length;
+    const label=grouping?'Group selection':'Merge selection';
+    const effect=grouping
+      ? 'Keeps objects separately editable. Pixel layers become reusable parts inside the group.'
+      : 'Combines only the selected artwork into one pixel layer. Selected objects and their rig links are flattened; shared parts stay in the library.';
+    openDialog(label,`<form id="combine-layers-form">${grouping?`<label class="field"><span class="field-label">Group name</span><input id="combine-group-name" value="${escapeHTML(uniqueLayerName('Group'))}" maxlength="80" required></label>`:''}<p class="modal-body-text">${effect} Unselected objects are kept.</p><p class="helper-text">Combines ${count} selected object${count===1?'':'s'} or group${count===1?'':'s'} in all ${frames} frame${frames===1?'':'s'} across ${animations} animation${animations===1?'':'s'}, regardless of the Edit switch. Bringing separated objects together can change overlaps. Undo is available.</p><p id="combine-layers-error" class="helper-text" role="alert" hidden></p><div class="modal-actions"><button id="cancel-combine-layers" class="button" type="button">Cancel</button><button class="button primary" type="submit">${label}</button></div></form>`);
+    $('cancel-combine-layers').onclick=()=>$('modal').close();
+    const project=state.project;
+    $('combine-layers-form').onsubmit=event=>{
+      event.preventDefault();
+      try {
+        if(state.project!==project)throw new Error('The project changed. Close this dialog and select the layers again.');
+        const target=objectTarget();
+        const result=grouping?groupSelection(project,target,plan.items,$('combine-group-name').value):mergeSelection(project,target,plan.items);
+        mutate(()=>{state.project=result.project;state.layerId=result.layerId;state.objectSelection={layerId:result.layerId,key:result.key};state.objectMulti=null;state.selection=null;state.tool='object';});
+        state.collapsedGroups.delete(result.layerId);renderLayers();$('modal').close();
+        toast(grouping?'Selection grouped. Objects stay editable. Undo is available.':'Selection merged into one pixel layer. Undo is available.');
+      }catch(error){$('combine-layers-error').textContent=error.message;$('combine-layers-error').hidden=false;}
+    };
+  }catch(error){toast(error.message);}
 }
 /** Turn the pixel selection (rectangle or wand mask) into a movable, reusable object. */
 function makeObjectDialog() {
@@ -1441,6 +1480,14 @@ function renderPlaybackControls() {
   $('play-toggle').setAttribute('aria-label', state.playing ? 'Pause animation' : 'Play animation');
   document.querySelector('.live-badge').innerHTML = `<i></i> ${state.playing ? 'LIVE' : 'STILL'}`;
   document.querySelector('.live-badge').classList.toggle('paused', !state.playing);
+  const button = $('timeline-play-toggle'), label = state.canvasPlaying ? 'Pause' : 'Play';
+  button.innerHTML = `${icon(state.canvasPlaying ? 'pause' : 'play')}<span>${label}</span>`;
+  button.setAttribute('aria-label', `${label} animation on canvas`);
+  button.setAttribute('aria-pressed', String(state.canvasPlaying));
+  button.title = `${label} animation on canvas (Space)`;
+  button.disabled = Boolean(state.inPlaceEdit || state.previewOverride);
+  $('canvas-stage').classList.toggle('canvas-playing', state.canvasPlaying);
+  if (state.canvasPlaying) renderCanvasPlaybackPosition();
 }
 /** Example projects as cards in the start screen; each opens a copy in a new tab. */
 function renderSampleCards(container) {
@@ -2178,10 +2225,48 @@ function reverseAnimation() {
   toast('Frame order reversed. Frame timing stays with each frame.');
 }
 function togglePlay() {
+  if (state.canvasPlaying) { pauseCanvasPlayback(); return; }
   state.playing = !state.playing;
   state.previewIndex = currentAnimation().frames.findIndex(frame => frame.id === state.frameId);
   state.previewTime = 0;
   renderPlaybackControls(); renderPreview();
+}
+/** Canvas playback shares the Live Preview clock, leaving the editable frame untouched until paused. */
+function toggleCanvasPlayback() {
+  if (state.canvasPlaying) { pauseCanvasPlayback(); return; }
+  if (state.inPlaceEdit || state.previewOverride) return;
+  finishDrawing();
+  state.canvasPlaying = true;
+  state.playing = true;
+  state.previewIndex = currentAnimation().frames.findIndex(frame => frame.id === state.frameId);
+  state.previewTime = 0;
+  state.cursor = null;
+  renderPlaybackControls(); renderCanvas(); renderPreview();
+}
+function pauseCanvasPlayback(render = true) {
+  if (!state.canvasPlaying) return;
+  state.frameId = currentAnimation().frames[state.previewIndex % currentAnimation().frames.length].id;
+  state.canvasPlaying = false;
+  state.playing = false;
+  state.previewTime = 0;
+  if (render) { renderAll(); scheduleSave(); }
+}
+function stepFrame(direction) {
+  const index = state.canvasPlaying ? state.previewIndex : currentAnimation().frames.findIndex(frame => frame.id === state.frameId);
+  state.playing = false;
+  selectFrameAt(index + direction);
+}
+/** Only move the playhead; rebuilding cards and object panels on every tick would interrupt keyboard focus. */
+function renderCanvasPlaybackPosition() {
+  const index = state.previewIndex % currentAnimation().frames.length;
+  for (const [selector, className] of [['#frame-list .frame-card', 'selected'], ['#frame-mini-strip .frame-mini', 'selected'], ['#frame-ruler .ruler-cell', 'current']]) {
+    document.querySelectorAll(selector).forEach((element, i) => {
+      element.classList.toggle(className, i === index);
+      if (element.tagName === 'BUTTON') element.setAttribute('aria-pressed', String(i === index));
+    });
+  }
+  $('frame-position').textContent = `Frame ${index + 1} of ${currentAnimation().frames.length}`;
+  $('frame-mini-position').textContent = `${index + 1} / ${currentAnimation().frames.length}`;
 }
 function animationTick(time) {
   const { animation, playing } = previewAnimation();
@@ -2197,7 +2282,10 @@ function animationTick(time) {
       changed = true;
       steps++;
     }
-    if (changed) renderPreview();
+    if (changed) {
+      renderPreview();
+      if (state.canvasPlaying) { renderCanvas(); renderCanvasPlaybackPosition(); }
+    }
   } else state.previewTime = 0;
   requestAnimationFrame(animationTick);
 }
@@ -2797,6 +2885,15 @@ function accountDialog() {
 }
 
 function bindEvents() {
+  // Resolve the displayed frame before drawing. Keep clicked panel buttons alive until their handler runs.
+  document.addEventListener('pointerdown', event => {
+    if (event.target.closest('#canvas-stage')) pauseCanvasPlayback();
+  }, true);
+  document.addEventListener('click', event => {
+    if (!state.canvasPlaying || event.target.closest('#timeline-play-toggle,#play-toggle,#timeline-prev-frame,#timeline-next-frame,#toggle-timeline,.zoom-controls')) return;
+    pauseCanvasPlayback(false);
+    queueMicrotask(() => { renderAll(); scheduleSave(); });
+  }, true);
   bindFileDrop();
   const mathsDeps={state,$,icon,escapeHTML,mutate,snapshot,remember,versionBefore,renderAll,renderCanvas,renderPreview,renderTools,toast,openDialog,paintSprite,finishDrawing,drawPoints,
     currentAnimation,currentFrame,currentLayer,selectedObject,selectedItems,transformItems,resizableObject,objectTarget,canEditPixels,canvasPixels,canvasPosition,normalizeSelection,selectObject,selectFrameAt,addFrame,undo:()=>restore(state.undo,state.redo)};
@@ -2932,8 +3029,10 @@ function bindEvents() {
   };
   $('manage-parts').onclick=()=>partLibrary();
   $('open-part-library').onclick=()=>partLibrary();
-  $('mini-prev-frame').onclick=()=>selectFrameAt(currentAnimation().frames.findIndex(f=>f.id===state.frameId)-1);
-  $('mini-next-frame').onclick=()=>selectFrameAt(currentAnimation().frames.findIndex(f=>f.id===state.frameId)+1);
+  $('timeline-prev-frame').onclick=()=>stepFrame(-1);
+  $('timeline-next-frame').onclick=()=>stepFrame(1);
+  $('timeline-play-toggle').onclick=toggleCanvasPlayback;
+  $('object-select-all').onclick=selectAllObjects;
   $('add-pixel-object').onclick=()=>addObject(false);
   $('add-object-group').onclick=()=>addObject(true);
   $('outline-objects').onclick=magicOutlineDialog;
@@ -3008,6 +3107,10 @@ function bindEvents() {
     if (event.target.closest('input,select') && !(event.ctrlKey || event.metaKey) && !['escape','?'].includes(event.key.toLowerCase())) return;
     if (curveKey(event)) return;
     const key = event.key.toLowerCase();
+    if (state.canvasPlaying && ![' ', 'tab', 'shift', 'control', 'meta', 'alt'].includes(key)) {
+      pauseCanvasPlayback();
+      if (key === 'escape') { event.preventDefault(); return; }
+    }
     if(state.inPlaceEdit){canvasPartKey(event,key);return;}
     if ((event.ctrlKey || event.metaKey) && key === 'z') { event.preventDefault(); event.shiftKey ? restore(state.redo,state.undo) : restore(state.undo,state.redo); return; }
     if ((event.ctrlKey || event.metaKey) && key === 'y') { event.preventDefault(); restore(state.redo,state.undo); return; }
@@ -3054,18 +3157,14 @@ function bindEvents() {
     else if((key==='[' || key===']') && BRUSH_TOOLS.includes(state.tool)){event.preventDefault();state.brushSize=Math.max(1,Math.min(8,state.brushSize+(key===']'?1:-1)));renderTools();renderCanvas();}
     else if (key === 'o') $('toggle-onion').click();
     else if (key === 'd') frameAction('duplicate');
-    else if (key === ' ' && !event.repeat) { event.preventDefault(); togglePlay(); }
+    else if (key === ' ' && !event.repeat) { event.preventDefault(); toggleCanvasPlayback(); }
     else if (key === '+' || key === '=') setZoom(state.scale+2);
     else if (key === '-') setZoom(state.scale-2);
     else if (key === '0') { state.fit = true; fitCanvas(); }
     else if (key === '?') openHelpCenter('shortcuts');
     else if (key === 'arrowleft' || key === 'arrowright') {
       event.preventDefault();
-      const frames = currentAnimation().frames;
-      const index = frames.findIndex(frame => frame.id === state.frameId);
-      state.frameId = frames[(index + (key === 'arrowleft' ? -1 : 1) + frames.length) % frames.length].id;
-      state.previewIndex = frames.findIndex(frame => frame.id === state.frameId);
-      renderAll();
+      stepFrame(key === 'arrowleft' ? -1 : 1);
     }
   });
   window.addEventListener('beforeunload',event=>{if(state.inPlaceEdit && inPlaceDirty(state.inPlaceEdit.session)){event.preventDefault();event.returnValue='';}});

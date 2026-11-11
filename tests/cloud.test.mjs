@@ -110,8 +110,25 @@ async function setup(t, { now = () => Date.now() } = {}) {
     const hook = signWebhook({ id: `evt_${email}`, type: 'customer.subscription.created', created: Math.floor(Date.now() / 1000), data: { object: subscription(store.userByEmail(email).id, 'active') } });
     assert.equal((await call('/api/billing/webhook', { method: 'POST', raw: hook.raw, headers: hook.headers })).status, 200);
   }
-  return { call, signIn, goPro, mails, upstream, store, origin, signWebhook, subscription, sessions, setReply: reply => { openaiReply = reply; }, clearCookie: () => { cookie = ''; } };
+  return { call, signIn, goPro, mails, upstream, store, origin, dist, signWebhook, subscription, sessions, setReply: reply => { openaiReply = reply; }, clearCookie: () => { cookie = ''; } };
 }
+
+test('rebuilt HTML stays in sync with assets without restarting the Cloud server', async t => {
+  const s = await setup(t);
+  assert.match(await (await s.call('/app')).text(), /<title>x<\/title>/);
+  await writeFile(join(s.dist, 'index.html'), '<!doctype html><html><head><title>Updated editor</title></head><body><button id="timeline-prev-frame">Previous</button><script src="/app.js"></script></body></html>');
+  await writeFile(join(s.dist, 'app.js'), 'document.getElementById("timeline-prev-frame").onclick = () => {};');
+  const response = await s.call('/app'), html = await response.text();
+  assert.match(html, /id="timeline-prev-frame"/);
+  assert.match(html, /<meta name="pixel-studio-cloud" content="1">/);
+  assert.equal(response.headers.get('cache-control'), 'no-cache');
+  assert.match(await (await s.call('/app.js')).text(), /timeline-prev-frame/);
+  await writeFile(join(s.dist, 'landing.html'), '<!doctype html><html><head><title>Updated landing</title></head><body><!--pricing--></body></html>');
+  const landing = await (await s.call('/')).text();
+  assert.match(landing, /Updated landing/);
+  assert.match(landing, /€8<small>\/month<\/small>/);
+  assert.doesNotMatch(landing, /pixel-studio-cloud/);
+});
 
 test('email sign-in: confirm page, single-use token, session cookie, marker tag and sign-out', async t => {
   const s = await setup(t);

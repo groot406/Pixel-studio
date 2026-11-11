@@ -90,7 +90,7 @@ export function createCloudServer({ config, store, mailer, billing, distDirector
   const allow = createRateLimiter();
   const busyUsers = new Set();
   const controllers = new Set();
-  let distRoot, indexHtml, landingHtml, closing = false;
+  let distRoot, closing = false;
 
   const clientIp = request => (config.trustProxy && String(request.headers['x-forwarded-for'] || '').split(',')[0].trim()) || request.socket.remoteAddress || 'unknown';
   const sessionCookie = (token, maxAge) => `${COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secureCookie ? '; Secure' : ''}`;
@@ -377,7 +377,13 @@ export function createCloudServer({ config, store, mailer, billing, distDirector
     try { decoded = decodeURIComponent(pathname); } catch { throw fail('NOT_FOUND', 'File not found.', 404); }
     if (decoded.includes('\\') || decoded.includes('\0') || decoded.split('/').some(part => part.startsWith('.'))) throw fail('NOT_FOUND', 'File not found.', 404);
     // The marketing page lives at /, the editor at /app (its relative asset URLs still resolve from the root).
-    const page = decoded === '/app' ? indexHtml : decoded === '/' ? landingHtml : null;
+    // Read HTML alongside the current assets: a local rebuild must not pair a cached page with new JavaScript.
+    let page = null;
+    if (decoded === '/app') {
+      page = (await readFile(resolve(distRoot, 'index.html'), 'utf8')).replace('<head>', '<head>\n  <meta name="pixel-studio-cloud" content="1">');
+    } else if (decoded === '/') {
+      page = await readFile(resolve(distRoot, 'landing.html'), 'utf8').then(html => renderLanding(html, config), () => null);
+    }
     if (page) {
       response.writeHead(200, { 'Content-Type': TYPES['.html'], 'Cache-Control': 'no-cache' });
       return response.end(request.method === 'HEAD' ? undefined : page);
@@ -452,9 +458,8 @@ export function createCloudServer({ config, store, mailer, billing, distDirector
     server,
     async listen(port = config.port, host = config.host) {
       distRoot = await realpath(distDirectory);
-      // The editor detects the hosted edition from this tag (CSP forbids inline scripts).
-      indexHtml = (await readFile(resolve(distRoot, 'index.html'), 'utf8')).replace('<head>', '<head>\n  <meta name="pixel-studio-cloud" content="1">');
-      landingHtml = await readFile(resolve(distRoot, 'landing.html'), 'utf8').then(html => renderLanding(html, config), () => null);
+      // Fail startup when the required editor entry point is missing or unreadable.
+      await readFile(resolve(distRoot, 'index.html'), 'utf8');
       await new Promise((ok, reject) => { server.once('error', reject); server.listen(port, host, () => { server.removeListener('error', reject); ok(); }); });
       return `http://${host === '0.0.0.0' ? 'localhost' : host}:${server.address().port}/`;
     },

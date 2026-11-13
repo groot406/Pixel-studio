@@ -79,7 +79,7 @@ A `SPAN` inside a retained `CEL` may extend past the canvas edge (x and y from -
 
 `STACK layer-id ROOT|GROUP` optionally follows layer declarations and precedes parts/animations. ROOT exposes a container's objects without a group; GROUP presents an isolated group. Omission preserves the legacy group behavior. `INSTANCE instance-id "name" visible locked` sets an existing `USE` object's metadata. Flags must be 0 or 1. Hidden objects retain their artwork. `AT`, `TURN` and `SWAP` preserve metadata; metadata changes use a full cel snapshot during export. These optional extensions require an updated PXA 2 reader; older files still load without migration loss. PXA 1/PXS bake the visible per-container result and cannot preserve independent instance metadata or optional group presentation.
 
-Limits: 2048 × 2048 canvas, 64 palette slots, 32 layers and 4,194,304 canvas pixel slots. Additional budgets bound part pixels, source operations and expanded rendering work. Unknown references, invalid IDs, nested parts, invalid geometry, truncated files and excess expansion are rejected.
+Limits: 2048 × 2048 canvas, 64 palette slots, 320 layers and 4,194,304 canvas pixel slots. Additional budgets bound part pixels, source operations and expanded rendering work. Unknown references, invalid IDs, nested parts, invalid geometry, truncated files and excess expansion are rejected.
 
 ## Project model and ownership
 

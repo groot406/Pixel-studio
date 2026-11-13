@@ -1,5 +1,6 @@
 /** Object editing over the established cel format. Groups retain isolated erase/override semantics. */
-import { validateProject, getAnimationLayers, insertProjectLayer, removeProjectLayer, uid, MAX_LAYERS, MAX_TOTAL_PIXELS } from './project.js';
+import { validateProject, getAnimationLayers, insertProjectLayer, removeProjectLayer, uid } from './project.js';
+import { assertCanAddLayer } from './project-capacity.js';
 import { PIVOT_MIN, PIVOT_MAX, MAX_SIZE } from './limits.js';
 import { cloneArtwork, sourceForCel, renderParts, hasLockedInstances, renderOperations, pixelSpans } from './artwork.js';
 import { linePoints, ellipsePoints, instancePixel, instanceSize, instanceBox, transformedSize, swapsAxes, composeTransform, transformPoint } from './geometry.js';
@@ -407,8 +408,8 @@ export function isEmptyNode(cel,node) {
 }
 
 export function addObjectContainer(project,afterId,name,group=false) {
-  const p=validateProject(project), frames=p.animations.reduce((n,a)=>n+a.frames.length,0);
-  if (p.layers.length>=MAX_LAYERS || frames*(p.layers.length+1)*p.width*p.height>MAX_TOTAL_PIXELS) throw new Error('The project has reached its object storage limit.');
+  const p=validateProject(project);
+  assertCanAddLayer(p);
   const layer={id:uid(),name,group,visible:true,locked:false};
   insertProjectLayer(p,layer,afterId);
   return {project:validateProject(p),layerId:layer.id};

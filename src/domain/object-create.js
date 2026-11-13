@@ -1,5 +1,6 @@
 /** Turn existing pixel artwork into reusable part instances. */
-import { validateProject, insertProjectLayer, removeProjectLayer, uid, MAX_LAYERS, MAX_TOTAL_PIXELS } from './project.js';
+import { validateProject, insertProjectLayer, removeProjectLayer, uid } from './project.js';
+import { assertCanAddLayer } from './project-capacity.js';
 import { sourceForCel, pixelSpans, renderOperations, hasLockedInstances } from './artwork.js';
 import { celObjects } from './objects.js';
 import { paintSharedPart, trimPart } from './parts.js';
@@ -24,8 +25,7 @@ function uniqueLayerName(p, base) {
   return name;
 }
 function addLayer(p, afterId, name, group) {
-  const frames = p.animations.reduce((n, a) => n + a.frames.length, 0);
-  if (p.layers.length >= MAX_LAYERS || frames * (p.layers.length + 1) * p.width * p.height > MAX_TOTAL_PIXELS) throw new Error('The project has reached its object storage limit.');
+  assertCanAddLayer(p);
   const layer = { id: uid(), name: uniqueLayerName(p, name), group, visible: true, locked: false };
   insertProjectLayer(p, layer, afterId);
   return layer;

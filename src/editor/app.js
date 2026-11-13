@@ -424,7 +424,7 @@ function toast(message, actions = []) {
     box.append(button);
   }
   box.hidden = false;
-  toastTimer = setTimeout(() => { box.hidden = true; }, actions.length ? 9000 : 3800);
+  toastTimer = setTimeout(() => { box.hidden = true; }, actions.length ? 9000 : Math.min(14000, Math.max(3800, message.length * 45)));
 }
 const SAVE_DELAY=500;
 /** Autosave: debounced after each change, deferred while a stroke is in progress, then run when the browser is idle. */

@@ -1,7 +1,7 @@
 /** Exact, indexed pixel operations. Transparent pixels use index -1. */
 import { artworkId, artworkBudget, validateParts, validateSource, renderParts, renderSource, cloneArtwork, pixelSpans } from './artwork.js';
 import { readOutline, compositeWithOutline } from './live-outline.js';
-import { SIZE, MAX_SIZE, MAX_TOTAL_PIXELS, MAX_COLORS, MAX_LAYERS, pixelCount } from './limits.js';
+import { SIZE, MAX_SIZE, MAX_TOTAL_PIXELS, MAX_COLORS, MAX_LAYERS, MAX_ANIMATIONS, MAX_FRAMES_PER_ANIMATION, MAX_TOTAL_FRAMES, pixelCount } from './limits.js';
 export { SIZE, MAX_SIZE, MAX_TOTAL_PIXELS, MAX_COLORS, MAX_LAYERS } from './limits.js';
 export { linePoints, rectanglePoints, ellipsePoints } from './geometry.js';
 /** Optional frame markers for key poses, breakdowns and in-betweens (frame.kind). */
@@ -13,9 +13,6 @@ export const DEFAULT_PALETTE = Object.freeze([
   '#f2ac53', '#d86850', '#8d6689', '#638bac',
 ]);
 
-const MAX_ANIMATIONS = 100;
-const MAX_FRAMES_PER_ANIMATION = 256;
-const MAX_TOTAL_FRAMES = 1024;
 let nextId = 0;
 
 export function uid() {

@@ -9,7 +9,10 @@ export const MAX_TOTAL_PIXELS = 4194304;
 /** Pivot pixel range (it may lie outside the box). */
 export const PIVOT_MIN = -MAX_SIZE, PIVOT_MAX = 2 * MAX_SIZE;
 export const MAX_COLORS = 64;
-export const MAX_LAYERS = 32;
+export const MAX_LAYERS = 320;
+export const MAX_ANIMATIONS = 100;
+export const MAX_FRAMES_PER_ANIMATION = 256;
+export const MAX_TOTAL_FRAMES = 1024;
 
 export function pixelCount(width, height) {
   if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width > MAX_SIZE || height > MAX_SIZE) {

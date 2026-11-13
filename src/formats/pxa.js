@@ -5,12 +5,10 @@ import {
   MAX_SIZE, MAX_COLORS, MAX_LAYERS, MAX_TOTAL_PIXELS,
   getLayerPixels, validateProject,
 } from '../domain/project.js';
+import { MAX_ANIMATIONS, MAX_FRAMES_PER_ANIMATION, MAX_TOTAL_FRAMES } from '../domain/limits.js';
 
 export const AI_PIXEL_ALPHABET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz@$';
 export const MAX_AI_FILE_BYTES = 4 * 1024 * 1024;
-const MAX_ANIMATIONS = 100;
-const MAX_FRAMES_PER_ANIMATION = 256;
-const MAX_TOTAL_FRAMES = 1024;
 const MAX_LINE_CHARACTERS = 2048;
 const utf8 = new TextEncoder();
 
@@ -46,7 +44,7 @@ A period (.) is transparent and erases an old pixel. Optionally repeat one symbo
 
 Preserve hidden layers, deliberate blank frames, names, palette order, visibility, locks, FPS, and durations unless asked to change them. Internal IDs are regenerated.
 
-Limits: dimensions 1–256; 1–64 colors; 1–32 layers; 1–100 animations; 1–256 frames per animation, 1,024 total; 4,194,304 stored pixels across all layers and frames. FPS is 1–60, including decimals. Durations are whole milliseconds from 1–60,000. Use decimal numbers without leading zeros. Project names allow 120 characters; layer and animation names allow 80. Text is limited to 4 MiB of UTF-8.`;
+Limits: dimensions 1–256; 1–64 colors; 1–${MAX_LAYERS} layers; 1–100 animations; 1–256 frames per animation, 1,024 total; 4,194,304 stored pixels across all layers and frames. FPS is 1–60, including decimals. Durations are whole milliseconds from 1–60,000. Use decimal numbers without leading zeros. Project names allow 120 characters; layer and animation names allow 80. Text is limited to 4 MiB of UTF-8.`;
 
 function problem(message, lineNumber) {
   throw new Error(lineNumber === undefined ? message : `Line ${lineNumber}: ${message}`);

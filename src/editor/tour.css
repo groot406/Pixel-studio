@@ -52,7 +52,7 @@ body[data-rich-tips="off"] .rich-tip, .tour-running .rich-tip { display: none; }
 
 /* Help center. */
 .modal.help-modal { --modal-width: 620px; }
-.help-center .help-tabs { margin-bottom: 14px; }
+.help-center .help-tabs { grid-template-columns: repeat(5, minmax(0, 1fr)); margin-bottom: 14px; }
 .help-center .help-tabs .export-tab { min-height: 36px; }
 .help-pane { min-height: 320px; }
 .help-tours, .help-news, .help-docs { margin: 12px 0 0; padding: 0; list-style: none; }
@@ -74,6 +74,23 @@ body[data-rich-tips="off"] .rich-tip, .tour-running .rich-tip { display: none; }
 .help-settings { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; padding-top: 4px; border-top: 1px solid var(--line); }
 .help-settings .check-row { margin-top: 8px; font-size: 11px; color: var(--muted); }
 .help-settings .text-button { margin-top: 8px; color: var(--muted); font-size: 11px; }
+.project-limits { color: var(--ink); font-size: 12px; line-height: 1.6; }
+.project-limits h3 { margin: 24px 0 8px; font-size: 14px; }
+.project-limits h3:first-child { margin-top: 0; }
+.project-limits p { margin: 8px 0; }
+.project-limits ul { padding-left: 20px; }
+.project-limits li + li { margin-top: 6px; }
+.project-limit-usage { margin: 16px 0; font-variant-numeric: tabular-nums; }
+.project-limit-usage > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.project-limit-usage dd { margin: 0; font-weight: 600; }
+.project-limit-formula { padding: 10px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+.project-limit-examples { width: 100%; margin: 18px 0; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.project-limit-examples caption { margin-bottom: 8px; text-align: left; font-weight: 600; }
+.project-limit-examples th, .project-limit-examples td { padding: 8px 4px; border-bottom: 1px solid var(--line); text-align: right; }
+.project-limit-examples th:first-child, .project-limit-examples td:first-child { text-align: left; }
+@media (max-width: 480px) {
+  .help-center .help-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .tour-spot, .tour-card, .rich-tip { transition: none; }

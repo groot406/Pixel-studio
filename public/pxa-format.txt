@@ -30,4 +30,4 @@ A period (.) is transparent and erases an old pixel. Optionally repeat one symbo
 
 Preserve hidden layers, deliberate blank frames, names, palette order, visibility, locks, FPS, and durations unless asked to change them. Internal IDs are regenerated.
 
-Limits: dimensions 1–256; 1–64 colors; 1–32 layers; 1–100 animations; 1–256 frames per animation, 1,024 total; 4,194,304 stored pixels across all layers and frames. FPS is 1–60, including decimals. Durations are whole milliseconds from 1–60,000. Use decimal numbers without leading zeros. Project names allow 120 characters; layer and animation names allow 80. Text is limited to 4 MiB of UTF-8.
+Limits: dimensions 1–256; 1–64 colors; 1–320 layers; 1–100 animations; 1–256 frames per animation, 1,024 total; 4,194,304 stored pixels across all layers and frames. FPS is 1–60, including decimals. Durations are whole milliseconds from 1–60,000. Use decimal numbers without leading zeros. Project names allow 120 characters; layer and animation names allow 80. Text is limited to 4 MiB of UTF-8.

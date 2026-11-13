@@ -2,13 +2,14 @@
 import { TOURS, TIPS, WHATS_NEW, DOCS, DOCS_URL, groupShortcuts, placeCard } from './onboarding.js';
 import { startTour, progress, saveProgress, dismissHint } from './tour.js';
 import { playDemo } from './demos.js';
+import { projectLimitsMarkup } from './project-limits.js';
 
 let d, tip = null, tipTimer = 0, tipFor = null, hover = null;
-const TABS = [['tours', 'Tours'], ['shortcuts', 'Shortcuts'], ['new', 'What’s new'], ['docs', 'Docs']];
+const TABS = [['tours', 'Tours'], ['shortcuts', 'Shortcuts'], ['limits', 'Limits'], ['new', 'What’s new'], ['docs', 'Docs']];
 /** "⌘/Ctrl + Z" → keycaps; a lone + or / between keys is a separator and "(Mode)" a note. */
 const keycaps = keys => keys.split(' ').map((k, i) => i % 2 && (k === '+' || k === '/') ? `<span>${k}</span>` : k.startsWith('(') ? `<small>${d.escapeHTML(k)}</small>` : `<kbd>${d.escapeHTML(k)}</kbd>`).join('');
 
-/** Open the help center on `tab` ('tours' | 'shortcuts' | 'new' | 'docs'). */
+/** Open the help center on `tab` ('tours' | 'shortcuts' | 'limits' | 'new' | 'docs'). */
 export function openHelpCenter(tab = 'tours') {
   dismissHint(); hideTip();
   d.openDialog('Help & tours', `<div class="help-center"><div class="export-tabs help-tabs" role="tablist" aria-label="Help sections">${TABS.map(([id, label]) => `<button type="button" class="export-tab" role="tab" id="help-tab-${id}" data-tab="${id}" aria-controls="help-pane-${id}" aria-selected="false">${label}</button>`).join('')}</div>${TABS.map(([id]) => `<div class="help-pane" id="help-pane-${id}" role="tabpanel" aria-labelledby="help-tab-${id}" hidden></div>`).join('')}
@@ -16,6 +17,7 @@ export function openHelpCenter(tab = 'tours') {
   const modal = d.$('modal'), root = modal.querySelector('.help-center');
   modal.classList.add('help-modal');
   renderTours(); renderNew(); renderDocs();
+  d.$('help-pane-limits').innerHTML = projectLimitsMarkup(d.state.project);
   d.$('help-pane-shortcuts').innerHTML = `<input type="search" class="help-search" id="help-search" placeholder="Search: a key (b, ?) or an action (frame, zoom…)" aria-label="Search shortcuts" autocomplete="off"><div class="help-shortcuts" aria-live="polite"></div>`;
   const search = d.$('help-search');
   search.oninput = () => renderShortcuts(search.value);

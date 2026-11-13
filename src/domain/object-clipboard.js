@@ -1,5 +1,6 @@
 /** Copy objects between frames, animations and projects. Clipboards are plain JSON and carry their own palette and part definitions. */
-import { validateProject, insertProjectLayer, uid, nearestColor, MAX_COLORS, MAX_LAYERS, MAX_TOTAL_PIXELS } from './project.js';
+import { validateProject, insertProjectLayer, uid, nearestColor, MAX_COLORS, MAX_LAYERS } from './project.js';
+import { assertCanAddLayer } from './project-capacity.js';
 import { cloneArtwork, sourceForCel, renderOperations, renderParts } from './artwork.js';
 import { celObjects, objectBounds, orderObjects } from './objects.js';
 import { nextPartId } from './parts.js';
@@ -128,8 +129,7 @@ function uniqueName(project, base) {
   return name;
 }
 function addContainer(p, afterId, name, group) {
-  const frames = p.animations.reduce((n, a) => n + a.frames.length, 0);
-  if (p.layers.length >= MAX_LAYERS || frames * (p.layers.length + 1) * p.width * p.height > MAX_TOTAL_PIXELS) throw new Error('The project has reached its object storage limit.');
+  assertCanAddLayer(p);
   const layer = { id: uid(), name: uniqueName(p, name), group, visible: true, locked: false };
   insertProjectLayer(p, layer, afterId);
   return layer;

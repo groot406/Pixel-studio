@@ -1,5 +1,5 @@
 /** PXA 2 codec. Domain operations are independent of this text grammar. */
-import { validateProject, MAX_TOTAL_PIXELS, MAX_SIZE } from '../domain/project.js';
+import { validateProject, MAX_TOTAL_PIXELS, MAX_SIZE, MAX_LAYERS } from '../domain/project.js';
 import { artworkId, cloneArtwork, pixelSpans, translatePixels, MAX_OPERATIONS, MAX_PARTS, MAX_RENDER_WORK } from '../domain/artwork.js';
 import { instancePivot } from '../domain/geometry.js';
 import { boxToPart, worldToBox } from '../domain/skeleton.js';
@@ -8,6 +8,8 @@ const FRAME_KIND_TOKENS = { KEY: 'key', BREAKDOWN: 'breakdown', INBETWEEN: 'inbe
 
 export const PXA2_ALPHABET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz@$';
 export const PXA2_MAX_BYTES = 4 * 1024 * 1024;
+// A layer order can list every 100-character ID plus one space per layer.
+const MAX_LAYER_LINE_CHARACTERS = Math.max(4096, MAX_LAYERS * 101 + 32);
 export const PXA2_COMMAND_GUIDE = `Drawing (all coordinates are x then y):
 SPAN x y pixels
 RECT x y width height color
@@ -47,13 +49,14 @@ BONE id layer-id instance-id PARENT parent-bone-id|- [JOINT x y] [LIMIT min max]
 POSE id "name" bone-id=degrees ... [MOVE root-bone-id dx dy] saves a named pose in the pose library (after the BONE lines): each bone's angle relative to its parent (a root: its own ROTATE), whole degrees; MOVE offsets a root's pivot from where it stands in its animation's first frame. Poses are not frames: the editor applies them to frames (Skeleton mode → Poses). Example: POSE crouch "Crouch" body=0 leg-l=40 shin-l=-80 leg-r=-40 shin-r=80 MOVE body 0 3.
 OUTLINE color|AUTO [INSIDE] [CORNERS] [THICK 1-3] [SEPARATE] [SKIP layer-id ...] (once, after the LAYER lines) turns on the live outline: drawn around the visible art whenever a frame is shown or exported, never stored in the pixels, so it stays correct when parts move, rotate or squash. color is a palette index; AUTO darkens each edge's own colour (selective outline). INSIDE recolours the art's edge instead of adding pixels; CORNERS includes diagonal neighbours; SEPARATE outlines each layer on its own (lines between overlapping layers); SKIP leaves layers (e.g. a background) unoutlined. With OUTLINE, draw parts and layers without their own outer outline.
 CEL layer-id selects a frame's layer. CEL layer-id CLEAR resets that cel. CEL layer-id RASTER selects raw pixels (an empty or already raster cel); SPAN and SHIFT dx dy are allowed until another CEL. SHIFT translates only the selected raster cel, clips edges and clears exposed pixels. RASTER retains compact pixel deltas without creating shared parts; use it for static art only, since raster cels cannot be posed or rigged (build characters from PART + USE + BONE).
-Limits: canvas/parts 1–2048 per dimension (keep pixel art small; the pixel budget below is the real ceiling); 1–64 colors; 1–32 layers; at most 256 parts; 1–100 animations, 1–256 frames each, 1024 total; 4,194,304 canvas pixel slots across all cels (64 cels of 256×256); same budget for part pixels; 32,768 expanded operations and 33,554,432 rendering work units. FPS 1–60; duration 1–60000 ms. Names: project 120, layer/animation 80 characters. Text 4 MiB; line 4096 characters. END is required. Preserve hidden artwork and deliberate blank frames.`;
+Limits: canvas/parts 1–2048 per dimension (keep pixel art small; the pixel budget below is the real ceiling); 1–64 colors; 1–${MAX_LAYERS} layers; at most 256 parts; 1–100 animations, 1–256 frames each, 1024 total; 4,194,304 canvas pixel slots across all cels (64 cels of 256×256); same budget for part pixels; 32,768 expanded operations and 33,554,432 rendering work units. FPS 1–60; duration 1–60000 ms. Names: project 120, layer/animation 80 characters. Text 4 MiB; line 4096 characters (ORDER, FRAMEORDER and OUTLINE: ${MAX_LAYER_LINE_CHARACTERS}). END is required. Preserve hidden artwork and deliberate blank frames.`;
 
 export function pxa2Lines(text, header = 'PXA 2') {
   if (typeof text !== 'string' || text.length > PXA2_MAX_BYTES || new TextEncoder().encode(text).length > PXA2_MAX_BYTES) throw new Error('PXA text exceeds 4 MiB.');
   const lines = [];
   for (const [i, value] of text.replace(/\r\n?/g, '\n').split('\n').entries()) {
-    if (value.length > 4096) throw new Error(`Line ${i + 1}: line exceeds 4096 characters.`);
+    const maxLength = /^(ORDER|FRAMEORDER|OUTLINE)\s/.test(value.trimStart()) ? MAX_LAYER_LINE_CHARACTERS : 4096;
+    if (value.length > maxLength) throw new Error(`Line ${i + 1}: line exceeds ${maxLength} characters.`);
     const trimmed = value.trim();
     if (!trimmed || trimmed.startsWith('#')) continue;
     const tokens = trimmed.match(/"(?:[^"\\]|\\.)*"|[^\s]+/g) || [];
@@ -227,7 +230,7 @@ export function decodePXA2(text) {
         part.ops.push(op); expandedOps++; continue;
       }
       if (cmd === 'LAYER') {
-        if (project.parts.length || animation || project.layers.length >= 32) throw new Error('Declare 1–32 layers before parts/animations.');
+        if (project.parts.length || animation || project.layers.length >= MAX_LAYERS) throw new Error(`Declare 1–${MAX_LAYERS} layers before parts/animations.`);
         argumentsCount(t, 4);
         if (!['0', '1'].includes(t[3]) || !['0', '1'].includes(t[4])) throw new Error('Layer flags must be 0 or 1.');
         project.layers.push({ id: artworkId(t[1]), name: quoted(t[2]), visible: t[3] === '1', locked: t[4] === '1' });
